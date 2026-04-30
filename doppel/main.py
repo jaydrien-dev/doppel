@@ -28,7 +28,9 @@ import hmac
 import io
 import json
 import os
+import pathlib
 import secrets
+from contextlib import asynccontextmanager
 from datetime import date, timedelta
 from uuid import UUID, uuid4
 
@@ -68,10 +70,36 @@ from doppel.brain.company.skills_extractor import (
     validate_action,
 )
 
+_SCHEMA_FILE = pathlib.Path(__file__).parent / "brain" / "db" / "schemas.sql"
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Run DB migrations on startup (all statements are idempotent IF NOT EXISTS)."""
+    import logging
+    _log = logging.getLogger(__name__)
+    try:
+        schema_sql = _SCHEMA_FILE.read_text()
+        # Split into individual statements; asyncpg doesn't support multi-statement execute
+        statements = [s.strip() for s in schema_sql.split(";") if s.strip() and not s.strip().startswith("--")]
+        async with AsyncSessionLocal() as session:
+            for stmt in statements:
+                try:
+                    await session.execute(sql_text(stmt))
+                except Exception as e:
+                    _log.warning("Migration stmt skipped (%s): %.120s", type(e).__name__, stmt)
+            await session.commit()
+        _log.info("DB schema migration complete (%d statements)", len(statements))
+    except Exception as exc:
+        _log.warning("Schema migration failed: %s", exc)
+    yield
+
+
 app = FastAPI(
     title="Doppel Brain API",
     version="0.2.0",
     description="The cognitive core of Doppel AI clones.",
+    lifespan=lifespan,
 )
 
 _cors_origins: list[str] = (
