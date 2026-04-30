@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 
 type Tier = "free" | "personal" | "enterprise_pro" | "enterprise_max";
 
@@ -39,15 +38,24 @@ export default function AdminPage() {
 function AdminContent() {
   const [users, setUsers] = useState<UserRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [updating, setUpdating] = useState<string | null>(null);
   const [search, setSearch] = useState("");
 
   async function load() {
     setLoading(true);
+    setError(null);
     try {
       const res = await fetch("/api/admin/users?limit=200");
       const data = await res.json();
+      if (!res.ok) {
+        setError(`${res.status}: ${data.detail ?? data.error ?? JSON.stringify(data)}`);
+        setUsers([]);
+        return;
+      }
       setUsers(data.users ?? []);
+    } catch (e) {
+      setError(String(e));
     } finally {
       setLoading(false);
     }
@@ -104,6 +112,11 @@ function AdminContent() {
       <div className="glass rounded-2xl overflow-hidden">
         {loading ? (
           <div className="p-8 text-center text-sm text-white/25">Loading…</div>
+        ) : error ? (
+          <div className="p-8 text-center">
+            <p className="text-sm text-red-400/60 font-mono">{error}</p>
+            <button onClick={load} className="mt-3 text-xs text-white/30 hover:text-white/60 underline">Retry</button>
+          </div>
         ) : filtered.length === 0 ? (
           <div className="p-8 text-center text-sm text-white/25">No users found.</div>
         ) : (
