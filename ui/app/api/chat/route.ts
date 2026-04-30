@@ -7,7 +7,7 @@ export async function POST(req: NextRequest) {
   const body = await req.json();
   const { stream: wantsStream, ...brainInput } = body;
 
-  const userHeader = userId ? { "X-User-Id": userId } : {};
+  const userHeader: Record<string, string> = userId ? { "X-User-Id": userId } : {};
 
   if (wantsStream) {
     const res = await backendStream("/brain/chat/stream", {

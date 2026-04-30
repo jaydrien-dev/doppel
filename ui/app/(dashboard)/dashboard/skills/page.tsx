@@ -479,7 +479,7 @@ function TestTab({ orgId }: { orgId: string }) {
               )}
               <div className="flex items-center gap-4">
                 <ConfidenceTag confidence={r.confidence as number} />
-                {r.escalate && (
+                {!!r.escalate && (
                   <span className="text-[10px] text-amber-400/60 bg-amber-400/10 rounded-full px-2 py-0.5">
                     Escalate to human
                   </span>

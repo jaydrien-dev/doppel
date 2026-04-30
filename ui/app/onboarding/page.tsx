@@ -397,7 +397,7 @@ function OnboardingWizard() {
     }
   }, [isLoading, clone, router]);
 
-  if (!isLoading && !clone) return null;
+  if (!clone) return null;
 
   return (
     <>
