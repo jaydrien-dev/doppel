@@ -22,6 +22,7 @@ export default function DeployPage() {
   const { clone, isLoading, mutate } = useClone();
   const [copied, setCopied] = useState(false);
   const [updatingMode, setUpdatingMode] = useState(false);
+  const [modeError, setModeError] = useState<string | null>(null);
   const [embedTab, setEmbedTab] = useState<EmbedTab>("widget");
   const [embedCopied, setEmbedCopied] = useState(false);
   const [showQR, setShowQR] = useState(false);
@@ -64,9 +65,21 @@ export default function DeployPage() {
   async function setAccessMode(mode: AccessMode) {
     if (!clone || mode === clone.access_mode) return;
     setUpdatingMode(true);
+    setModeError(null);
     try {
-      await updateClone(clone.handle, { access_mode: mode });
+      const res = await fetch(`/api/clones/${clone.handle}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ access_mode: mode }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        setModeError(`Failed to save: ${d.detail ?? d.error ?? res.status}`);
+        return;
+      }
       await mutate();
+    } catch (e) {
+      setModeError(String(e));
     } finally {
       setUpdatingMode(false);
     }
@@ -196,6 +209,10 @@ export default function DeployPage() {
             );
           })}
         </div>
+
+        {modeError && (
+          <p className="mt-3 text-xs text-red-400/60 font-mono">{modeError}</p>
+        )}
 
         {/* Allowlist email manager */}
         {clone.access_mode === "allowlist" && (

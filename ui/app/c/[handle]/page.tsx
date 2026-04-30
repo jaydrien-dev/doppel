@@ -11,7 +11,7 @@ interface CloneServerInfo extends ClonePublicInfo {
 
 async function getClone(handle: string): Promise<CloneServerInfo | null> {
   const res = await fetch(`${FASTAPI}/clones/${handle}`, {
-    next: { revalidate: 60 },
+    cache: "no-store",
   });
   if (res.status === 404) return null;
   if (!res.ok) return null;

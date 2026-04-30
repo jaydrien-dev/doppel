@@ -1,4 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
+import { revalidatePath } from "next/cache";
 import { NextRequest } from "next/server";
 import { backendFetch } from "@/lib/backendFetch";
 
@@ -29,5 +30,6 @@ export async function PATCH(
   });
 
   const data = await res.json();
+  if (res.ok) revalidatePath(`/c/${handle}`);
   return Response.json(data, { status: res.status });
 }
