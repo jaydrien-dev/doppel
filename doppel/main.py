@@ -77,21 +77,29 @@ _SCHEMA_FILE = pathlib.Path(__file__).parent / "brain" / "db" / "schemas.sql"
 async def lifespan(app: FastAPI):
     """Run DB migrations on startup (all statements are idempotent IF NOT EXISTS)."""
     import logging
+    from doppel.brain.db.connection import engine
     _log = logging.getLogger(__name__)
     try:
         schema_sql = _SCHEMA_FILE.read_text()
-        # Split into individual statements; asyncpg doesn't support multi-statement execute
-        statements = [s.strip() for s in schema_sql.split(";") if s.strip() and not s.strip().startswith("--")]
-        async with AsyncSessionLocal() as session:
+        # Strip comments and split into individual statements
+        statements = [
+            s.strip() for s in schema_sql.split(";")
+            if s.strip() and not s.strip().startswith("--")
+        ]
+        # Use AUTOCOMMIT so each statement is its own transaction —
+        # a failed statement doesn't abort subsequent ones.
+        async with engine.connect() as conn:
+            await conn.execution_options(isolation_level="AUTOCOMMIT")
+            ok = 0
             for stmt in statements:
                 try:
-                    await session.execute(sql_text(stmt))
+                    await conn.execute(sql_text(stmt))
+                    ok += 1
                 except Exception as e:
-                    _log.warning("Migration stmt skipped (%s): %.120s", type(e).__name__, stmt)
-            await session.commit()
-        _log.info("DB schema migration complete (%d statements)", len(statements))
+                    _log.warning("Migration stmt skipped (%s): %.200s", type(e).__name__, stmt[:120])
+        _log.info("DB schema migration: %d/%d statements applied", ok, len(statements))
     except Exception as exc:
-        _log.warning("Schema migration failed: %s", exc)
+        _log.warning("Schema migration failed entirely: %s", exc)
     yield
 
 
@@ -1172,16 +1180,21 @@ async def admin_list_users(
     """List all users with their current plan. caller_user_id must match ADMIN_USER_ID."""
     _require_admin(caller_user_id)
 
-    rows = await session.execute(
-        sql_text("""
-            SELECT user_id, display_name, handle, subscription_tier,
-                   stripe_customer_id, created_at
-            FROM clone_identity
-            ORDER BY created_at DESC
-            LIMIT :lim OFFSET :off
-        """),
-        {"lim": limit, "off": offset},
-    )
+    try:
+        rows = await session.execute(
+            sql_text("""
+                SELECT user_id, display_name, handle,
+                       COALESCE(subscription_tier, 'free') AS subscription_tier,
+                       stripe_customer_id, created_at
+                FROM clone_identity
+                ORDER BY created_at DESC
+                LIMIT :lim OFFSET :off
+            """),
+            {"lim": limit, "off": offset},
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"DB error: {exc}")
+
     users = [
         {
             "user_id": r["user_id"],
