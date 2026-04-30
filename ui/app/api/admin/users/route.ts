@@ -9,12 +9,15 @@ export async function GET(request: Request) {
   const limit = searchParams.get("limit") ?? "50";
   const offset = searchParams.get("offset") ?? "0";
 
+  const fastApiUrl = process.env.FASTAPI_URL ?? "http://localhost:8000";
   const res = await backendFetch(
     `/admin/users?caller_user_id=${userId}&limit=${limit}&offset=${offset}`
   );
   if (!res.ok) {
     const data = await res.json();
-    return Response.json(data, { status: res.status });
+    // Include backend URL (host only) for easier debugging
+    const urlHost = (() => { try { return new URL(fastApiUrl).host; } catch { return fastApiUrl; } })();
+    return Response.json({ ...data, _backend: urlHost }, { status: res.status });
   }
 
   const data = await res.json();

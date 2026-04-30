@@ -49,7 +49,8 @@ function AdminContent() {
       const res = await fetch("/api/admin/users?limit=200");
       const data = await res.json();
       if (!res.ok) {
-        setError(`${res.status}: ${data.detail ?? data.error ?? JSON.stringify(data)}`);
+        const backend = data._backend ? ` [backend: ${data._backend}]` : "";
+        setError(`${res.status}: ${data.detail ?? data.error ?? JSON.stringify(data)}${backend}`);
         setUsers([]);
         return;
       }
