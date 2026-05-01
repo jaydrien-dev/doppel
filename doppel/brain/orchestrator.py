@@ -150,7 +150,7 @@ class DoppelBrain:
         # ── 9. Log + update working memory (fire-and-forget, don't block) ─
         asyncio.create_task(
             _persist_async(
-                session=self._session,
+                session=None,  # fresh session opened inside _persist_async
                 clone_id=self._clone_id,
                 brain_input=brain_input,
                 perceived=perceived,
@@ -258,7 +258,7 @@ class DoppelBrain:
 
         asyncio.create_task(
             _persist_async(
-                session=self._session,
+                session=None,  # fresh session opened inside _persist_async
                 clone_id=self._clone_id,
                 brain_input=brain_input,
                 perceived=perceived,
@@ -271,7 +271,7 @@ class DoppelBrain:
 
 
 async def _persist_async(
-    session: AsyncSession,
+    session: AsyncSession | None,
     clone_id: UUID,
     brain_input: BrainInput,
     perceived,
@@ -281,63 +281,107 @@ async def _persist_async(
     latency_ms: int,
 ) -> None:
     """
-    Async post-response persistence: working memory + reasoning trace log.
-    Runs after the response is returned to the user.
+    Async post-response persistence: working memory + reasoning trace + episodic learning.
+    Uses its own fresh session so it survives after the request session is closed.
     """
-    from sqlalchemy import text
     import json
+    import logging
+    from datetime import datetime, timezone
+    from sqlalchemy import text
+    from doppel.brain.db.connection import AsyncSessionLocal
 
-    # Append user message to working memory
-    await append_turn(
-        clone_id=clone_id,
-        session_id=brain_input.session_id,
-        role="user",
-        content=brain_input.message,
-    )
-    # Append clone response to working memory
-    await append_turn(
-        clone_id=clone_id,
-        session_id=brain_input.session_id,
-        role="clone",
-        content=final_response,
-        confidence=trace.confidence,
-    )
+    _log = logging.getLogger(__name__)
 
-    # Write reasoning trace to DB
-    await session.execute(
-        text("""
-            INSERT INTO reasoning_traces
-              (id, clone_id, session_id, brain_input, perceived_input,
-               memory_context_summary, path, private_scratchpad,
-               framing, options_considered, selected_approach,
-               response, confidence, needs_escalation, latency_ms)
-            VALUES
-              (:id, :clone_id, :session_id, :brain_input, :perceived_input,
-               :memory_context_summary, :path, :private_scratchpad,
-               :framing, :options_considered, :selected_approach,
-               :response, :confidence, :needs_escalation, :latency_ms)
-        """),
-        {
-            "id": str(trace.id),
-            "clone_id": str(clone_id),
-            "session_id": str(brain_input.session_id),
-            "brain_input": json.dumps(brain_input.model_dump(mode="json")),
-            "perceived_input": json.dumps(perceived.model_dump()),
-            "memory_context_summary": json.dumps({
-                "episodic_count": len(memory.episodic),
-                "semantic_count": len(memory.semantic),
-                "procedural_count": len(memory.procedural),
-                "has_relational": memory.relational is not None,
-            }),
-            "path": trace.path,
-            "private_scratchpad": trace.private_scratchpad or None,
-            "framing": trace.framing or None,
-            "options_considered": trace.options_considered or [],
-            "selected_approach": trace.selected_approach or None,
-            "response": final_response,
-            "confidence": trace.confidence,
-            "needs_escalation": trace.needs_escalation,
-            "latency_ms": latency_ms,
-        },
-    )
-    await session.commit()
+    # Always use a fresh session — the caller's session may be closed by the time
+    # this background task runs (especially on the streaming path).
+    async with AsyncSessionLocal() as fresh_session:
+        try:
+            # Append user message to working memory
+            await append_turn(
+                clone_id=clone_id,
+                session_id=brain_input.session_id,
+                role="user",
+                content=brain_input.message,
+            )
+            # Append clone response to working memory
+            await append_turn(
+                clone_id=clone_id,
+                session_id=brain_input.session_id,
+                role="clone",
+                content=final_response,
+                confidence=trace.confidence,
+            )
+
+            # Write reasoning trace
+            await fresh_session.execute(
+                text("""
+                    INSERT INTO reasoning_traces
+                      (id, clone_id, session_id, brain_input, perceived_input,
+                       memory_context_summary, path, private_scratchpad,
+                       framing, options_considered, selected_approach,
+                       response, confidence, needs_escalation, latency_ms)
+                    VALUES
+                      (:id, :clone_id, :session_id, :brain_input, :perceived_input,
+                       :memory_context_summary, :path, :private_scratchpad,
+                       :framing, :options_considered, :selected_approach,
+                       :response, :confidence, :needs_escalation, :latency_ms)
+                """),
+                {
+                    "id": str(trace.id),
+                    "clone_id": str(clone_id),
+                    "session_id": str(brain_input.session_id),
+                    "brain_input": json.dumps(brain_input.model_dump(mode="json")),
+                    "perceived_input": json.dumps(perceived.model_dump()),
+                    "memory_context_summary": json.dumps({
+                        "episodic_count": len(memory.episodic),
+                        "semantic_count": len(memory.semantic),
+                        "procedural_count": len(memory.procedural),
+                        "has_relational": memory.relational is not None,
+                    }),
+                    "path": trace.path,
+                    "private_scratchpad": trace.private_scratchpad or None,
+                    "framing": trace.framing or None,
+                    "options_considered": trace.options_considered or [],
+                    "selected_approach": trace.selected_approach or None,
+                    "response": final_response,
+                    "confidence": trace.confidence,
+                    "needs_escalation": trace.needs_escalation,
+                    "latency_ms": latency_ms,
+                },
+            )
+
+            # Feed high-quality exchanges back into episodic memory so the clone
+            # learns from its own conversations (retrieval context for future queries).
+            confidence = trace.confidence or 0.0
+            if not trace.needs_escalation and confidence >= 0.55 and len(final_response.strip()) > 20:
+                try:
+                    from doppel.brain.db.vector import embed_batch
+                    from doppel.ingestion.pipeline import _store_chunk_with_embedding
+                    from doppel.ingestion.connectors.base import RawItem
+                    from doppel.ingestion.preprocessor import estimate_formality
+
+                    exchange = f"Q: {brain_input.message}\nA: {final_response}"
+                    embeddings = await embed_batch([exchange])
+                    item = RawItem(
+                        content=exchange,
+                        source="chat",
+                        authored_by_user=False,
+                        context_type="conversation",
+                        created_at=datetime.now(timezone.utc),
+                    )
+                    await _store_chunk_with_embedding(
+                        session=fresh_session,
+                        clone_id=clone_id,
+                        content=exchange,
+                        embedding=embeddings[0],
+                        item=item,
+                        formality=estimate_formality(final_response),
+                    )
+                except Exception as e:
+                    _log.warning("Episodic learning write failed (non-fatal): %s", e)
+
+            await fresh_session.commit()
+
+        except Exception as exc:
+            _log.error("_persist_async failed: %s", exc, exc_info=True)
+            await fresh_session.rollback()
