@@ -1584,6 +1584,135 @@ async def ingest_text(
 
 
 # ---------------------------------------------------------------------------
+# Ingestion — file upload (PDF, DOCX, XLSX, PPTX, TXT, CSV, …)
+# ---------------------------------------------------------------------------
+
+def _extract_text_from_file(filename: str, content: bytes) -> str:
+    """Extract plain text from uploaded file bytes. Raises ValueError on unsupported type."""
+    import io
+    ext = pathlib.Path(filename).suffix.lower() if filename else ""
+
+    if ext == ".pdf":
+        try:
+            from pypdf import PdfReader
+            reader = PdfReader(io.BytesIO(content))
+            pages = [page.extract_text() or "" for page in reader.pages]
+            return "\n\n".join(p for p in pages if p.strip())
+        except Exception as e:
+            raise ValueError(f"Could not parse PDF: {e}")
+
+    if ext in (".docx",):
+        try:
+            import docx
+            doc = docx.Document(io.BytesIO(content))
+            return "\n\n".join(p.text for p in doc.paragraphs if p.text.strip())
+        except Exception as e:
+            raise ValueError(f"Could not parse DOCX: {e}")
+
+    if ext in (".xlsx", ".xls"):
+        try:
+            import openpyxl
+            wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+            lines: list[str] = []
+            for ws in wb.worksheets:
+                for row in ws.iter_rows(values_only=True):
+                    row_text = "\t".join(str(c) for c in row if c is not None)
+                    if row_text.strip():
+                        lines.append(row_text)
+            return "\n".join(lines)
+        except Exception as e:
+            raise ValueError(f"Could not parse XLSX: {e}")
+
+    if ext in (".pptx",):
+        try:
+            from pptx import Presentation
+            prs = Presentation(io.BytesIO(content))
+            slides: list[str] = []
+            for slide in prs.slides:
+                texts = [shape.text for shape in slide.shapes if hasattr(shape, "text") and shape.text.strip()]
+                if texts:
+                    slides.append("\n".join(texts))
+            return "\n\n".join(slides)
+        except Exception as e:
+            raise ValueError(f"Could not parse PPTX: {e}")
+
+    if ext in (".csv",):
+        import csv, io as _io
+        reader = csv.reader(_io.StringIO(content.decode("utf-8", errors="replace")))
+        return "\n".join("\t".join(row) for row in reader)
+
+    # Fallback: treat as plain text (txt, md, json, html, etc.)
+    try:
+        return content.decode("utf-8", errors="replace")
+    except Exception:
+        raise ValueError(f"Cannot extract text from file type '{ext}'")
+
+
+from fastapi import File, Form, UploadFile
+
+
+@app.post("/ingestion/file", status_code=201)
+async def ingest_file(
+    clone_id: str = Form(...),
+    file: UploadFile = File(...),
+    source: str = Form(default="upload"),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """
+    Upload a file (PDF, DOCX, XLSX, PPTX, TXT, CSV, MD, …) and ingest it into a clone's memory.
+    Text is extracted, chunked, embedded, and stored.
+    """
+    from doppel.ingestion.chunker import chunk_text
+    from doppel.ingestion.pipeline import _store_chunk_with_embedding
+    from doppel.brain.db.vector import embed_batch
+    from doppel.ingestion.preprocessor import estimate_formality
+    from doppel.ingestion.pii_redactor import redact_pii
+    from doppel.ingestion.connectors.base import RawItem
+    from datetime import datetime, timezone
+    import uuid as _uuid
+
+    content = await file.read()
+    filename = file.filename or "upload"
+
+    try:
+        text = _extract_text_from_file(filename, content)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    if not text.strip():
+        raise HTTPException(status_code=400, detail="No text could be extracted from the file.")
+
+    clone_uuid = _uuid.UUID(clone_id)
+    await load_clone_keys(session, clone_uuid)
+
+    chunks = chunk_text(text, max_chars=settings.ingestion_chunk_max_chars)
+    chunks = [redact_pii(c) for c in chunks]
+    embeddings = await embed_batch(chunks)
+    formality = estimate_formality(text)
+    now = datetime.now(timezone.utc)
+
+    for chunk, embedding in zip(chunks, embeddings):
+        item = RawItem(
+            content=chunk,
+            source=source,
+            authored_by_user=True,
+            context_type="document",
+            created_at=now,
+        )
+        await _store_chunk_with_embedding(
+            session=session,
+            clone_id=clone_uuid,
+            content=chunk,
+            embedding=embedding,
+            item=item,
+            formality=formality,
+        )
+
+    await session.commit()
+    return {"chunks_stored": len(chunks), "filename": filename, "chars_extracted": len(text)}
+
+
+# ---------------------------------------------------------------------------
 # Ingestion — extract / recompute style fingerprint
 # ---------------------------------------------------------------------------
 

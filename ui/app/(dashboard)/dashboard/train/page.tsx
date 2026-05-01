@@ -2,6 +2,13 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useClone } from "@/lib/hooks/useClone";
+
+type FileUploadItem = {
+  id: string;
+  file: File;
+  status: "pending" | "uploading" | "done" | "error";
+  result?: string;
+};
 import { extractStyle, getGithubAuthUrl, getGmailAuthUrl, getNotionAuthUrl, getSlackInstallUrl, getSlackStatus, ingestText, triggerGithubSync, triggerGmailSync, triggerNotionSync } from "@/lib/api";
 import { IngestionJobBanner } from "@/components/dashboard/IngestionJobBanner";
 import { SeedQAPanel } from "@/components/dashboard/SeedQAPanel";
@@ -49,6 +56,11 @@ export default function TrainPage() {
   const [uploadText, setUploadText] = useState("");
   const [uploading, setUploading] = useState(false);
   const [uploadResult, setUploadResult] = useState<string | null>(null);
+
+  // File upload
+  const [fileQueue, setFileQueue] = useState<FileUploadItem[]>([]);
+  const [isDragging, setIsDragging] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Style extraction
   const [extracting, setExtracting] = useState(false);
@@ -128,6 +140,53 @@ export default function TrainPage() {
       setActiveJobId(job_id);
     } catch (e) {
       setSyncStarted(false);
+    }
+  }
+
+  function addFiles(files: FileList | File[]) {
+    if (!clone) return;
+    const items: FileUploadItem[] = Array.from(files).map((file) => ({
+      id: `${file.name}-${Date.now()}-${Math.random()}`,
+      file,
+      status: "pending",
+    }));
+    setFileQueue((prev) => [...prev, ...items]);
+    // Upload each sequentially
+    uploadFiles(items);
+  }
+
+  async function uploadFiles(items: FileUploadItem[]) {
+    if (!clone) return;
+    for (const item of items) {
+      setFileQueue((prev) =>
+        prev.map((f) => (f.id === item.id ? { ...f, status: "uploading" } : f))
+      );
+      try {
+        const fd = new FormData();
+        fd.append("clone_id", clone.clone_id);
+        fd.append("file", item.file);
+        const res = await fetch("/api/ingestion/file", { method: "POST", body: fd });
+        const data = await res.json();
+        if (!res.ok) {
+          setFileQueue((prev) =>
+            prev.map((f) =>
+              f.id === item.id ? { ...f, status: "error", result: data.detail ?? data.error ?? `${res.status}` } : f
+            )
+          );
+        } else {
+          setFileQueue((prev) =>
+            prev.map((f) =>
+              f.id === item.id ? { ...f, status: "done", result: `${data.chunks_stored} chunks` } : f
+            )
+          );
+        }
+      } catch (e) {
+        setFileQueue((prev) =>
+          prev.map((f) =>
+            f.id === item.id ? { ...f, status: "error", result: String(e) } : f
+          )
+        );
+      }
     }
   }
 
@@ -284,6 +343,80 @@ export default function TrainPage() {
           </button>
           {uploadResult && <span className="text-xs text-white/35">{uploadResult}</span>}
         </div>
+      </Section>
+
+      {/* File Upload */}
+      <Section title="Upload files" sub="PDF, Word, Excel, PowerPoint, CSV, Markdown — any document you've written or worked on.">
+        <div
+          onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+          onDragLeave={() => setIsDragging(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            setIsDragging(false);
+            if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
+          }}
+          onClick={() => fileInputRef.current?.click()}
+          className={`flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed px-6 py-8 cursor-pointer transition-all ${
+            isDragging ? "border-white/30 bg-white/[0.06]" : "border-white/[0.10] hover:border-white/20 hover:bg-white/[0.03]"
+          }`}
+        >
+          <svg width="22" height="22" viewBox="0 0 22 22" fill="none" className="text-white/25">
+            <path d="M11 14V4M11 4L7 8M11 4L15 8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+            <path d="M3 16v1a2 2 0 002 2h12a2 2 0 002-2v-1" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+          </svg>
+          <p className="text-sm text-white/40">Drop files here or click to browse</p>
+          <p className="text-xs text-white/20">PDF · DOCX · XLSX · PPTX · CSV · TXT · MD</p>
+        </div>
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv,.txt,.md,.json,.html"
+          className="hidden"
+          onChange={(e) => { if (e.target.files?.length) { addFiles(e.target.files); e.target.value = ""; } }}
+        />
+        {fileQueue.length > 0 && (
+          <div className="mt-3 space-y-2">
+            {fileQueue.map((item) => (
+              <div key={item.id} className="flex items-center justify-between glass rounded-xl px-4 py-2.5">
+                <div className="flex items-center gap-3 min-w-0">
+                  <span className="text-xs text-white/20 font-mono shrink-0">
+                    {item.file.name.split(".").pop()?.toUpperCase()}
+                  </span>
+                  <p className="text-sm text-white/60 truncate">{item.file.name}</p>
+                </div>
+                <div className="flex items-center gap-2 ml-3 shrink-0">
+                  {item.status === "uploading" && (
+                    <span className="text-xs text-white/35 animate-pulse">Uploading…</span>
+                  )}
+                  {item.status === "done" && (
+                    <span className="text-xs text-emerald-400/60">{item.result}</span>
+                  )}
+                  {item.status === "error" && (
+                    <span className="text-xs text-red-400/60 font-mono">{item.result}</span>
+                  )}
+                  {item.status === "pending" && (
+                    <span className="text-xs text-white/25">Queued</span>
+                  )}
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setFileQueue((prev) => prev.filter((f) => f.id !== item.id)); }}
+                    className="text-white/15 hover:text-white/40 transition-colors text-base leading-none"
+                  >
+                    ×
+                  </button>
+                </div>
+              </div>
+            ))}
+            {fileQueue.some((f) => f.status === "done" || f.status === "error") && (
+              <button
+                onClick={() => setFileQueue((prev) => prev.filter((f) => f.status === "uploading" || f.status === "pending"))}
+                className="text-xs text-white/25 hover:text-white/45 transition-colors"
+              >
+                Clear finished
+              </button>
+            )}
+          </div>
+        )}
       </Section>
 
       {/* YouTube / Podcast — stub */}
