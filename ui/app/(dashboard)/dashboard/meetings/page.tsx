@@ -124,7 +124,8 @@ function ActiveSession({
   const [errorMsg, setErrorMsg] = useState("");
   const [ending, setEnding] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
-  const recognitionRef = useRef<SpeechRecognition | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const recognitionRef = useRef<any>(null);
   const transcriptEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -170,7 +171,7 @@ function ActiveSession({
         }
       };
 
-      recognition.onerror = (e: SpeechRecognitionErrorEvent) => {
+      recognition.onerror = (e: { error: string }) => {
         if (e.error === "not-allowed") {
           setErrorMsg("Microphone access denied. Allow mic access and try again.");
           setConnStatus("error");
