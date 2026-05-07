@@ -54,7 +54,7 @@ export default function UsagePage() {
   const nearLimit = !unlimited && pct >= 80;
 
   return (
-    <div className="p-8 max-w-2xl flex flex-col gap-6">
+    <div className="p-8 max-w-4xl flex flex-col gap-6">
       <div>
         <h1 className="text-2xl font-light text-white/85">Usage</h1>
         <p className="text-sm text-white/35 mt-1">Your plan usage for the current billing period.</p>

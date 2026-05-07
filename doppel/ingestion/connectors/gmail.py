@@ -5,6 +5,8 @@ Flow:
   1. get_auth_url(clone_id)       → redirect user to Google consent screen
   2. handle_callback(code, state) → exchange code for tokens, store in DB
   3. fetch_sent_emails(clone_id)  → async-iterate over sent emails as RawItems
+  4. send_email(...)              → send a reply via Gmail API
+  5. setup_watch(...)             → subscribe to Gmail push notifications via Pub/Sub
 
 Uses httpx directly (already in deps) instead of the heavy google-api-python-client.
 Token refresh handled by google-auth (lightweight).
@@ -12,6 +14,7 @@ Token refresh handled by google-auth (lightweight).
 from __future__ import annotations
 
 import base64
+import email.mime.text
 import json
 import urllib.parse
 from datetime import datetime, timedelta, timezone
@@ -33,6 +36,8 @@ _AUTH_BASE = "https://accounts.google.com/o/oauth2/v2/auth"
 
 _SCOPES = [
     "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/gmail.send",
+    "https://www.googleapis.com/auth/gmail.modify",
 ]
 
 
@@ -172,6 +177,131 @@ async def _refresh_token(
     )
     await session.commit()
     return new_access
+
+
+# ---------------------------------------------------------------------------
+# Send + Watch helpers
+# ---------------------------------------------------------------------------
+
+async def send_email(
+    clone_id: UUID,
+    to: str,
+    subject: str,
+    body: str,
+    thread_id: str | None,
+    session: AsyncSession,
+) -> dict:
+    """
+    Send an email reply via Gmail API. Uses stored OAuth token for clone_id.
+    Returns the Gmail message object from the API.
+    """
+    token = await _get_valid_token(clone_id, session)
+
+    # Construct RFC 2822 MIME message
+    msg = email.mime.text.MIMEText(body, "plain", "utf-8")
+    msg["To"] = to
+    msg["Subject"] = subject
+    raw = base64.urlsafe_b64encode(msg.as_bytes()).decode("utf-8")
+
+    payload: dict = {"raw": raw}
+    if thread_id:
+        payload["threadId"] = thread_id
+
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        resp = await client.post(
+            f"{_GMAIL_BASE}/users/me/messages/send",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            json=payload,
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+
+async def setup_watch(clone_id: UUID, pubsub_topic: str, session: AsyncSession) -> dict:
+    """
+    Subscribe to Gmail push notifications via Google Cloud Pub/Sub.
+    Stores the watch expiration in oauth_tokens.metadata.
+    Returns {historyId, expiration}.
+    """
+    token = await _get_valid_token(clone_id, session)
+
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        resp = await client.post(
+            f"{_GMAIL_BASE}/users/me/watch",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            json={"topicName": pubsub_topic, "labelIds": ["INBOX"]},
+        )
+        resp.raise_for_status()
+        watch_data = resp.json()
+
+    # Store expiration in oauth_tokens metadata
+    await session.execute(
+        text("""
+            UPDATE oauth_tokens
+            SET metadata = COALESCE(metadata, '{}') || :patch::jsonb,
+                updated_at = NOW()
+            WHERE clone_id = :clone_id AND provider = 'gmail'
+        """),
+        {
+            "clone_id": str(clone_id),
+            "patch": json.dumps({
+                "watch_expiration": watch_data.get("expiration"),
+                "watch_history_id": watch_data.get("historyId"),
+            }),
+        },
+    )
+    await session.commit()
+    return watch_data
+
+
+async def fetch_messages_since(
+    clone_id: UUID,
+    history_id: str,
+    session: AsyncSession,
+) -> list[dict]:
+    """
+    Fetch new messages since a given Gmail historyId.
+    Returns list of parsed message dicts with {subject, sender, sender_email, body, thread_id}.
+    """
+    token = await _get_valid_token(clone_id, session)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        # Get history records since historyId
+        history_resp = await client.get(
+            f"{_GMAIL_BASE}/users/me/history",
+            headers=headers,
+            params={"startHistoryId": history_id, "historyTypes": "messageAdded", "labelId": "INBOX"},
+        )
+        if history_resp.status_code == 404:
+            return []  # historyId too old
+        history_resp.raise_for_status()
+        history_data = history_resp.json()
+
+        messages = []
+        for record in history_data.get("history", []):
+            for added in record.get("messagesAdded", []):
+                msg_id = added["message"]["id"]
+                try:
+                    item = await _fetch_single_email(client, headers, msg_id)
+                    if item:
+                        # Parse sender name/email from "Name <email>" format
+                        sender_full = item.metadata.get("to", "") or ""
+                        sender_name = sender_full.split("<")[0].strip().strip('"') or sender_full
+                        sender_email = ""
+                        if "<" in sender_full and ">" in sender_full:
+                            sender_email = sender_full.split("<")[1].split(">")[0].strip()
+
+                        messages.append({
+                            "subject": item.metadata.get("subject", "(no subject)"),
+                            "sender": sender_name or sender_email,
+                            "sender_email": sender_email or sender_full,
+                            "body": item.content,
+                            "thread_id": item.metadata.get("thread_id"),
+                        })
+                except Exception:
+                    pass
+        return messages
 
 
 # ---------------------------------------------------------------------------

@@ -43,11 +43,19 @@ interface EpistemicProfile {
   preferred_evidence_types?: string[];
 }
 
+type RelationalAdjustments = Record<string, {
+  formality: "more formal" | "same" | "more casual";
+  detail_level: "high" | "medium" | "low";
+  vulnerability: "more open" | "same" | "more guarded";
+  notes: string;
+}>;
+
 interface IdentityData {
   clone_id: string;
   style_fingerprint: StyleFingerprint;
   value_system: ValueSystem;
   epistemic_profile: EpistemicProfile;
+  relational_profile: RelationalAdjustments;
 }
 
 // ---------------------------------------------------------------------------
@@ -459,16 +467,18 @@ const RELATIONSHIP_TYPES = [
   { id: "stranger", label: "Strangers / Public" },
 ];
 
-interface RelationalAdjustment {
-  formality: "more formal" | "same" | "more casual";
-  detail_level: "high" | "medium" | "low";
-  vulnerability: "more open" | "same" | "more guarded";
-  notes: string;
-}
+type RelationalAdjustment = RelationalAdjustments[string];
 
-function RelationalLayer() {
-  const [adjustments, setAdjustments] = useState<Record<string, RelationalAdjustment>>({});
+function RelationalLayer({
+  data,
+  onSave,
+}: {
+  data: RelationalAdjustments;
+  onSave: (patch: RelationalAdjustments) => Promise<void>;
+}) {
+  const [adjustments, setAdjustments] = useState<RelationalAdjustments>(data ?? {});
   const [saving, setSaving] = useState<string | null>(null);
+  const [saved, setSaved] = useState<string | null>(null);
 
   function update(id: string, patch: Partial<RelationalAdjustment>) {
     setAdjustments((prev) => ({ ...prev, [id]: { ...prev[id], ...patch } as RelationalAdjustment }));
@@ -476,9 +486,14 @@ function RelationalLayer() {
 
   async function save(id: string) {
     setSaving(id);
-    // Saved to relational_memory or epistemic_profile — for now just local
-    await new Promise((r) => setTimeout(r, 600));
-    setSaving(null);
+    try {
+      const updated = { ...adjustments };
+      await onSave(updated);
+      setSaved(id);
+      setTimeout(() => setSaved(null), 2000);
+    } finally {
+      setSaving(null);
+    }
   }
 
   const FORMALITY_OPTS: RelationalAdjustment["formality"][] = ["more formal", "same", "more casual"];
@@ -532,8 +547,8 @@ function RelationalLayer() {
               </div>
             </div>
             <button onClick={() => save(id)} disabled={saving === id}
-              className="text-[11px] text-white/30 hover:text-white/55 transition-colors disabled:opacity-40">
-              {saving === id ? "Saving…" : "Save adjustments"}
+              className={`text-[11px] transition-colors disabled:opacity-40 ${saved === id ? "text-emerald-400/60" : "text-white/30 hover:text-white/55"}`}>
+              {saving === id ? "Saving…" : saved === id ? "Saved" : "Save adjustments"}
             </button>
           </div>
         );
@@ -561,7 +576,7 @@ export default function IdentityPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  async function saveLayer(layer: "style_fingerprint" | "value_system" | "epistemic_profile", patch: object) {
+  async function saveLayer(layer: "style_fingerprint" | "value_system" | "epistemic_profile" | "relational_profile", patch: object) {
     await fetch("/api/identity", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -578,7 +593,7 @@ export default function IdentityPage() {
   ];
 
   return (
-    <div className="p-8 max-w-2xl">
+    <div className="p-8 max-w-4xl">
       <div className="mb-8">
         <h1 className="text-2xl font-light text-white/85">Identity</h1>
         <p className="text-sm text-white/35 mt-1">
@@ -635,7 +650,12 @@ export default function IdentityPage() {
               onSave={(patch) => saveLayer("value_system", patch)}
             />
           )}
-          {tab === "relational" && <RelationalLayer />}
+          {tab === "relational" && (
+            <RelationalLayer
+              data={data.relational_profile ?? {}}
+              onSave={(patch) => saveLayer("relational_profile", patch)}
+            />
+          )}
         </>
       )}
     </div>

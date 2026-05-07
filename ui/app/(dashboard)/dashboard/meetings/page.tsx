@@ -2,29 +2,52 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useClone } from "@/lib/hooks/useClone";
-import { joinMeeting, leaveMeeting, getMeetingSession, getMeetingSessions } from "@/lib/api";
+import { getMeetingSessions } from "@/lib/api";
 import type { MeetingSession, TranscriptEntry, MeetingResponse } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 
-const PLATFORM_ICONS: Record<string, React.ReactNode> = {
+// Web Speech API ambient types
+declare global {
+  interface Window {
+    SpeechRecognition: typeof SpeechRecognition;
+    webkitSpeechRecognition: typeof SpeechRecognition;
+  }
+}
+
+type Platform = "zoom" | "meet" | "teams" | "other";
+
+const PLATFORM_LABELS: Record<Platform, string> = {
+  zoom: "Zoom",
+  meet: "Google Meet",
+  teams: "Teams",
+  other: "Other",
+};
+
+const PLATFORM_ICONS: Record<Platform, React.ReactNode> = {
   zoom: (
     <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-      <rect width="14" height="14" rx="3" fill="currentColor" fillOpacity="0.15"/>
-      <path d="M2 5a1 1 0 011-1h5a1 1 0 011 1v4a1 1 0 01-1 1H3a1 1 0 01-1-1V5zM9 5.5l3-2v7l-3-2V5.5z" fill="currentColor"/>
+      <rect width="14" height="14" rx="3" fill="currentColor" fillOpacity="0.15" />
+      <path d="M2 5a1 1 0 011-1h5a1 1 0 011 1v4a1 1 0 01-1 1H3a1 1 0 01-1-1V5zM9 5.5l3-2v7l-3-2V5.5z" fill="currentColor" />
     </svg>
   ),
   meet: (
     <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-      <rect width="14" height="14" rx="3" fill="currentColor" fillOpacity="0.15"/>
-      <path d="M7 3.5a3.5 3.5 0 100 7 3.5 3.5 0 000-7z" fill="currentColor" fillOpacity="0.5"/>
-      <path d="M7 5.5a1.5 1.5 0 100 3 1.5 1.5 0 000-3z" fill="currentColor"/>
+      <rect width="14" height="14" rx="3" fill="currentColor" fillOpacity="0.15" />
+      <path d="M7 3.5a3.5 3.5 0 100 7 3.5 3.5 0 000-7z" fill="currentColor" fillOpacity="0.5" />
+      <path d="M7 5.5a1.5 1.5 0 100 3 1.5 1.5 0 000-3z" fill="currentColor" />
     </svg>
   ),
   teams: (
     <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-      <rect width="14" height="14" rx="3" fill="currentColor" fillOpacity="0.15"/>
-      <path d="M5 4h4M7 4v6M4 7h6" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+      <rect width="14" height="14" rx="3" fill="currentColor" fillOpacity="0.15" />
+      <path d="M5 4h4M7 4v6M4 7h6" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+    </svg>
+  ),
+  other: (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+      <rect width="14" height="14" rx="3" fill="currentColor" fillOpacity="0.15" />
+      <circle cx="7" cy="7" r="3" stroke="currentColor" strokeWidth="1.2" />
     </svg>
   ),
 };
@@ -36,143 +59,13 @@ const STATUS_DOT: Record<string, string> = {
   error: "bg-red-400/60",
 };
 
-const STATUS_LABEL: Record<string, string> = {
-  joining: "Joining…",
-  in_call: "Live",
-  ended: "Ended",
-  error: "Error",
-};
+function getWsBase(): string {
+  const http = process.env.NEXT_PUBLIC_FASTAPI_URL ?? "http://localhost:8000";
+  return http.replace(/^https:\/\//, "wss://").replace(/^http:\/\//, "ws://");
+}
 
 function formatTime(iso: string) {
   return new Date(iso).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
-}
-
-function ActiveMeeting({
-  botId,
-  onLeave,
-}: {
-  botId: string;
-  onLeave: () => void;
-}) {
-  const [session, setSession] = useState<MeetingSession | null>(null);
-  const [leaving, setLeaving] = useState(false);
-  const transcriptEndRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    let active = true;
-    const poll = async () => {
-      try {
-        const data = await getMeetingSession(botId);
-        if (active) {
-          setSession(data);
-          if (data.status === "ended" || data.status === "error") {
-            clearInterval(interval);
-          }
-        }
-      } catch {}
-    };
-    poll();
-    const interval = setInterval(poll, 2000);
-    return () => { active = false; clearInterval(interval); };
-  }, [botId]);
-
-  useEffect(() => {
-    transcriptEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [session?.transcript.length]);
-
-  async function handleLeave() {
-    setLeaving(true);
-    try {
-      await leaveMeeting(botId);
-      onLeave();
-    } finally {
-      setLeaving(false);
-    }
-  }
-
-  if (!session) {
-    return (
-      <div className="glass rounded-2xl p-6 flex items-center gap-3">
-        <div className="w-4 h-4 rounded-full border border-white/20 border-t-white/60 animate-spin" />
-        <p className="text-sm text-white/40">Connecting bot to meeting…</p>
-      </div>
-    );
-  }
-
-  const isActive = session.status === "joining" || session.status === "in_call";
-
-  return (
-    <div className="glass rounded-2xl overflow-hidden">
-      {/* Header */}
-      <div className="px-5 py-4 border-b border-white/[0.06] flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className={cn("w-2 h-2 rounded-full", STATUS_DOT[session.status])} />
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-medium text-white/75">
-                {STATUS_LABEL[session.status]}
-              </span>
-              <span className="text-white/30">·</span>
-              <span className="text-xs text-white/35 capitalize">{session.platform}</span>
-            </div>
-            <p className="text-[11px] text-white/25 mt-0.5 font-mono truncate max-w-xs">
-              {session.meeting_url}
-            </p>
-          </div>
-        </div>
-        {isActive && (
-          <button
-            onClick={handleLeave}
-            disabled={leaving}
-            className="glass hover:glass-md rounded-xl px-4 py-2 text-xs text-white/50 hover:text-white/70 transition-all disabled:opacity-40"
-          >
-            {leaving ? "Leaving…" : "Leave meeting"}
-          </button>
-        )}
-      </div>
-
-      <div className="grid grid-cols-2 divide-x divide-white/[0.05]" style={{ minHeight: 320 }}>
-        {/* Transcript */}
-        <div className="flex flex-col">
-          <div className="px-4 py-2.5 border-b border-white/[0.05]">
-            <p className="text-[11px] text-white/35 font-medium">Live transcript</p>
-          </div>
-          <div className="flex-1 overflow-y-auto p-4 space-y-2.5 max-h-72">
-            {session.transcript.length === 0 ? (
-              <p className="text-xs text-white/25 text-center pt-8">
-                {session.status === "joining"
-                  ? "Waiting to join…"
-                  : "No transcript yet. Bot is listening."}
-              </p>
-            ) : (
-              session.transcript.map((entry, i) => (
-                <TranscriptLine key={i} entry={entry} />
-              ))
-            )}
-            <div ref={transcriptEndRef} />
-          </div>
-        </div>
-
-        {/* Clone responses */}
-        <div className="flex flex-col">
-          <div className="px-4 py-2.5 border-b border-white/[0.05]">
-            <p className="text-[11px] text-white/35 font-medium">Clone responses</p>
-          </div>
-          <div className="flex-1 overflow-y-auto p-4 space-y-3 max-h-72">
-            {session.responses.length === 0 ? (
-              <p className="text-xs text-white/25 text-center pt-8">
-                Mention the clone by name to trigger a response.
-              </p>
-            ) : (
-              session.responses.map((r, i) => (
-                <ResponseCard key={i} response={r} />
-              ))
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
 }
 
 function TranscriptLine({ entry }: { entry: TranscriptEntry }) {
@@ -196,18 +89,270 @@ function ResponseCard({ response }: { response: MeetingResponse }) {
   );
 }
 
+function MicIcon({ active }: { active: boolean }) {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 16 16"
+      fill="none"
+      className={active ? "text-emerald-400/80" : "text-white/40"}
+    >
+      <rect x="5" y="1" width="6" height="9" rx="3" stroke="currentColor" strokeWidth="1.3" />
+      <path d="M2.5 8a5.5 5.5 0 0010 0" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+      <line x1="8" y1="13.5" x2="8" y2="15.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function ActiveSession({
+  cloneId,
+  cloneName,
+  platform,
+  onEnd,
+}: {
+  cloneId: string;
+  cloneName: string;
+  platform: Platform;
+  onEnd: () => void;
+}) {
+  const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
+  const [responses, setResponses] = useState<MeetingResponse[]>([]);
+  const [connStatus, setConnStatus] = useState<"connecting" | "live" | "error">("connecting");
+  const [errorMsg, setErrorMsg] = useState("");
+  const [ending, setEnding] = useState(false);
+  const wsRef = useRef<WebSocket | null>(null);
+  const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const transcriptEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const wsBase = getWsBase();
+    const ws = new WebSocket(
+      `${wsBase}/meetings/stream?clone_id=${encodeURIComponent(cloneId)}&platform=${platform}`
+    );
+    wsRef.current = ws;
+
+    ws.onopen = () => {
+      const SR =
+        (typeof window !== "undefined" &&
+          (window.SpeechRecognition || window.webkitSpeechRecognition)) ||
+        null;
+      if (!SR) {
+        setErrorMsg("Speech recognition is not supported in this browser. Use Chrome.");
+        setConnStatus("error");
+        ws.close();
+        return;
+      }
+
+      const recognition = new SR();
+      recognition.continuous = true;
+      recognition.interimResults = false;
+      recognition.lang = "en-US";
+      recognitionRef.current = recognition;
+
+      recognition.onresult = (event) => {
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          if (event.results[i].isFinal) {
+            const text = event.results[i][0].transcript.trim();
+            if (!text) continue;
+            const entry: TranscriptEntry = {
+              speaker: "You",
+              text,
+              ts: new Date().toISOString(),
+            };
+            setTranscript((prev) => [...prev, entry]);
+            if (ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({ type: "transcript", speaker: "You", text }));
+            }
+          }
+        }
+      };
+
+      recognition.onerror = (e: SpeechRecognitionErrorEvent) => {
+        if (e.error === "not-allowed") {
+          setErrorMsg("Microphone access denied. Allow mic access and try again.");
+          setConnStatus("error");
+        }
+      };
+
+      recognition.onend = () => {
+        // restart unless we're ending
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          try { recognition.start(); } catch {}
+        }
+      };
+
+      recognition.start();
+      setConnStatus("live");
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+        if (msg.type === "response") {
+          setResponses((prev) => [
+            ...prev,
+            { question: msg.question, answer: msg.answer, ts: msg.ts },
+          ]);
+        }
+      } catch {}
+    };
+
+    ws.onerror = () => {
+      setConnStatus("error");
+      setErrorMsg("Could not connect to backend. Check that the server is running.");
+    };
+
+    ws.onclose = () => {
+      recognitionRef.current?.stop();
+    };
+
+    return () => {
+      recognitionRef.current?.stop();
+      if (ws.readyState !== WebSocket.CLOSED) ws.close();
+    };
+  }, [cloneId, platform]);
+
+  useEffect(() => {
+    transcriptEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [transcript.length]);
+
+  function handleEnd() {
+    setEnding(true);
+    recognitionRef.current?.stop();
+    wsRef.current?.close();
+    onEnd();
+  }
+
+  if (connStatus === "error") {
+    return (
+      <div className="glass rounded-2xl p-6">
+        <div className="flex items-start gap-3">
+          <div className="w-2 h-2 rounded-full bg-red-400/60 mt-1.5 shrink-0" />
+          <div>
+            <p className="text-sm font-medium text-white/60">Session error</p>
+            <p className="text-xs text-white/35 mt-1 leading-relaxed">{errorMsg}</p>
+          </div>
+        </div>
+        <button
+          onClick={onEnd}
+          className="mt-4 glass hover:glass-md rounded-xl px-4 py-2 text-xs text-white/50 hover:text-white/70 transition-all"
+        >
+          Dismiss
+        </button>
+      </div>
+    );
+  }
+
+  if (connStatus === "connecting") {
+    return (
+      <div className="glass rounded-2xl p-6 flex items-center gap-3">
+        <div className="w-4 h-4 rounded-full border border-white/20 border-t-white/60 animate-spin" />
+        <p className="text-sm text-white/40">Starting session…</p>
+      </div>
+    );
+  }
+
+  const firstName = cloneName.split(" ")[0];
+
+  return (
+    <div className="glass rounded-2xl overflow-hidden">
+      {/* Header */}
+      <div className="px-5 py-4 border-b border-white/[0.06] flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1.5">
+            <div className="w-2 h-2 rounded-full bg-emerald-400/70 animate-pulse" />
+            <span className="text-sm font-medium text-white/75">Live</span>
+          </div>
+          <span className="text-white/20">·</span>
+          <div className="flex items-center gap-1.5 text-white/35">
+            {PLATFORM_ICONS[platform]}
+            <span className="text-xs">{PLATFORM_LABELS[platform]}</span>
+          </div>
+          <span className="text-white/20">·</span>
+          <div className="flex items-center gap-1.5">
+            <MicIcon active />
+            <span className="text-xs text-white/35">Listening</span>
+          </div>
+        </div>
+        <button
+          onClick={handleEnd}
+          disabled={ending}
+          className="glass hover:glass-md rounded-xl px-4 py-2 text-xs text-white/50 hover:text-white/70 transition-all disabled:opacity-40"
+        >
+          {ending ? "Ending…" : "End session"}
+        </button>
+      </div>
+
+      <div className="grid grid-cols-2 divide-x divide-white/[0.05]" style={{ minHeight: 320 }}>
+        {/* Transcript */}
+        <div className="flex flex-col">
+          <div className="px-4 py-2.5 border-b border-white/[0.05] flex items-center justify-between">
+            <p className="text-[11px] text-white/35 font-medium">Live transcript</p>
+            {transcript.length > 0 && (
+              <button
+                onClick={() => setTranscript([])}
+                className="text-[10px] text-white/20 hover:text-white/50 transition-colors"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+          <div className="flex-1 overflow-y-auto p-4 space-y-2.5 max-h-72">
+            {transcript.length === 0 ? (
+              <p className="text-xs text-white/25 text-center pt-8">
+                Speak to start the transcript.
+              </p>
+            ) : (
+              transcript.map((entry, i) => <TranscriptLine key={i} entry={entry} />)
+            )}
+            <div ref={transcriptEndRef} />
+          </div>
+        </div>
+
+        {/* Clone responses */}
+        <div className="flex flex-col">
+          <div className="px-4 py-2.5 border-b border-white/[0.05] flex items-center justify-between">
+            <p className="text-[11px] text-white/35 font-medium">Clone responses</p>
+            {responses.length > 0 && (
+              <button
+                onClick={() => setResponses([])}
+                className="text-[10px] text-white/20 hover:text-white/50 transition-colors"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+          <div className="flex-1 overflow-y-auto p-4 space-y-3 max-h-72">
+            {responses.length === 0 ? (
+              <p className="text-xs text-white/25 text-center pt-8">
+                Say &quot;{firstName}&quot; to trigger a response.
+              </p>
+            ) : (
+              responses.map((r, i) => <ResponseCard key={i} response={r} />)
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SessionHistoryRow({ session }: { session: MeetingSession }) {
-  const duration = session.started_at && session.ended_at
-    ? Math.round((new Date(session.ended_at).getTime() - new Date(session.started_at).getTime()) / 60000)
-    : null;
+  const duration =
+    session.started_at && session.ended_at
+      ? Math.round(
+          (new Date(session.ended_at).getTime() - new Date(session.started_at).getTime()) / 60000
+        )
+      : null;
 
   return (
     <div className="py-3 px-4 flex items-center gap-4">
       <div className="text-white/30 shrink-0">
-        {PLATFORM_ICONS[session.platform] ?? PLATFORM_ICONS.zoom}
+        {PLATFORM_ICONS[(session.platform as Platform) ?? "other"] ?? PLATFORM_ICONS.other}
       </div>
       <div className="flex-1 min-w-0">
-        <p className="text-xs text-white/55 font-mono truncate">{session.meeting_url}</p>
+        <p className="text-xs text-white/55 capitalize">{session.platform} session</p>
         <div className="flex items-center gap-2 mt-0.5">
           <div className={cn("w-1.5 h-1.5 rounded-full", STATUS_DOT[session.status])} />
           <p className="text-[10px] text-white/25">
@@ -224,9 +369,8 @@ function SessionHistoryRow({ session }: { session: MeetingSession }) {
 
 export default function MeetingsPage() {
   const { clone, isLoading } = useClone();
-  const [urlInput, setUrlInput] = useState("");
-  const [joining, setJoining] = useState(false);
-  const [activeBotId, setActiveBotId] = useState<string | null>(null);
+  const [platform, setPlatform] = useState<Platform>("zoom");
+  const [sessionActive, setSessionActive] = useState(false);
   const [sessions, setSessions] = useState<MeetingSession[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
 
@@ -237,7 +381,7 @@ export default function MeetingsPage() {
       .then((d) => setSessions(d.sessions))
       .catch(() => {})
       .finally(() => setLoadingHistory(false));
-  }, [clone, activeBotId]);
+  }, [clone, sessionActive]);
 
   if (isLoading) return <LoadingSpinner />;
   if (!clone) {
@@ -245,112 +389,120 @@ export default function MeetingsPage() {
       <div className="p-8">
         <p className="text-sm text-white/40">
           Create your clone first.{" "}
-          <a href="/dashboard" className="text-white/60 underline underline-offset-2">Overview →</a>
+          <a href="/dashboard" className="text-white/60 underline underline-offset-2">
+            Overview →
+          </a>
         </p>
       </div>
     );
   }
 
-  async function handleJoin(e: React.FormEvent) {
-    e.preventDefault();
-    if (!urlInput.trim() || !clone) return;
-    setJoining(true);
-    try {
-      const { bot_id } = await joinMeeting(clone.clone_id, urlInput.trim());
-      setActiveBotId(bot_id);
-      setUrlInput("");
-    } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to join meeting");
-    } finally {
-      setJoining(false);
-    }
-  }
-
-  const pastSessions = sessions.filter(
-    (s) => s.status === "ended" || s.status === "error"
-  );
+  const firstName = clone.display_name.split(" ")[0];
+  const pastSessions = sessions.filter((s) => s.status === "ended" || s.status === "error");
 
   return (
-    <div className="p-8 max-w-3xl flex flex-col gap-6">
+    <div className="p-8 max-w-5xl flex flex-col gap-6">
       <div className="mb-2">
         <h1 className="text-2xl font-light text-white/85">Meetings</h1>
         <p className="text-sm text-white/35 mt-1">
-          Send your clone to any Zoom, Meet, or Teams call. It listens and responds when called.
+          Start a listening session during any call. Your clone responds when it hears its name.
         </p>
       </div>
 
-      {/* Join form */}
-      {!activeBotId ? (
+      {sessionActive ? (
+        <ActiveSession
+          cloneId={clone.clone_id}
+          cloneName={clone.display_name}
+          platform={platform}
+          onEnd={() => setSessionActive(false)}
+        />
+      ) : (
         <div className="glass rounded-2xl p-6">
-          <h3 className="text-sm font-medium text-white/60 mb-1">Join a meeting</h3>
-          <p className="text-xs text-white/35 mb-4 leading-relaxed">
-            Paste a Zoom, Google Meet, or Teams URL. Your clone joins, listens, and responds when
-            someone mentions{" "}
-            <span className="text-white/55">{clone.display_name.split(" ")[0]}</span>.
+          <h3 className="text-sm font-medium text-white/60 mb-1">Start a session</h3>
+          <p className="text-xs text-white/35 mb-5 leading-relaxed">
+            Open your meeting, then start a session here. Your browser microphone captures the
+            conversation. When someone mentions{" "}
+            <span className="text-white/55">{firstName}</span>, the clone answers in this window.
           </p>
-          <form onSubmit={handleJoin} className="flex gap-2">
-            <input
-              type="url"
-              value={urlInput}
-              onChange={(e) => setUrlInput(e.target.value)}
-              placeholder="https://zoom.us/j/123456789"
-              className="flex-1 glass rounded-xl px-4 py-2.5 text-sm text-white/80 placeholder:text-white/25 outline-none font-mono"
-            />
+
+          <div className="flex items-center gap-3">
+            {/* Platform selector */}
+            <div className="relative">
+              <select
+                value={platform}
+                onChange={(e) => setPlatform(e.target.value as Platform)}
+                className="appearance-none bg-white/[0.05] border border-white/[0.08] rounded-xl pl-3 pr-8 py-2.5 text-sm text-white/60 outline-none focus:border-white/20 cursor-pointer"
+              >
+                {(Object.keys(PLATFORM_LABELS) as Platform[]).map((p) => (
+                  <option key={p} value={p} className="bg-neutral-900">
+                    {PLATFORM_LABELS[p]}
+                  </option>
+                ))}
+              </select>
+              <svg
+                className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-white/30"
+                width="10"
+                height="10"
+                viewBox="0 0 10 10"
+                fill="none"
+              >
+                <path d="M2 3.5l3 3 3-3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+              </svg>
+            </div>
+
             <button
-              type="submit"
-              disabled={joining || !urlInput.trim()}
-              className="glass-md hover:glass-hi rounded-xl px-5 py-2.5 text-sm text-white/70 hover:text-white/90 transition-all disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
+              onClick={() => setSessionActive(true)}
+              className="glass-hi hover:bg-white/[0.14] rounded-xl px-5 py-2.5 text-sm text-white/80 hover:text-white/90 transition-all flex items-center gap-2"
             >
-              {joining ? "Joining…" : "Join →"}
+              <MicIcon active={false} />
+              Start listening
             </button>
-          </form>
+          </div>
 
           <div className="mt-4 flex items-start gap-2">
-            <svg className="text-white/20 mt-0.5 shrink-0" width="12" height="12" viewBox="0 0 12 12" fill="none">
-              <circle cx="6" cy="6" r="5" stroke="currentColor" strokeWidth="1.2"/>
-              <path d="M6 4v3M6 8.5h.01" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+            <svg
+              className="text-white/20 mt-0.5 shrink-0"
+              width="12"
+              height="12"
+              viewBox="0 0 12 12"
+              fill="none"
+            >
+              <circle cx="6" cy="6" r="5" stroke="currentColor" strokeWidth="1.2" />
+              <path
+                d="M6 4v3M6 8.5h.01"
+                stroke="currentColor"
+                strokeWidth="1.2"
+                strokeLinecap="round"
+              />
             </svg>
             <p className="text-[11px] text-white/25 leading-relaxed">
-              Requires a{" "}
-              <a
-                href="https://www.recall.ai"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-white/40 hover:text-white/60 underline underline-offset-2"
-              >
-                Recall.ai
-              </a>{" "}
-              API key configured in your environment. Set <code className="text-white/35">RECALL_API_KEY</code>.
+              Uses your browser&apos;s built-in speech recognition. No external API key required.
+              Works best in Chrome. Allow microphone access when prompted.
             </p>
           </div>
         </div>
-      ) : (
-        <ActiveMeeting
-          botId={activeBotId}
-          onLeave={() => setActiveBotId(null)}
-        />
       )}
 
       {/* How it works */}
-      {!activeBotId && (
+      {!sessionActive && (
         <div className="glass rounded-2xl p-6">
           <h3 className="text-sm font-medium text-white/60 mb-4">How it works</h3>
           <div className="flex flex-col gap-3">
             {[
               {
                 step: "1",
-                title: "Bot joins",
-                desc: `Your clone enters the meeting as "${clone.display_name}'s Doppel" and sends a greeting.`,
+                title: "Join your meeting",
+                desc: `Open Zoom, Meet, Teams, or any call in a browser tab or the desktop app.`,
               },
               {
                 step: "2",
-                title: "Listens for trigger",
-                desc: `When someone mentions "${clone.display_name.split(" ")[0]}", the bot activates and processes the question.`,
+                title: "Start a session here",
+                desc: `Click "Start listening". Your mic transcribes the conversation in real time.`,
               },
               {
                 step: "3",
-                title: "Responds in chat",
-                desc: "The answer is posted in the meeting chat, sourced from your brain's knowledge.",
+                title: "Trigger the clone",
+                desc: `When someone says "${firstName}", the clone processes the question and displays a response here.`,
               },
             ].map(({ step, title, desc }) => (
               <div key={step} className="flex gap-3">
@@ -370,15 +522,21 @@ export default function MeetingsPage() {
       {/* Session history */}
       {pastSessions.length > 0 && (
         <div className="glass rounded-2xl overflow-hidden">
-          <div className="px-5 py-4 border-b border-white/[0.06]">
-            <h3 className="text-sm font-medium text-white/60">Past meetings</h3>
+          <div className="px-5 py-4 border-b border-white/[0.06] flex items-center justify-between">
+            <h3 className="text-sm font-medium text-white/60">Past sessions</h3>
+            <button
+              onClick={() => setSessions((prev) => prev.filter((s) => s.status !== "ended" && s.status !== "error"))}
+              className="text-[11px] text-white/20 hover:text-red-400/50 transition-colors"
+            >
+              Clear history
+            </button>
           </div>
           {loadingHistory ? (
             <div className="px-5 py-4 text-xs text-white/30">Loading…</div>
           ) : (
             <div className="divide-y divide-white/[0.04]">
-              {pastSessions.map((s) => (
-                <SessionHistoryRow key={s.bot_id} session={s} />
+              {pastSessions.map((s, i) => (
+                <SessionHistoryRow key={s.bot_id ?? i} session={s} />
               ))}
             </div>
           )}
@@ -387,4 +545,3 @@ export default function MeetingsPage() {
     </div>
   );
 }
-

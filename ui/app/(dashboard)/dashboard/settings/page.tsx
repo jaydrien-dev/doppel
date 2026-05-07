@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useClone } from "@/lib/hooks/useClone";
 import { useOrg } from "@/lib/hooks/useOrg";
 
@@ -11,9 +12,11 @@ import { useOrg } from "@/lib/hooks/useOrg";
 type Provider =
   | "anthropic" | "openai"
   | "google_client_id" | "google_client_secret"
+  | "gmail_pubsub_topic" | "pubsub_verification_token"
   | "github_client_id" | "github_client_secret"
   | "notion_client_id" | "notion_client_secret"
-  | "slack_client_id" | "slack_client_secret"
+  | "slack_client_id" | "slack_client_secret" | "slack_signing_secret"
+  | "stripe_secret_key" | "stripe_webhook_secret"
   | "recall" | "elevenlabs";
 
 interface KeyState {
@@ -46,7 +49,7 @@ const PROVIDERS: {
     placeholder: "sk-proj-…",
     group: "llm",
   },
-  // Google / Gmail
+  // Google / Gmail OAuth
   {
     id: "google_client_id",
     label: "Google Client ID",
@@ -60,6 +63,21 @@ const PROVIDERS: {
     description: "Google OAuth app Client Secret.",
     placeholder: "GOCSPX-…",
     group: "google",
+  },
+  // Gmail Push (Pub/Sub)
+  {
+    id: "gmail_pubsub_topic",
+    label: "Gmail Pub/Sub Topic",
+    description: "GCP Pub/Sub topic for Gmail push notifications. Format: projects/{project}/topics/{topic}",
+    placeholder: "projects/your-project/topics/gmail-push",
+    group: "gmail_push",
+  },
+  {
+    id: "pubsub_verification_token",
+    label: "Pub/Sub Verification Token",
+    description: "Random token appended to the push endpoint URL to verify Pub/Sub messages.",
+    placeholder: "random-secret-token",
+    group: "gmail_push",
   },
   // GitHub
   {
@@ -105,6 +123,28 @@ const PROVIDERS: {
     description: "Slack app Client Secret.",
     placeholder: "a1b2c3…",
     group: "slack",
+  },
+  {
+    id: "slack_signing_secret",
+    label: "Slack Signing Secret",
+    description: "Used to verify that events come from Slack. Found under Basic Information in your Slack app.",
+    placeholder: "a1b2c3d4e5f6…",
+    group: "slack",
+  },
+  // Stripe
+  {
+    id: "stripe_secret_key",
+    label: "Stripe Secret Key",
+    description: "Enables billing — subscription creation, customer portal, and invoice management.",
+    placeholder: "sk_live_…",
+    group: "stripe",
+  },
+  {
+    id: "stripe_webhook_secret",
+    label: "Stripe Webhook Secret",
+    description: "Verifies webhook payloads from Stripe. Found in the Webhooks dashboard after adding an endpoint.",
+    placeholder: "whsec_…",
+    group: "stripe",
   },
   // Recall.ai
   {
@@ -682,6 +722,69 @@ function GdprPanel({ cloneHandle }: { cloneHandle: string | null }) {
 
 
 // ---------------------------------------------------------------------------
+// Knowledge Handoff panel
+// ---------------------------------------------------------------------------
+
+function HandoffPanel({ cloneHandle }: { cloneHandle: string | null }) {
+  const [status, setStatus] = useState<"not_started" | "generating" | "complete" | "failed" | null>(null);
+  const [generatedAt, setGeneratedAt] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!cloneHandle) return;
+    fetch(`/api/handoff/report?handle=${cloneHandle}`)
+      .then((r) => r.json())
+      .then((d) => {
+        setStatus(d.status ?? "not_started");
+        setGeneratedAt(d.generated_at ?? null);
+      })
+      .catch(() => setStatus("not_started"));
+  }, [cloneHandle]);
+
+  if (!cloneHandle || status === null) return null;
+
+  return (
+    <div className="glass rounded-2xl p-5 space-y-3">
+      <div>
+        <p className="text-sm font-medium text-white/80">Knowledge handoff</p>
+        <p className="text-xs text-white/35 mt-0.5">
+          Capture everything you know before moving on — a structured transfer report for your successor.
+        </p>
+      </div>
+
+      {status === "complete" ? (
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="w-1.5 h-1.5 rounded-full bg-emerald-400/70" />
+            <p className="text-xs text-white/55">
+              Report ready{generatedAt ? ` · ${new Date(generatedAt).toLocaleDateString()}` : ""}
+            </p>
+          </div>
+          <Link
+            href="/dashboard/handoff"
+            className="text-xs text-white/45 hover:text-white/65 transition-colors underline underline-offset-2"
+          >
+            View report →
+          </Link>
+        </div>
+      ) : status === "generating" ? (
+        <div className="flex items-center gap-2">
+          <div className="w-3 h-3 rounded-full border border-white/20 border-t-white/50 animate-spin" />
+          <p className="text-xs text-white/40">Generating report…</p>
+        </div>
+      ) : (
+        <Link
+          href="/dashboard/handoff"
+          className="block w-full py-2 px-4 rounded-xl text-xs text-white/55 hover:text-white/75 glass hover:glass-md transition-all text-center"
+        >
+          Generate transfer report →
+        </Link>
+      )}
+    </div>
+  );
+}
+
+
+// ---------------------------------------------------------------------------
 // SSO Config panel (org admin only)
 // ---------------------------------------------------------------------------
 
@@ -875,9 +978,23 @@ export default function SettingsPage() {
         <p className="text-xs text-white/30 leading-relaxed mb-3">
           Create a Google Cloud project, enable the Gmail API, and add{" "}
           <code className="text-white/45 bg-white/[0.06] px-1 rounded">
-            http://localhost:8000/ingestion/gmail/callback
+            {(process.env.NEXT_PUBLIC_FASTAPI_URL ?? "https://doppel.up.railway.app")}/ingestion/gmail/callback
           </code>{" "}
           as an authorized redirect URI.
+        </p>
+      ),
+    },
+    {
+      label: "Gmail Push (Pub/Sub)",
+      group: "gmail_push",
+      hint: (
+        <p className="text-xs text-white/30 leading-relaxed mb-3">
+          Required for auto-receive — new emails generate drafts automatically. Create a Pub/Sub topic in GCP, grant{" "}
+          <code className="text-white/45 bg-white/[0.06] px-1 rounded">gmail-api-push@system.gserviceaccount.com</code>{" "}
+          Pub/Sub Publisher role, then add a push subscription pointing to{" "}
+          <code className="text-white/45 bg-white/[0.06] px-1 rounded">
+            {(process.env.NEXT_PUBLIC_FASTAPI_URL ?? "https://doppel.up.railway.app")}/ingestion/gmail/push-event?token=&lt;your-token&gt;
+          </code>.
         </p>
       ),
     },
@@ -888,7 +1005,7 @@ export default function SettingsPage() {
         <p className="text-xs text-white/30 leading-relaxed mb-3">
           Create a GitHub OAuth app. Set the callback to{" "}
           <code className="text-white/45 bg-white/[0.06] px-1 rounded">
-            http://localhost:8000/ingestion/github/callback
+            {(process.env.NEXT_PUBLIC_FASTAPI_URL ?? "https://doppel.up.railway.app")}/ingestion/github/callback
           </code>.
         </p>
       ),
@@ -902,7 +1019,7 @@ export default function SettingsPage() {
           <code className="text-white/45 bg-white/[0.06] px-1 rounded">notion.so/my-integrations</code>.
           Set redirect URI to{" "}
           <code className="text-white/45 bg-white/[0.06] px-1 rounded">
-            http://localhost:8000/ingestion/notion/callback
+            {(process.env.NEXT_PUBLIC_FASTAPI_URL ?? "https://doppel.up.railway.app")}/ingestion/notion/callback
           </code>.
         </p>
       ),
@@ -916,9 +1033,24 @@ export default function SettingsPage() {
           <code className="text-white/45 bg-white/[0.06] px-1 rounded">api.slack.com/apps</code>.
           Enable OAuth and add{" "}
           <code className="text-white/45 bg-white/[0.06] px-1 rounded">
-            http://localhost:8000/slack/oauth/callback
+            {(process.env.NEXT_PUBLIC_FASTAPI_URL ?? "https://doppel.up.railway.app")}/slack/oauth/callback
           </code>{" "}
-          as a redirect URI.
+          as a redirect URI. The signing secret is under Basic Information.
+        </p>
+      ),
+    },
+    {
+      label: "Stripe",
+      group: "stripe",
+      hint: (
+        <p className="text-xs text-white/30 leading-relaxed mb-3">
+          Get your keys from the{" "}
+          <code className="text-white/45 bg-white/[0.06] px-1 rounded">Developers → API keys</code> page in the Stripe dashboard.
+          Add a webhook endpoint pointing to{" "}
+          <code className="text-white/45 bg-white/[0.06] px-1 rounded">
+            {(process.env.NEXT_PUBLIC_FASTAPI_URL ?? "https://doppel.up.railway.app")}/stripe/webhook
+          </code>{" "}
+          and copy the webhook signing secret.
         </p>
       ),
     },
@@ -927,12 +1059,29 @@ export default function SettingsPage() {
   ];
 
   return (
-    <div className="p-8 max-w-xl">
+    <div className="p-8 max-w-3xl">
       <div className="mb-8">
         <h1 className="text-2xl font-light text-white/85">Settings</h1>
         <p className="text-sm text-white/35 mt-1">
           Add your own API keys. Leave empty to use the platform&apos;s keys.
         </p>
+      </div>
+
+      {/* Account quick-links */}
+      <div className="flex gap-2 mb-8">
+        {[
+          { label: "Usage", href: "/dashboard/usage" },
+          { label: "Activity", href: "/dashboard/activity" },
+          { label: "Billing", href: "/dashboard/billing" },
+        ].map(({ label, href }) => (
+          <Link
+            key={href}
+            href={href}
+            className="flex-1 py-2 rounded-xl text-xs text-white/45 hover:text-white/65 glass hover:glass-md transition-all text-center"
+          >
+            {label} →
+          </Link>
+        ))}
       </div>
 
       {!clone && (
@@ -983,6 +1132,10 @@ export default function SettingsPage() {
         {/* GDPR */}
         <p className="text-[11px] uppercase tracking-widest text-white/25 px-1 pt-6 pb-2">Your data rights</p>
         <GdprPanel cloneHandle={clone?.handle ?? null} />
+
+        {/* Knowledge Handoff */}
+        <p className="text-[11px] uppercase tracking-widest text-white/25 px-1 pt-6 pb-2">Knowledge handoff</p>
+        <HandoffPanel cloneHandle={clone?.handle ?? null} />
 
         {/* SSO — org admin only */}
         {org && (

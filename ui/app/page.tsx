@@ -37,8 +37,11 @@ function Nav() {
         </Link>
 
         <nav className="hidden md:flex items-center gap-6">
-          <a href="#problem" className="text-sm text-white/40 hover:text-white/70 transition-colors">
-            The problem
+          <a href="#for-you" className="text-sm text-white/40 hover:text-white/70 transition-colors">
+            For individuals
+          </a>
+          <a href="#for-teams" className="text-sm text-white/40 hover:text-white/70 transition-colors">
+            For teams
           </a>
           <a href="#how" className="text-sm text-white/40 hover:text-white/70 transition-colors">
             How it works
@@ -46,6 +49,9 @@ function Nav() {
           <a href="#pricing" className="text-sm text-white/40 hover:text-white/70 transition-colors">
             Pricing
           </a>
+          <Link href="/contact" className="text-sm text-white/40 hover:text-white/70 transition-colors">
+            Contact
+          </Link>
         </nav>
 
         <div className="flex items-center gap-2">
@@ -74,8 +80,10 @@ function Nav() {
 
 function HeroSection() {
   const [titleNumber, setTitleNumber] = useState(0);
+  const [scenario, setScenario] = useState<"individual" | "team">("individual");
+
   const titles = useMemo(
-    () => ["compound.", "stay.", "last.", "grow.", "live on."],
+    () => ["scale beyond you.", "answer for you.", "outlast you.", "compound.", "live on."],
     []
   );
 
@@ -98,7 +106,6 @@ function HeroSection() {
           WebkitMaskImage: "radial-gradient(ellipse 80% 70% at 50% 40%, black 30%, transparent 100%)",
         }}
       />
-      {/* Ambient gradient */}
       <div className="pointer-events-none absolute inset-0">
         <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] rounded-full bg-white/[0.02] blur-[120px]" />
       </div>
@@ -124,8 +131,8 @@ function HeroSection() {
         className="text-center"
       >
         <h1 className="text-5xl md:text-7xl font-light text-white/85 tracking-tight leading-[1.08] max-w-3xl">
-          Knowledge should{" "}
-          <span className="relative inline-flex justify-center overflow-y-hidden overflow-x-visible h-[1.15em] align-bottom w-fit min-w-[260px] md:min-w-[420px]">
+          What you know should{" "}
+          <span className="relative inline-flex justify-center overflow-y-hidden overflow-x-visible h-[1.15em] align-bottom w-fit min-w-[280px] md:min-w-[440px]">
             {titles.map((title, index) => (
               <motion.span
                 key={index}
@@ -135,10 +142,7 @@ function HeroSection() {
                 animate={
                   titleNumber === index
                     ? { y: 0, opacity: 1 }
-                    : {
-                        y: titleNumber > index ? "-60%" : "60%",
-                        opacity: 0,
-                      }
+                    : { y: titleNumber > index ? "-60%" : "60%", opacity: 0 }
                 }
               >
                 {title}
@@ -155,27 +159,61 @@ function HeroSection() {
         transition={{ duration: 0.6, delay: 0.25 }}
         className="mt-6 text-base md:text-lg text-white/35 max-w-xl text-center leading-relaxed"
       >
-        The valuable thoughts and skills of your best people are lost when they leave —
-        the things that were never on paper. Doppel captures them permanently,
-        so your company&apos;s knowledge compounds instead of disappearing.
+        Doppel turns your expertise into a permanent, queryable intelligence —
+        for yourself, and for the teams that depend on you.
       </motion.p>
 
-      {/* Scenario callout */}
+      {/* Scenario callout — tabbed */}
       <motion.div
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5, delay: 0.35 }}
-        className="mt-8 glass rounded-2xl px-5 py-4 max-w-md text-center"
+        className="mt-8 glass rounded-2xl p-1 max-w-md w-full"
       >
-        <p className="text-sm text-white/50 leading-relaxed">
-          <span className="text-white/70">New engineer, day one:</span>{" "}
-          <span className="italic">&ldquo;Why did we build the auth layer this way?&rdquo;</span>
-          <br />
-          <span className="text-white/30 text-xs mt-1.5 block">
-            Sarah left 8 months ago. Her answer is still here.
-          </span>
-          <span className="text-white/55 mt-1 block">&ldquo;Sarah made that call in April — here&apos;s her reasoning, with sources.&rdquo;</span>
-        </p>
+        <div className="flex gap-1 p-1 mb-3">
+          {(["individual", "team"] as const).map((s) => (
+            <button
+              key={s}
+              onClick={() => setScenario(s)}
+              className={cn(
+                "flex-1 py-1.5 rounded-lg text-xs transition-all",
+                scenario === s ? "glass-md text-white/75" : "text-white/30 hover:text-white/50"
+              )}
+            >
+              {s === "individual" ? "For individuals" : "For teams"}
+            </button>
+          ))}
+        </div>
+
+        <div className="px-4 pb-4 text-sm leading-relaxed min-h-[80px]">
+          {scenario === "individual" ? (
+            <>
+              <p className="text-white/50">
+                <span className="text-white/70">Colleague on Slack:</span>{" "}
+                <span className="italic">&ldquo;Quick question about that infra pattern you use?&rdquo;</span>
+              </p>
+              <p className="text-white/25 text-xs mt-2">You&apos;re in a meeting. Your clone isn&apos;t.</p>
+              <p className="text-white/50 mt-1.5">
+                <span className="text-white/65">[Your clone]:</span>{" "}
+                &ldquo;I avoid that pattern because of X — here&apos;s how I&apos;d approach it instead.&rdquo;
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="text-white/50">
+                <span className="text-white/70">New engineer, day one:</span>{" "}
+                <span className="italic">&ldquo;Why did we build auth this way?&rdquo;</span>
+              </p>
+              <p className="text-white/25 text-xs mt-2">
+                Sarah left 8 months ago. Her answer is still here.
+              </p>
+              <p className="text-white/50 mt-1.5">
+                <span className="text-white/65">[Sarah&apos;s clone]:</span>{" "}
+                &ldquo;Made that call in April — here&apos;s her reasoning, with sources.&rdquo;
+              </p>
+            </>
+          )}
+        </div>
       </motion.div>
 
       {/* CTAs */}
@@ -189,32 +227,135 @@ function HeroSection() {
           href="/sign-up"
           className="glass-hi hover:bg-white/[0.14] px-6 py-3 rounded-xl text-sm font-medium text-white/85 hover:text-white transition-all flex items-center gap-2"
         >
-          Start preserving knowledge
+          Start free
           <MoveRight className="w-4 h-4" />
         </Link>
-        <a
-          href="#problem"
+        <Link
+          href="/contact"
           className="glass hover:glass-md px-6 py-3 rounded-xl text-sm text-white/50 hover:text-white/70 transition-all"
         >
-          See the problem
-        </a>
+          Request a team demo →
+        </Link>
       </motion.div>
 
-      {/* Stat */}
       <motion.p
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ duration: 0.5, delay: 0.65 }}
-        className="mt-10 text-[11px] text-white/20 tracking-wide"
+        className="mt-10 text-[11px] text-white/20 tracking-wide text-center"
       >
-        The average knowledge worker changes jobs every 2–3 years · That knowledge doesn&apos;t have to leave
+        Free for individuals · Company Brain on Enterprise plans
       </motion.p>
     </section>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Problem section
+// For individuals section
+// ---------------------------------------------------------------------------
+
+function ForIndividualsSection() {
+  const ref = useRef<HTMLDivElement>(null);
+  const isInView = useInView(ref, { once: true, margin: "-80px" });
+
+  const USE_CASES = [
+    {
+      who: "Consultant",
+      problem: "Clients ask the same strategic questions. You answer each one from scratch.",
+      solution: "Your clone answers with your frameworks — you focus on the work that needs you.",
+    },
+    {
+      who: "Engineer",
+      problem: "Junior devs pull you into Slack for context you've explained ten times.",
+      solution: "Your clone surfaces the right answer from your actual decisions and code reviews.",
+    },
+    {
+      who: "Executive",
+      problem: "Your judgment is the bottleneck. You can't be in every room.",
+      solution: "Your reasoning process is queryable. Decisions get made without the meeting.",
+    },
+    {
+      who: "Creator",
+      problem: "Your audience wants you — more than you can produce.",
+      solution: "Your clone engages, answers, and teaches. Trained on everything you've written.",
+    },
+  ];
+
+  return (
+    <section id="for-you" className="relative py-24 px-6 max-w-6xl mx-auto" ref={ref}>
+      <div className="max-w-2xl mb-16">
+        <motion.p
+          initial={{ opacity: 0, y: 8 }}
+          animate={isInView ? { opacity: 1, y: 0 } : {}}
+          transition={{ duration: 0.5 }}
+          className="text-[11px] uppercase tracking-widest text-white/25 mb-3"
+        >
+          For individuals
+        </motion.p>
+        <motion.h2
+          initial={{ opacity: 0, y: 12 }}
+          animate={isInView ? { opacity: 1, y: 0 } : {}}
+          transition={{ duration: 0.5, delay: 0.1 }}
+          className="text-4xl font-light text-white/85 mb-4 leading-tight"
+        >
+          You are the bottleneck.
+          <br />
+          <span className="text-white/40">You don&apos;t have to be.</span>
+        </motion.h2>
+        <motion.p
+          initial={{ opacity: 0, y: 8 }}
+          animate={isInView ? { opacity: 1, y: 0 } : {}}
+          transition={{ duration: 0.5, delay: 0.2 }}
+          className="text-base text-white/35 leading-relaxed"
+        >
+          Your knowledge is more valuable than your availability.
+          Doppel lets you deploy your expertise at scale — without giving up more of your time.
+        </motion.p>
+      </div>
+
+      <div className="grid md:grid-cols-2 gap-4">
+        {USE_CASES.map((uc, i) => (
+          <motion.div
+            key={uc.who}
+            initial={{ opacity: 0, y: 20 }}
+            animate={isInView ? { opacity: 1, y: 0 } : {}}
+            transition={{ duration: 0.5, delay: 0.2 + i * 0.08 }}
+            className="glass rounded-2xl p-6"
+          >
+            <p className="text-xs text-white/30 uppercase tracking-wider mb-3">{uc.who}</p>
+            <p className="text-sm text-white/40 leading-relaxed mb-4 flex items-start gap-2">
+              <span className="w-1 h-1 rounded-full bg-red-400/40 inline-block mt-2 shrink-0" />
+              {uc.problem}
+            </p>
+            <p className="text-sm text-white/60 leading-relaxed flex items-start gap-2">
+              <span className="w-1 h-1 rounded-full bg-emerald-400/60 inline-block mt-2 shrink-0" />
+              {uc.solution}
+            </p>
+          </motion.div>
+        ))}
+      </div>
+
+      <motion.div
+        initial={{ opacity: 0, y: 12 }}
+        animate={isInView ? { opacity: 1, y: 0 } : {}}
+        transition={{ duration: 0.5, delay: 0.55 }}
+        className="mt-8 flex items-center gap-6"
+      >
+        <Link
+          href="/sign-up"
+          className="glass-md hover:glass-hi rounded-xl px-5 py-2.5 text-sm text-white/65 hover:text-white/85 transition-all flex items-center gap-2"
+        >
+          Start free
+          <MoveRight className="w-3.5 h-3.5" />
+        </Link>
+        <p className="text-xs text-white/25">Free forever · No credit card</p>
+      </motion.div>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// For teams section (replaces old problem section)
 // ---------------------------------------------------------------------------
 
 const LOSSES = [
@@ -226,12 +367,12 @@ const LOSSES = [
   {
     role: "Support lead",
     years: "4 years",
-    what: "Which customers to bend the rules for. How to handle the edge cases that aren't in the policy doc. The instincts that come from 10,000 tickets.",
+    what: "Which customers to bend the rules for. How to handle the edge cases that aren't in the policy doc. The instincts from 10,000 tickets.",
   },
   {
     role: "Head of sales",
     years: "7 years",
-    what: "When to discount, when to hold firm, which objections are real. The deals she almost lost and why. The pricing intuition that closed $4M last year.",
+    what: "When to discount, when to hold firm, which objections are real. The pricing intuition that closed $4M last year.",
   },
   {
     role: "Founding PM",
@@ -240,17 +381,16 @@ const LOSSES = [
   },
 ];
 
-function ProblemSection() {
+function ForTeamsSection() {
   const ref = useRef<HTMLDivElement>(null);
   const isInView = useInView(ref, { once: true, margin: "-80px" });
 
   return (
     <section
-      id="problem"
+      id="for-teams"
       className="relative py-24 px-6 max-w-5xl mx-auto overflow-hidden"
       ref={ref}
     >
-      {/* Dotted grid background */}
       <div
         className="pointer-events-none absolute inset-0"
         style={{
@@ -261,15 +401,14 @@ function ProblemSection() {
         }}
       />
 
-      {/* Heading */}
-      <div className="relative max-w-2xl mx-auto text-center mb-20">
+      <div className="relative max-w-2xl mb-20">
         <motion.p
           initial={{ opacity: 0, y: 8 }}
           animate={isInView ? { opacity: 1, y: 0 } : {}}
           transition={{ duration: 0.5 }}
           className="text-[11px] uppercase tracking-widest text-white/25 mb-3"
         >
-          The problem
+          For teams
         </motion.p>
         <motion.h2
           initial={{ opacity: 0, y: 12 }}
@@ -277,7 +416,9 @@ function ProblemSection() {
           transition={{ duration: 0.5, delay: 0.1 }}
           className="text-4xl font-light text-white/85 mb-4 leading-tight"
         >
-          When they leave, it&apos;s gone
+          When they leave,
+          <br />
+          <span className="text-white/40">it doesn&apos;t have to go with them.</span>
         </motion.h2>
         <motion.p
           initial={{ opacity: 0, y: 8 }}
@@ -286,21 +427,18 @@ function ProblemSection() {
           className="text-base text-white/35 leading-relaxed"
         >
           Not the things in documents — the judgment, the instincts, the reasoning
-          behind the reasoning. Every departure takes it.
+          behind the reasoning. Every departure takes it. Until now.
         </motion.p>
       </div>
 
-      {/* Trail */}
+      {/* Timeline */}
       <div className="relative max-w-3xl mx-auto">
-
-        {/* Vertical dashed spine */}
         <div
           className="absolute left-1/2 -translate-x-px top-0 bottom-0 w-px hidden md:block"
           style={{
             backgroundImage: "repeating-linear-gradient(to bottom, rgba(255,255,255,0.10) 0, rgba(255,255,255,0.10) 6px, transparent 6px, transparent 16px)",
           }}
         />
-        {/* Mobile: left-edge spine */}
         <div
           className="absolute left-4 top-0 bottom-0 w-px md:hidden"
           style={{
@@ -318,39 +456,26 @@ function ProblemSection() {
               transition={{ duration: 0.5, delay: 0.25 + i * 0.1 }}
               className="relative mb-8 flex md:block pl-10 md:pl-0"
             >
-              {/* Desktop: alternating card */}
-              <div
-                className={`hidden md:block w-[calc(50%-28px)] glass rounded-2xl p-5 ${
-                  isLeft ? "mr-auto" : "ml-auto"
-                }`}
-              >
+              <div className={`hidden md:block w-[calc(50%-28px)] glass rounded-2xl p-5 ${isLeft ? "mr-auto" : "ml-auto"}`}>
                 <CardContent item={item} />
               </div>
-
-              {/* Mobile: full-width card */}
               <div className="md:hidden flex-1 glass rounded-2xl p-5">
                 <CardContent item={item} />
               </div>
-
-              {/* Center dot (desktop) */}
               <div className="hidden md:block absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full bg-[#080808] border border-white/20 z-10" />
-              {/* Left dot (mobile) */}
               <div className="md:hidden absolute left-4 top-6 -translate-x-1/2 w-2 h-2 rounded-full bg-[#080808] border border-white/20 z-10" />
             </motion.div>
           );
         })}
 
-        {/* Trail end — DOPPEL node */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={isInView ? { opacity: 1, y: 0 } : {}}
           transition={{ duration: 0.55, delay: 0.7 }}
           className="relative flex justify-center pt-2 pl-10 md:pl-0"
         >
-          {/* End dot */}
           <div className="hidden md:block absolute top-0 left-1/2 -translate-x-1/2 w-3.5 h-3.5 rounded-full bg-white/15 border border-white/35 z-10" />
           <div className="md:hidden absolute top-1 left-4 -translate-x-1/2 w-3.5 h-3.5 rounded-full bg-white/15 border border-white/35 z-10" />
-
           <div className="mt-6 md:w-auto w-full glass-hi border border-white/[0.13] rounded-2xl px-8 py-6 text-center max-w-xs">
             <p className="text-[10px] uppercase tracking-[0.18em] text-white/30 mb-2">Until now</p>
             <p className="text-xl font-semibold text-white/80 tracking-tight mb-1">doppel</p>
@@ -386,13 +511,12 @@ function CardContent({ item }: { item: { role: string; years: string; what: stri
 }
 
 // ---------------------------------------------------------------------------
-// Dashboard Mock
+// Dashboard mock
 // ---------------------------------------------------------------------------
 
 function DashboardMock() {
   return (
     <div className="h-full w-full bg-[#080808] overflow-hidden flex select-none text-[11px]">
-      {/* Sidebar */}
       <div className="w-[160px] shrink-0 border-r border-white/[0.05] flex flex-col p-2.5">
         <div className="px-2.5 py-2 mb-4">
           <span className="text-xs font-semibold text-white/65">doppel</span>
@@ -409,7 +533,7 @@ function DashboardMock() {
           <div
             key={label}
             className={cn(
-              "px-2.5 py-2 rounded-lg mb-0.5 text-[11px] transition-colors",
+              "px-2.5 py-2 rounded-lg mb-0.5 text-[11px]",
               active ? "bg-white/[0.07] text-white/80" : "text-white/30"
             )}
           >
@@ -418,7 +542,6 @@ function DashboardMock() {
         ))}
       </div>
 
-      {/* Chat area */}
       <div className="flex-1 flex flex-col min-w-0">
         <div className="px-5 py-3 border-b border-white/[0.05] flex items-center gap-2.5 shrink-0">
           <div className="w-7 h-7 rounded-lg bg-white/[0.07] flex items-center justify-center text-[10px] text-white/50 font-medium shrink-0">
@@ -439,14 +562,11 @@ function DashboardMock() {
               Why did we choose Postgres over Dynamo for the events table?
             </div>
           </div>
-
           <div className="flex gap-2.5 items-start">
-            <div className="w-6 h-6 rounded-lg bg-white/[0.05] flex items-center justify-center text-[9px] text-white/40 shrink-0 mt-0.5">
-              S
-            </div>
+            <div className="w-6 h-6 rounded-lg bg-white/[0.05] flex items-center justify-center text-[9px] text-white/40 shrink-0 mt-0.5">S</div>
             <div className="flex flex-col gap-1.5 max-w-[80%]">
               <div className="bg-white/[0.03] border border-white/[0.05] rounded-2xl rounded-tl-sm px-3 py-2 text-white/55 leading-relaxed">
-                We evaluated both in Q3 2024. The main constraint was complex join patterns across event streams — Dynamo&apos;s single-table model would&apos;ve forced us into duplicate writes everywhere.
+                We evaluated both in Q3 2024. The main constraint was complex join patterns — Dynamo&apos;s single-table model would&apos;ve forced duplicate writes everywhere.
               </div>
               <div className="flex items-center gap-2 px-1">
                 <span className="text-[9px] font-medium border border-emerald-400/25 text-emerald-400/80 rounded px-1.5 py-0.5">92% confident</span>
@@ -454,19 +574,15 @@ function DashboardMock() {
               </div>
             </div>
           </div>
-
           <div className="flex justify-end">
             <div className="bg-white/[0.07] border border-white/[0.06] rounded-2xl rounded-tr-sm px-3 py-2 text-white/65 max-w-[70%] leading-relaxed">
               Were there any trade-offs she worried about?
             </div>
           </div>
-
           <div className="flex gap-2.5 items-start">
-            <div className="w-6 h-6 rounded-lg bg-white/[0.05] flex items-center justify-center text-[9px] text-white/40 shrink-0 mt-0.5">
-              S
-            </div>
+            <div className="w-6 h-6 rounded-lg bg-white/[0.05] flex items-center justify-center text-[9px] text-white/40 shrink-0 mt-0.5">S</div>
             <div className="bg-white/[0.03] border border-white/[0.05] rounded-2xl rounded-tl-sm px-3 py-2 text-white/55 max-w-[80%] leading-relaxed">
-              Yes — connection pool exhaustion at scale. That&apos;s why we set up PgBouncer from day one. She left a note about revisiting this at 10M events/day.
+              Yes — connection pool exhaustion at scale. That&apos;s why we set up PgBouncer from day one. She left a note about revisiting at 10M events/day.
             </div>
           </div>
         </div>
@@ -484,19 +600,13 @@ function DashboardMock() {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Scroll demo section
-// ---------------------------------------------------------------------------
-
 function ScrollSection() {
   return (
     <section id="demo" className="relative">
       <ContainerScroll
         titleComponent={
           <div className="space-y-3">
-            <p className="text-[11px] uppercase tracking-widest text-white/25">
-              The product
-            </p>
+            <p className="text-[11px] uppercase tracking-widest text-white/25">The product</p>
             <h2 className="text-4xl md:text-5xl font-light text-white/85 leading-tight">
               Query the people who built it
             </h2>
@@ -527,7 +637,8 @@ const FEATURES = [
       </svg>
     ),
     title: "Capture",
-    desc: "Connect Gmail, Slack, GitHub, and docs. Every decision, email, and thread becomes queryable memory — not lost in someone's inbox when they leave.",
+    desc: "Connect Gmail, Slack, GitHub, Notion, and docs. Every email, decision, and thread becomes memory — not lost in someone's inbox.",
+    tag: "Individual & team",
   },
   {
     icon: (
@@ -536,18 +647,20 @@ const FEATURES = [
         <path d="M2 9h3M13 9h3M9 2v3M9 13v3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
       </svg>
     ),
-    title: "Preserve",
-    desc: "When someone leaves, their clone stays — permanently. New hires query the people who built what they're inheriting. The knowledge doesn't walk out the door.",
+    title: "Deploy",
+    desc: "Your clone is queryable via chat link, API, Slack bot, or email. Anyone you give access can ask — you answer once, for everyone.",
+    tag: "Individual",
   },
   {
     icon: (
       <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-        <path d="M3 15 L9 3 L15 15" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
-        <path d="M5.5 10.5h7" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+        <path d="M3 15 L9 3 L15 15" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M5.5 10.5h7" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
       </svg>
     ),
     title: "Compound",
-    desc: "Every brain added makes the whole stronger. Role brains aggregate expertise across your team. The longer you use Doppel, the more irreplaceable your knowledge layer becomes.",
+    desc: "Individual clones aggregate into role brains. Team knowledge becomes a queryable layer. Every brain added makes the whole stronger.",
+    tag: "Team",
   },
 ];
 
@@ -588,7 +701,7 @@ function FeaturesSection() {
           transition={{ duration: 0.5, delay: 0.25 }}
           className="text-sm text-white/30 mt-4 max-w-md mx-auto leading-relaxed"
         >
-          Every departure used to subtract. With Doppel, it adds.
+          Works at the individual level. Scales to the org.
         </motion.p>
       </div>
 
@@ -600,18 +713,20 @@ function FeaturesSection() {
             animate={isInView ? { opacity: 1, y: 0 } : {}}
             transition={{ duration: 0.5, delay: 0.2 + i * 0.1 }}
           >
-            <div className="glass rounded-2xl p-6 h-full">
+            <div className="glass rounded-2xl p-6 h-full flex flex-col">
               <div className="w-9 h-9 rounded-xl glass-md flex items-center justify-center text-white/45 mb-5">
                 {f.icon}
               </div>
-              <h3 className="text-base font-medium text-white/80 mb-2">{f.title}</h3>
+              <div className="flex items-center gap-2 mb-2">
+                <h3 className="text-base font-medium text-white/80">{f.title}</h3>
+                <span className="text-[10px] text-white/25 glass rounded-full px-2 py-px">{f.tag}</span>
+              </div>
               <p className="text-sm text-white/35 leading-relaxed">{f.desc}</p>
             </div>
           </motion.div>
         ))}
       </div>
 
-      {/* Social proof quote */}
       <motion.div
         initial={{ opacity: 0, y: 16 }}
         animate={isInView ? { opacity: 1, y: 0 } : {}}
@@ -646,13 +761,15 @@ function CompanyBrainSection() {
             transition={{ duration: 0.5 }}
             className="mb-10"
           >
-            <p className="text-[11px] uppercase tracking-widest text-white/25 mb-3">Company Brain</p>
+            <p className="text-[11px] uppercase tracking-widest text-white/25 mb-3">
+              For teams · Company Brain
+            </p>
             <h2 className="text-3xl md:text-4xl font-light text-white/85 leading-tight mb-4">
               Individual knowledge becomes<br className="hidden md:block" /> company knowledge
             </h2>
             <p className="text-base text-white/35 leading-relaxed max-w-xl">
-              Individual clones are the start. Doppel then aggregates them into role brains —
-              and extracts structured, executable skills your AI agents can use before acting.
+              Individual clones are the foundation. Doppel aggregates them into role brains —
+              then extracts structured, executable skills your AI agents can use before acting.
             </p>
           </motion.div>
 
@@ -719,7 +836,7 @@ function CompanyBrainSection() {
 const PLANS = [
   {
     name: "Free",
-    desc: "Try every feature — no Company Brain. No credit card required.",
+    desc: "Your personal clone, fully functional. No credit card. Keep it forever.",
     monthly: 0,
     yearly: 0,
     cta: "Start free",
@@ -727,17 +844,17 @@ const PLANS = [
     badge: null,
     queriesLabel: "50 queries / month",
     features: [
-      "1 clone",
-      "All ingestion sources",
-      "Public shareable link",
-      "Confidence + source UI",
-      "Gmail, Slack, GitHub connectors",
+      "1 personal clone",
+      "Gmail, Slack, GitHub, Notion connectors",
+      "File upload (PDF, DOCX, XLSX…)",
+      "Shareable public link",
+      "Confidence + source citations",
       "50 queries / month",
     ],
   },
   {
     name: "Personal",
-    desc: "Full power for individuals. 5× the queries. Keep your knowledge forever.",
+    desc: "Full individual power. All surfaces, higher limits, your own API access.",
     monthly: 15,
     yearly: 150,
     cta: "Get Personal",
@@ -746,16 +863,17 @@ const PLANS = [
     queriesLabel: "250 queries / month",
     features: [
       "Everything in Free",
-      "250 queries / month (5×)",
-      "Priority response speed",
+      "250 queries / month",
+      "Email drafts (inbox triage)",
+      "Meeting bot (Zoom, Meet, Teams)",
+      "Knowledge handoff report",
+      "Developer API access",
       "Data export (GDPR Art. 20)",
-      "Clone preservation + legal hold",
-      "API access",
     ],
   },
   {
     name: "Enterprise Pro",
-    desc: "Company Brain + 5× Personal queries. For teams that can't afford to lose knowledge.",
+    desc: "Company Brain for your team. Role knowledge, cross-clone search, org controls.",
     monthly: 59,
     yearly: 590,
     cta: "Get Pro",
@@ -764,19 +882,18 @@ const PLANS = [
     perSeat: true,
     queriesLabel: "1,250 queries / seat / month",
     features: [
-      "Everything in Personal",
-      "1,250 queries / seat / month (5×)",
+      "Everything in Personal × whole team",
       "Company Brain + Role Brains",
+      "Team Knowledge directory",
       "Skills API for AI agents",
-      "Cross-clone org search",
-      "SCIM provisioning",
-      "SSO / SAML",
+      "Org workspace + cross-clone search",
+      "SSO / SAML · SCIM provisioning",
       "Audit log + webhooks",
     ],
   },
   {
     name: "Enterprise Max",
-    desc: "20× Personal queries. For orgs running knowledge at full scale.",
+    desc: "The full intelligence layer. Org feed, drift detection, spec generation.",
     monthly: 179,
     yearly: 1790,
     cta: "Talk to us",
@@ -786,11 +903,12 @@ const PLANS = [
     queriesLabel: "5,000 queries / seat / month",
     features: [
       "Everything in Enterprise Pro",
-      "5,000 queries / seat / month (20×)",
-      "Dedicated CSM",
-      "SOC 2 Type II",
-      "Custom SLAs",
-      "Volume discounts at 50+ seats",
+      "Org Intelligence Feed",
+      "Goals & drift detection",
+      "AI spec generator",
+      "Decision log",
+      "SOC 2 Type II · Custom SLAs",
+      "Dedicated CSM · Volume discounts",
     ],
   },
 ];
@@ -833,7 +951,7 @@ function PricingSection() {
           transition={{ duration: 0.5, delay: 0.3 }}
           className="text-sm text-white/35"
         >
-          Free forever for individuals. Company Brain unlocks at Enterprise.
+          Free forever for individuals · Company Brain unlocks at Enterprise
         </motion.p>
 
         <motion.div
@@ -882,7 +1000,6 @@ function PricingSection() {
         </motion.div>
       </div>
 
-      {/* 2×2 grid */}
       <div className="grid md:grid-cols-2 gap-4 max-w-4xl mx-auto">
         {PLANS.map((plan, i) => (
           <motion.div
@@ -893,13 +1010,10 @@ function PricingSection() {
           >
             <div
               className={cn(
-                "rounded-2xl p-6 border h-full flex flex-col transition-all",
-                plan.popular
-                  ? "glass-hi border-white/[0.14]"
-                  : "glass border-white/[0.08]"
+                "rounded-2xl p-6 border h-full flex flex-col",
+                plan.popular ? "glass-hi border-white/[0.14]" : "glass border-white/[0.08]"
               )}
             >
-              {/* Header */}
               <div className="mb-5">
                 <div className="flex items-start justify-between gap-2 mb-1">
                   <h3 className="text-lg font-medium text-white/85">{plan.name}</h3>
@@ -912,7 +1026,6 @@ function PricingSection() {
                 <p className="text-xs text-white/35 leading-relaxed">{plan.desc}</p>
               </div>
 
-              {/* Price */}
               <div className="mb-5">
                 <div className="flex items-baseline gap-1">
                   <span className="text-3xl font-light text-white/85">
@@ -935,13 +1048,12 @@ function PricingSection() {
                   )}
                 </div>
                 <p className="text-[11px] text-white/25 mt-1">
-                  {plan.perSeat ? "5-seat minimum · " : ""}{plan.queriesLabel}
+                  {"perSeat" in plan && plan.perSeat ? "5-seat minimum · " : ""}{plan.queriesLabel}
                 </p>
               </div>
 
-              {/* CTA */}
               <Link
-                href={plan.name === "Enterprise Max" ? "mailto:team@doppel.ai" : "/sign-up"}
+                href={plan.name === "Enterprise Max" ? "/contact" : "/sign-up"}
                 className={cn(
                   "flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm transition-all mb-5",
                   plan.popular
@@ -953,7 +1065,6 @@ function PricingSection() {
                 <MoveRight className="w-3.5 h-3.5" />
               </Link>
 
-              {/* Features */}
               <ul className="space-y-2 mt-auto">
                 {plan.features.map((feat) => (
                   <li key={feat} className="flex items-start gap-2.5 text-sm text-white/40">
@@ -967,7 +1078,6 @@ function PricingSection() {
         ))}
       </div>
 
-      {/* Company Brain callout */}
       <motion.div
         initial={{ opacity: 0, y: 12 }}
         animate={isInView ? { opacity: 1, y: 0 } : {}}
@@ -977,12 +1087,12 @@ function PricingSection() {
         <div className="flex-1">
           <p className="text-sm text-white/55 font-medium">Company Brain is Enterprise-only</p>
           <p className="text-xs text-white/30 mt-0.5 leading-relaxed">
-            Role brains, Skills API, and agent-ready org knowledge require Enterprise Pro or Max.
-            Free and Personal plans get full individual clone features.
+            Role brains, Skills API, org intelligence feed, and agent-ready org knowledge require Enterprise Pro or Max.
+            Free and Personal plans get the full individual clone.
           </p>
         </div>
         <Link
-          href="mailto:team@doppel.ai"
+          href="/contact"
           className="glass-md hover:glass-hi rounded-xl px-5 py-2 text-sm text-white/60 hover:text-white/80 transition-all whitespace-nowrap shrink-0"
         >
           Talk to us →
@@ -1005,23 +1115,11 @@ function Footer() {
           <p className="text-xs text-white/20 mt-1">Knowledge shouldn&apos;t have a lifespan.</p>
         </div>
         <div className="flex items-center gap-6">
-          <a href="/privacy" className="text-xs text-white/25 hover:text-white/50 transition-colors">
-            Privacy
-          </a>
-          <a href="/terms" className="text-xs text-white/25 hover:text-white/50 transition-colors">
-            Terms
-          </a>
-          <a
-            href="https://github.com"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-xs text-white/25 hover:text-white/50 transition-colors flex items-center gap-1"
-          >
-            GitHub
-            <ArrowUpRight className="w-2.5 h-2.5" />
-          </a>
+          <Link href="/contact" className="text-xs text-white/25 hover:text-white/50 transition-colors">Contact</Link>
+          <a href="/privacy" className="text-xs text-white/25 hover:text-white/50 transition-colors">Privacy</a>
+          <a href="/terms" className="text-xs text-white/25 hover:text-white/50 transition-colors">Terms</a>
         </div>
-        <p className="text-xs text-white/20">&copy; 2026 Doppel. All rights reserved.</p>
+        <p className="text-xs text-white/20">&copy; 2026 Doppel AI, Inc.</p>
       </div>
     </footer>
   );
@@ -1036,7 +1134,8 @@ export default function LandingPage() {
     <main className="relative overflow-x-hidden">
       <Nav />
       <HeroSection />
-      <ProblemSection />
+      <ForIndividualsSection />
+      <ForTeamsSection />
       <ScrollSection />
       <FeaturesSection />
       <CompanyBrainSection />

@@ -27,6 +27,7 @@ import hashlib
 import hmac
 import io
 import json
+import logging
 import os
 import pathlib
 import secrets
@@ -34,8 +35,10 @@ from contextlib import asynccontextmanager
 from datetime import date, timedelta
 from uuid import UUID, uuid4
 
+_log = logging.getLogger(__name__)
+
 import httpx
-from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Query, Request
+from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from sqlalchemy import text as sql_text
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse, StreamingResponse
@@ -59,6 +62,9 @@ from doppel.ingestion.connectors.gmail import (
     GmailConnector,
     get_auth_url,
     handle_callback,
+    send_email as gmail_send_email,
+    setup_watch as gmail_setup_watch,
+    fetch_messages_since as gmail_fetch_since,
 )
 from doppel.ingestion.pipeline import IngestionPipeline
 from doppel.ingestion.status import create_job, get_job_status
@@ -81,10 +87,14 @@ async def lifespan(app: FastAPI):
     _log = logging.getLogger(__name__)
     try:
         schema_sql = _SCHEMA_FILE.read_text()
-        # Strip comments and split into individual statements
+        # Strip comment lines, then split into individual statements
+        stripped_lines = "\n".join(
+            line for line in schema_sql.splitlines()
+            if not line.strip().startswith("--")
+        )
         statements = [
-            s.strip() for s in schema_sql.split(";")
-            if s.strip() and not s.strip().startswith("--")
+            s.strip() for s in stripped_lines.split(";")
+            if s.strip()
         ]
         # Use AUTOCOMMIT so each statement is its own transaction —
         # a failed statement doesn't abort subsequent ones.
@@ -332,7 +342,8 @@ async def create_clone(
     except Exception as e:
         if "unique" in str(e).lower():
             raise HTTPException(status_code=409, detail="handle already taken")
-        raise HTTPException(status_code=500, detail=str(e))
+        _log.error("clone creation failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
     return {"clone_id": str(clone_id), "handle": body.handle}
 
@@ -412,7 +423,7 @@ async def update_clone(
 ) -> dict:
     """Update clone fields (access_mode, display_name). Caller must be owner (enforced by Next.js proxy)."""
 
-    allowed = {"access_mode", "display_name", "allowed_emails"}
+    allowed = {"access_mode", "display_name", "allowed_emails", "is_onboarding_resource", "expertise_tags"}
     updates = {k: v for k, v in body.items() if k in allowed}
     if not updates:
         raise HTTPException(status_code=422, detail="No valid fields to update")
@@ -420,26 +431,27 @@ async def update_clone(
     if "access_mode" in updates and updates["access_mode"] not in ("private", "allowlist", "public", "org_scoped"):
         raise HTTPException(status_code=422, detail="access_mode must be private | allowlist | public")
 
-    if "allowed_emails" in updates:
-        # Store as Postgres array literal
-        emails = [str(e).lower().strip() for e in (updates["allowed_emails"] or [])]
-        set_parts = [f"{k} = :{k}" for k in updates if k != "allowed_emails"]
-        set_parts.append("allowed_emails = :allowed_emails_arr")
-        set_clause = ", ".join(set_parts)
-        updates_exec = {k: v for k, v in updates.items() if k != "allowed_emails"}
-        updates_exec["handle"] = handle
-        updates_exec["allowed_emails_arr"] = emails
-        await session.execute(
-            sql_text(f"UPDATE clone_identity SET {set_clause}, updated_at = NOW() WHERE handle = :handle"),
-            updates_exec,
-        )
-    else:
-        set_clause = ", ".join(f"{k} = :{k}" for k in updates)
-        updates["handle"] = handle
-        await session.execute(
-            sql_text(f"UPDATE clone_identity SET {set_clause}, updated_at = NOW() WHERE handle = :handle"),
-            updates,
-        )
+    # Build SET clause — handle Postgres array fields specially
+    set_parts = []
+    updates_exec: dict = {}
+    for k, v in updates.items():
+        if k == "allowed_emails":
+            emails = [str(e).lower().strip() for e in (v or [])]
+            set_parts.append("allowed_emails = :allowed_emails_arr")
+            updates_exec["allowed_emails_arr"] = emails
+        elif k == "expertise_tags":
+            tags = [str(t).strip() for t in (v or [])]
+            set_parts.append("expertise_tags = :expertise_tags_arr")
+            updates_exec["expertise_tags_arr"] = tags
+        else:
+            set_parts.append(f"{k} = :{k}")
+            updates_exec[k] = v
+    set_clause = ", ".join(set_parts)
+    updates_exec["handle"] = handle
+    await session.execute(
+        sql_text(f"UPDATE clone_identity SET {set_clause}, updated_at = NOW() WHERE handle = :handle"),
+        updates_exec,
+    )
     await session.commit()
     return {"status": "updated"}
 
@@ -620,7 +632,8 @@ async def chat(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Brain error: {e}")
+        _log.error("brain.process failed clone_id=%s: %s", body.clone_id, e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Brain processing error")
 
 
 # ---------------------------------------------------------------------------
@@ -1170,6 +1183,29 @@ async def admin_set_plan(
     return {"ok": True, "user_id": clerk_user_id, "tier": tier}
 
 
+@app.post("/admin/migrate")
+async def admin_run_migration() -> dict:
+    """Force re-run the DB schema migration without restarting."""
+    from doppel.brain.db.connection import engine
+    schema_sql = _SCHEMA_FILE.read_text()
+    stripped_lines = "\n".join(
+        line for line in schema_sql.splitlines()
+        if not line.strip().startswith("--")
+    )
+    statements = [s.strip() for s in stripped_lines.split(";") if s.strip()]
+    ok, skipped, errors = 0, 0, []
+    async with engine.connect() as conn:
+        await conn.execution_options(isolation_level="AUTOCOMMIT")
+        for stmt in statements:
+            try:
+                await conn.execute(sql_text(stmt))
+                ok += 1
+            except Exception as e:
+                skipped += 1
+                errors.append(f"{type(e).__name__}: {stmt[:80]}")
+    return {"applied": ok, "skipped": skipped, "errors": errors[-20:]}
+
+
 @app.get("/admin/users")
 async def admin_list_users(
     caller_user_id: str = Query(...),
@@ -1319,6 +1355,169 @@ async def _run_gmail_ingestion(
             job_id=job_id,
             clone_name=clone_name,
         )
+
+
+# ---------------------------------------------------------------------------
+# Ingestion — Gmail Push (Pub/Sub watch + webhook)
+# ---------------------------------------------------------------------------
+
+@app.post("/ingestion/gmail/watch")
+async def gmail_watch(
+    clone_id: UUID = Query(...),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Subscribe the clone's Gmail inbox to Pub/Sub push notifications."""
+    if not settings.gmail_pubsub_topic:
+        raise HTTPException(status_code=503, detail="GMAIL_PUBSUB_TOPIC not configured.")
+    try:
+        result = await gmail_setup_watch(clone_id, settings.gmail_pubsub_topic, session)
+    except Exception as e:
+        _log.error("gmail_watch failed for clone %s: %s", clone_id, e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to set up Gmail watch")
+    import datetime as _dt
+    expiry_ts = result.get("expiration")
+    expires_at = (
+        _dt.datetime.fromtimestamp(int(expiry_ts) / 1000, tz=_dt.timezone.utc).isoformat()
+        if expiry_ts
+        else None
+    )
+    return {"watch_active": True, "expires_at": expires_at}
+
+
+@app.post("/ingestion/gmail/push-event", status_code=200)
+async def gmail_push_event(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """
+    Receive Google Cloud Pub/Sub push notifications for new Gmail messages.
+    Authenticates via Bearer token in Authorization header.
+    Auto-generates a draft for each new inbound email.
+    """
+    # Verify Pub/Sub token
+    if settings.pubsub_verification_token:
+        auth_header = request.headers.get("Authorization", "")
+        expected = f"Bearer {settings.pubsub_verification_token}"
+        if auth_header != expected:
+            raise HTTPException(status_code=403, detail="Invalid Pub/Sub token")
+
+    try:
+        payload = await request.json()
+    except Exception:
+        return {"status": "ok"}  # Always return 200 to avoid Pub/Sub retries on bad payloads
+
+    # Decode Pub/Sub message
+    try:
+        message_b64 = payload.get("message", {}).get("data", "")
+        import base64 as _b64
+        notification = json.loads(_b64.b64decode(message_b64 + "==").decode("utf-8"))
+        gmail_address: str = notification.get("emailAddress", "")
+        history_id: str = str(notification.get("historyId", ""))
+    except Exception:
+        return {"status": "ok"}
+
+    if not gmail_address or not history_id:
+        return {"status": "ok"}
+
+    # Look up clone by Gmail address stored in oauth_tokens metadata
+    result = await session.execute(
+        sql_text("""
+            SELECT clone_id FROM oauth_tokens
+            WHERE provider = 'gmail'
+              AND (metadata->>'email') = :email
+        """),
+        {"email": gmail_address},
+    )
+    row = result.mappings().first()
+    if not row:
+        return {"status": "ok"}  # Unknown clone — ignore
+
+    clone_id = UUID(str(row["clone_id"]))
+    background_tasks.add_task(_process_push_emails, clone_id, history_id)
+    return {"status": "ok"}
+
+
+async def _process_push_emails(clone_id: UUID, history_id: str) -> None:
+    """Background: fetch new emails and generate drafts for each one."""
+    from doppel.brain.db.connection import AsyncSessionLocal
+    async with AsyncSessionLocal() as session:
+        try:
+            messages = await gmail_fetch_since(clone_id, history_id, session)
+            for msg in messages:
+                await _generate_and_store_draft(
+                    clone_id=clone_id,
+                    sender=msg["sender"],
+                    sender_email=msg["sender_email"],
+                    subject=msg["subject"],
+                    body=msg["body"],
+                    thread_id=msg.get("thread_id"),
+                    session=session,
+                )
+        except Exception as e:
+            _log.error("_process_push_emails failed clone=%s: %s", clone_id, e, exc_info=True)
+
+
+async def _generate_and_store_draft(
+    clone_id: UUID,
+    sender: str,
+    sender_email: str,
+    subject: str,
+    body: str,
+    thread_id: str | None,
+    session: AsyncSession,
+) -> str:
+    """Shared logic: generate a brain draft and store it. Returns draft_id."""
+    row = await session.execute(
+        sql_text("SELECT display_name FROM clone_identity WHERE clone_id = :cid"),
+        {"cid": str(clone_id)},
+    )
+    record = row.mappings().first()
+    if not record:
+        raise ValueError(f"Clone {clone_id} not found")
+    display_name = record["display_name"]
+
+    await load_clone_keys(session, clone_id)
+    brain = DoppelBrain(session=session, clone_id=clone_id)
+    prompt = (
+        f"You received an email from {sender} <{sender_email}>.\n"
+        f"Subject: {subject}\n\n"
+        f"Email body:\n{body}\n\n"
+        f"Draft a reply as {display_name}. Be concise and authentic to their voice. "
+        f"Do not include a subject line or greeting — just the reply body."
+    )
+    brain_input = BrainInput(
+        clone_id=clone_id,
+        message=prompt,
+        context_type="email_draft",
+        metadata={"subject": subject, "sender": sender},
+    )
+    result = await brain.process(brain_input)
+    trace_id = str(result.reasoning_trace_id) if result.reasoning_trace_id else None
+
+    insert = await session.execute(
+        sql_text("""
+            INSERT INTO email_drafts
+                (clone_id, sender, sender_email, subject, body, thread_id, draft, reasoning, trace_id)
+            VALUES
+                (:cid, :sender, :sender_email, :subject, :body, :thread_id, :draft, :reasoning, :trace_id)
+            RETURNING id
+        """),
+        {
+            "cid": str(clone_id),
+            "sender": sender,
+            "sender_email": sender_email,
+            "subject": subject,
+            "body": body,
+            "thread_id": thread_id,
+            "draft": result.response.strip(),
+            "reasoning": f"Drafted based on email from {sender} about '{subject}'.",
+            "trace_id": trace_id,
+        },
+    )
+    draft_id = str(insert.scalar())
+    await session.commit()
+    return draft_id
 
 
 # ---------------------------------------------------------------------------
@@ -1671,7 +1870,10 @@ async def ingest_file(
     from datetime import datetime, timezone
     import uuid as _uuid
 
-    content = await file.read()
+    _MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 20 MB
+    content = await file.read(_MAX_UPLOAD_BYTES + 1)
+    if len(content) > _MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="File exceeds 20 MB limit.")
     filename = file.filename or "upload"
 
     try:
@@ -2189,274 +2391,168 @@ async def update_memory(
 
 import httpx as _httpx
 
-def _recall_headers() -> dict:
-    if not get_recall_key():
-        raise HTTPException(status_code=503, detail="Meeting bot not configured — set RECALL_API_KEY")
-    return {
-        "Authorization": f"Token {get_recall_key()}",
-        "Content-Type": "application/json",
-    }
-
-def _detect_platform(url: str) -> str:
-    if "zoom.us" in url or "zoom.com" in url:
-        return "zoom"
-    if "meet.google.com" in url:
-        return "meet"
-    if "teams.microsoft.com" in url or "teams.live.com" in url:
-        return "teams"
-    return "zoom"
-
-
-class MeetingJoinRequest(BaseModel):
-    clone_id: UUID
-    meeting_url: str
-
-
-@app.post("/meetings/join")
-async def join_meeting(
-    body: MeetingJoinRequest,
-    session: AsyncSession = Depends(get_session),
-) -> dict:
-    """Send a Recall.ai bot to join a meeting on behalf of the clone."""
-
-    # Look up clone display name for the bot
-    row = await session.execute(
-        sql_text("SELECT display_name FROM clone_identity WHERE clone_id = :cid"),
-        {"cid": str(body.clone_id)},
-    )
-    record = row.mappings().first()
-    if not record:
-        raise HTTPException(status_code=404, detail="Clone not found")
-
-    display_name = record["display_name"]
-    platform = _detect_platform(body.meeting_url)
-    webhook_url = f"{settings.app_url}/api/meetings/webhook"
-
-    bot_payload = {
-        "meeting_url": body.meeting_url,
-        "bot_name": f"{display_name}'s Doppel",
-        "transcription_options": {"provider": "assembly_ai"},
-        "real_time_transcription": {
-            "destination_url": webhook_url,
-            "partial_results": False,
-        },
-        "chat": {
-            "on_bot_join": {
-                "send_to": "everyone",
-                "message": (
-                    f"Hi! I'm {display_name}'s Doppel clone. "
-                    f"Mention \"{display_name}\" in your message to ask me anything."
-                ),
-            }
-        },
-    }
-
-    async with _httpx.AsyncClient(timeout=30) as client:
-        resp = await client.post(
-            f"{settings.recall_api_base}/bot/",
-            headers=_recall_headers(),
-            json=bot_payload,
-        )
-    if not resp.is_success:
-        raise HTTPException(status_code=502, detail=f"Recall.ai error: {resp.text}")
-
-    bot_data = resp.json()
-    bot_id = bot_data["id"]
-
-    # Store session
-    await session.execute(
-        sql_text("""
-            INSERT INTO meeting_sessions
-                (bot_id, clone_id, meeting_url, meeting_platform, status)
-            VALUES (:bot_id, :cid, :url, :platform, 'joining')
-        """),
-        {"bot_id": bot_id, "cid": str(body.clone_id), "url": body.meeting_url, "platform": platform},
-    )
-    await session.commit()
-
-    return {"bot_id": bot_id, "status": "joining", "platform": platform}
-
-
-@app.post("/meetings/webhook")
-async def meeting_webhook(
-    request: Request,
-    background_tasks: BackgroundTasks,
-    session: AsyncSession = Depends(get_session),
-) -> dict:
-    """Receive real-time transcription events from Recall.ai."""
-
-    payload = await request.json()
-    event = payload.get("event", "")
-    data = payload.get("data", {})
-    bot_id = data.get("bot_id") or data.get("id")
-
-    if not bot_id:
-        return {"ok": True}
-
-    if event == "bot.status_change":
-        code = (data.get("status") or {}).get("code", "")
-        status_map = {
-            "joining_call": "joining",
-            "in_call_not_recording": "in_call",
-            "in_call_recording": "in_call",
-            "call_ended": "ended",
-            "fatal_error": "error",
-            "done": "ended",
-        }
-        new_status = status_map.get(code, "joining")
-        ended_at_sql = ", ended_at = NOW()" if new_status in ("ended", "error") else ""
-        await session.execute(
-            sql_text(
-                f"UPDATE meeting_sessions SET status = :status{ended_at_sql} WHERE bot_id = :bid"
-            ),
-            {"status": new_status, "bid": bot_id},
-        )
-        await session.commit()
-
-    elif event == "transcript.data":
-        transcript_entry = data.get("transcript", {})
-        speaker = transcript_entry.get("speaker", "Unknown")
-        words = transcript_entry.get("words", [])
-        text = " ".join(w.get("text", "") for w in words).strip()
-        if not text:
-            return {"ok": True}
-
-        # Append to transcript buffer
-        import datetime as _dt
-        entry = {"speaker": speaker, "text": text, "ts": _dt.datetime.utcnow().isoformat()}
-        await session.execute(
-            sql_text("""
-                UPDATE meeting_sessions
-                SET transcript = transcript || CAST(:entry AS jsonb)
-                WHERE bot_id = :bid
-            """),
-            {"entry": json.dumps([entry]), "bid": bot_id},
-        )
-        await session.commit()
-
-        # Check for trigger: clone name mentioned
-        row = await session.execute(
-            sql_text("""
-                SELECT ms.clone_id, ci.display_name, ms.transcript
-                FROM meeting_sessions ms
-                JOIN clone_identity ci ON ci.clone_id = ms.clone_id
-                WHERE ms.bot_id = :bid
-            """),
-            {"bid": bot_id},
-        )
-        record = row.mappings().first()
-        if not record:
-            return {"ok": True}
-
-        clone_id = str(record["clone_id"])
-        display_name: str = record["display_name"]
-        first_name = display_name.split()[0]
-
-        # Simple trigger: speaker mentions the clone's name
-        name_mentioned = (
-            first_name.lower() in text.lower()
-            or display_name.lower() in text.lower()
-            or "doppel" in text.lower()
-        )
-        if name_mentioned:
-            background_tasks.add_task(
-                _respond_in_meeting,
-                bot_id=bot_id,
-                clone_id=clone_id,
-                display_name=display_name,
-                question_text=text,
-                transcript=list(record["transcript"] or []),
-                session_factory=AsyncSessionLocal,
-            )
-
-    return {"ok": True}
-
-
-async def _respond_in_meeting(
-    bot_id: str,
+@app.websocket("/meetings/stream")
+async def meeting_stream_ws(
+    websocket: WebSocket,
     clone_id: str,
-    display_name: str,
-    question_text: str,
-    transcript: list,
-    session_factory,
+    platform: str = "zoom",
 ) -> None:
-    """Background task: query the brain and post a chat message in the meeting."""
+    """
+    WebSocket endpoint for browser-based meeting transcription.
+
+    Browser sends: {"type": "transcript", "speaker": "You", "text": "...", "is_final": true}
+    Server sends:  {"type": "transcript_ack"}
+                   {"type": "response", "question": "...", "answer": "...", "ts": "..."}
+                   {"type": "session_started", "session_id": "..."}
+                   {"type": "error", "message": "..."}
+    """
+    import datetime as _dt
+    import uuid as _uuid_mod
+
+    await websocket.accept()
+
+    session_id = str(_uuid_mod.uuid4())
+
+    # Verify clone exists
+    async with AsyncSessionLocal() as db:
+        row = await db.execute(
+            sql_text("SELECT display_name FROM clone_identity WHERE clone_id = :cid"),
+            {"cid": clone_id},
+        )
+        rec = row.mappings().first()
+    if not rec:
+        await websocket.send_json({"type": "error", "message": "Clone not found"})
+        await websocket.close()
+        return
+
+    display_name: str = rec["display_name"]
+    first_name = display_name.split()[0]
+
+    # Create session record
+    async with AsyncSessionLocal() as db:
+        await db.execute(
+            sql_text("""
+                INSERT INTO meeting_sessions
+                    (bot_id, clone_id, meeting_url, meeting_platform, status)
+                VALUES (:sid, :cid, :url, :platform, 'in_call')
+            """),
+            {"sid": session_id, "cid": clone_id, "url": f"local://{platform}", "platform": platform},
+        )
+        await db.commit()
+
+    await websocket.send_json({"type": "session_started", "session_id": session_id})
+
     try:
-        # Build context from last 2 minutes of transcript
-        recent = transcript[-30:] if len(transcript) > 30 else transcript
-        context_lines = [f"{e['speaker']}: {e['text']}" for e in recent]
-        meeting_context = "\n".join(context_lines)
+        while True:
+            data = await websocket.receive_json()
 
-        from doppel.brain.models.types import BrainInput
-        async with session_factory() as db:
-            await load_clone_keys(db, UUID(clone_id))
-            brain = DoppelBrain(session=db, clone_id=UUID(clone_id))
-            brain_input = BrainInput(
-                clone_id=UUID(clone_id),
-                message=question_text,
-                context_type="meeting",
-                metadata={
-                    "meeting_context": meeting_context,
-                    "platform": "zoom",
-                },
+            if data.get("type") != "transcript":
+                continue
+
+            text: str = (data.get("text") or "").strip()
+            if not text:
+                continue
+
+            speaker: str = data.get("speaker") or "You"
+            ts = _dt.datetime.utcnow().isoformat()
+            entry = {"speaker": speaker, "text": text, "ts": ts}
+
+            # Persist transcript line
+            async with AsyncSessionLocal() as db:
+                await db.execute(
+                    sql_text("""
+                        UPDATE meeting_sessions
+                        SET transcript = transcript || CAST(:entry AS jsonb)
+                        WHERE bot_id = :sid
+                    """),
+                    {"entry": json.dumps([entry]), "sid": session_id},
+                )
+                await db.commit()
+
+            # Check trigger
+            triggered = (
+                first_name.lower() in text.lower()
+                or display_name.lower() in text.lower()
+                or "doppel" in text.lower()
             )
-            result = await brain.process(brain_input)
-            full_response = result.response
+            if not triggered:
+                continue
 
-        if not full_response.strip():
-            return
+            # Query clone brain
+            try:
+                async with AsyncSessionLocal() as db:
+                    trow = await db.execute(
+                        sql_text("SELECT transcript FROM meeting_sessions WHERE bot_id = :sid"),
+                        {"sid": session_id},
+                    )
+                    trec = trow.mappings().first()
+                    recent = list((trec["transcript"] if trec else None) or [])[-30:]
 
-        # Prefix the response
-        message = f"[{display_name}'s Doppel] {full_response.strip()}"
+                context = "\n".join(f"{e['speaker']}: {e['text']}" for e in recent)
 
-        # Post to Recall.ai meeting chat
-        async with _httpx.AsyncClient(timeout=30) as client:
-            await client.post(
-                f"{settings.recall_api_base}/bot/{bot_id}/send_chat_message/",
-                headers=_recall_headers(),
-                json={"message": message},
-            )
+                from doppel.brain.models.types import BrainInput
+                async with AsyncSessionLocal() as db:
+                    await load_clone_keys(db, UUID(clone_id))
+                    brain = DoppelBrain(session=db, clone_id=UUID(clone_id))
+                    result = await brain.process(BrainInput(
+                        clone_id=UUID(clone_id),
+                        message=text,
+                        context_type="meeting",
+                        metadata={"meeting_context": context, "platform": platform},
+                    ))
 
-        # Store the response
-        import datetime as _dt
-        response_entry = {
-            "question": question_text,
-            "answer": full_response.strip(),
-            "ts": _dt.datetime.utcnow().isoformat(),
-        }
-        async with session_factory() as db:
+                if not result.response.strip():
+                    continue
+
+                response_entry = {
+                    "question": text,
+                    "answer": result.response.strip(),
+                    "ts": _dt.datetime.utcnow().isoformat(),
+                }
+
+                async with AsyncSessionLocal() as db:
+                    await db.execute(
+                        sql_text("""
+                            UPDATE meeting_sessions
+                            SET responses = responses || CAST(:entry AS jsonb)
+                            WHERE bot_id = :sid
+                        """),
+                        {"entry": json.dumps([response_entry]), "sid": session_id},
+                    )
+                    await db.commit()
+
+                await websocket.send_json({"type": "response", **response_entry})
+
+            except Exception as exc:
+                _log.error("Meeting brain error: %s", exc)
+                await websocket.send_json({"type": "error", "message": "Brain unavailable — try again"})
+
+    except WebSocketDisconnect:
+        pass
+    except Exception as exc:
+        _log.error("Meeting WebSocket error: %s", exc)
+    finally:
+        async with AsyncSessionLocal() as db:
             await db.execute(
-                sql_text("""
-                    UPDATE meeting_sessions
-                    SET responses = responses || CAST(:entry AS jsonb)
-                    WHERE bot_id = :bid
-                """),
-                {"entry": json.dumps([response_entry]), "bid": bot_id},
+                sql_text(
+                    "UPDATE meeting_sessions SET status = 'ended', ended_at = NOW() WHERE bot_id = :sid"
+                ),
+                {"sid": session_id},
             )
             await db.commit()
-    except Exception as exc:
-        import logging
-        logging.getLogger(__name__).error("Meeting response error: %s", exc)
 
 
-@app.post("/meetings/{bot_id}/leave")
+@app.post("/meetings/{session_id}/leave")
 async def leave_meeting(
-    bot_id: str,
+    session_id: str,
     session: AsyncSession = Depends(get_session),
 ) -> dict:
-    """Kick the bot from the meeting."""
-
-    async with _httpx.AsyncClient(timeout=15) as client:
-        resp = await client.delete(
-            f"{settings.recall_api_base}/bot/{bot_id}/",
-            headers=_recall_headers(),
-        )
-    # Even if Recall returns an error, mark locally as ended
+    """End a meeting session (marks as ended in DB)."""
     await session.execute(
         sql_text(
-            "UPDATE meeting_sessions SET status = 'ended', ended_at = NOW() WHERE bot_id = :bid"
+            "UPDATE meeting_sessions SET status = 'ended', ended_at = NOW() WHERE bot_id = :sid"
         ),
-        {"bid": bot_id},
+        {"sid": session_id},
     )
     await session.commit()
     return {"status": "ended"}
@@ -2552,62 +2648,26 @@ async def generate_email_draft(
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     """Generate a draft reply for an email using the clone brain. Store it as pending."""
+    try:
+        draft_id = await _generate_and_store_draft(
+            clone_id=body.clone_id,
+            sender=body.sender,
+            sender_email=body.sender_email,
+            subject=body.subject,
+            body=body.body,
+            thread_id=body.thread_id,
+            session=session,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
-    # Look up clone name
+    # Fetch back the stored draft text for the response
     row = await session.execute(
-        sql_text("SELECT display_name FROM clone_identity WHERE clone_id = :cid"),
-        {"cid": str(body.clone_id)},
+        sql_text("SELECT draft, reasoning FROM email_drafts WHERE id = :id"),
+        {"id": draft_id},
     )
-    record = row.mappings().first()
-    if not record:
-        raise HTTPException(status_code=404, detail="Clone not found")
-    display_name = record["display_name"]
-
-    await load_clone_keys(session, body.clone_id)
-    brain = DoppelBrain(session=session, clone_id=body.clone_id)
-
-    prompt = (
-        f"You received an email from {body.sender} <{body.sender_email}>.\n"
-        f"Subject: {body.subject}\n\n"
-        f"Email body:\n{body.body}\n\n"
-        f"Draft a reply as {display_name}. Be concise and authentic to their voice. "
-        f"Do not include a subject line or greeting — just the reply body."
-    )
-
-    brain_input = BrainInput(
-        clone_id=body.clone_id,
-        message=prompt,
-        context_type="email_draft",
-        metadata={"subject": body.subject, "sender": body.sender},
-    )
-
-    result = await brain.process(brain_input)
-    draft_text = result.response
-
-    reasoning = f"Drafted based on email from {body.sender} about '{body.subject}'."
-
-    insert = await session.execute(
-        sql_text("""
-            INSERT INTO email_drafts
-                (clone_id, sender, sender_email, subject, body, thread_id, draft, reasoning)
-            VALUES
-                (:cid, :sender, :sender_email, :subject, :body, :thread_id, :draft, :reasoning)
-            RETURNING id
-        """),
-        {
-            "cid": str(body.clone_id),
-            "sender": body.sender,
-            "sender_email": body.sender_email,
-            "subject": body.subject,
-            "body": body.body,
-            "thread_id": body.thread_id,
-            "draft": draft_text.strip(),
-            "reasoning": reasoning,
-        },
-    )
-    draft_id = str(insert.scalar())
-    await session.commit()
-    return {"draft_id": draft_id, "draft": draft_text.strip(), "reasoning": reasoning}
+    r = row.mappings().first()
+    return {"draft_id": draft_id, "draft": r["draft"] if r else "", "reasoning": r["reasoning"] if r else ""}
 
 
 @app.get("/email/drafts")
@@ -2668,10 +2728,19 @@ async def review_email_draft(
     body: EmailDraftReviewRequest,
     session: AsyncSession = Depends(get_session),
 ) -> dict:
-    """Mark a draft as approved, edited, or rejected."""
+    """Mark a draft as approved, edited, or rejected. Wires feedback to learning loop."""
 
     if body.status not in ("approved", "edited", "rejected"):
         raise HTTPException(status_code=422, detail="status must be approved, edited, or rejected")
+
+    # Fetch trace_id and clone_id before update for learning loop
+    meta_row = await session.execute(
+        sql_text("SELECT trace_id, clone_id FROM email_drafts WHERE id = :id"),
+        {"id": str(draft_id)},
+    )
+    meta = meta_row.mappings().first()
+    if not meta:
+        raise HTTPException(status_code=404, detail="Draft not found")
 
     result = await session.execute(
         sql_text("""
@@ -2686,7 +2755,70 @@ async def review_email_draft(
     if result.rowcount == 0:
         raise HTTPException(status_code=404, detail="Draft not found")
     await session.commit()
+
+    # Wire feedback into DPO learning pipeline if we have a trace
+    if meta["trace_id"]:
+        signal_map = {"approved": "approve", "edited": "edit", "rejected": "reject"}
+        try:
+            from doppel.brain.learning.feedback import record_feedback
+            await record_feedback(
+                session,
+                FeedbackSignal(
+                    trace_id=UUID(str(meta["trace_id"])),
+                    clone_id=UUID(str(meta["clone_id"])),
+                    signal_type=signal_map[body.status],
+                    corrected_response=body.edited_version if body.status == "edited" else None,
+                ),
+            )
+        except Exception as e:
+            _log.warning("Email draft feedback recording failed: %s", e)
+
     return {"status": body.status}
+
+
+@app.post("/email/drafts/{draft_id}/send")
+async def send_email_draft(
+    draft_id: UUID,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Send an approved or edited draft via Gmail API."""
+    row = await session.execute(
+        sql_text("""
+            SELECT clone_id, sender_email, subject, draft, edited_version, status, thread_id
+            FROM email_drafts WHERE id = :id
+        """),
+        {"id": str(draft_id)},
+    )
+    draft = row.mappings().first()
+    if not draft:
+        raise HTTPException(status_code=404, detail="Draft not found")
+    if draft["status"] not in ("approved", "edited"):
+        raise HTTPException(status_code=422, detail="Draft must be approved or edited before sending")
+
+    final_text = draft["edited_version"] if draft["status"] == "edited" else draft["draft"]
+    subject = draft["subject"]
+    if not subject.lower().startswith("re:"):
+        subject = f"Re: {subject}"
+
+    try:
+        await gmail_send_email(
+            clone_id=UUID(str(draft["clone_id"])),
+            to=draft["sender_email"],
+            subject=subject,
+            body=final_text,
+            thread_id=draft["thread_id"],
+            session=session,
+        )
+    except Exception as e:
+        _log.error("Gmail send failed draft_id=%s: %s", draft_id, e, exc_info=True)
+        raise HTTPException(status_code=502, detail="Failed to send email via Gmail")
+
+    await session.execute(
+        sql_text("UPDATE email_drafts SET status = 'sent', reviewed_at = COALESCE(reviewed_at, NOW()) WHERE id = :id"),
+        {"id": str(draft_id)},
+    )
+    await session.commit()
+    return {"sent": True}
 
 
 # ---------------------------------------------------------------------------
@@ -2889,7 +3021,8 @@ async def create_org(
     except Exception as e:
         if "unique" in str(e).lower():
             raise HTTPException(status_code=409, detail="Org slug already taken")
-        raise HTTPException(status_code=500, detail=str(e))
+        _log.error("org creation failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
     return {"org_id": str(org["id"]), "name": body.name, "slug": body.slug}
 
@@ -2948,7 +3081,8 @@ async def get_org_members(
     members_row = await session.execute(
         sql_text("""
             SELECT m.user_id, m.role, m.joined_at,
-                   c.clone_id, c.display_name, c.handle, c.access_mode
+                   c.clone_id, c.display_name, c.handle, c.access_mode,
+                   COALESCE(c.is_onboarding_resource, FALSE) AS is_onboarding_resource
             FROM org_memberships m
             LEFT JOIN clone_identity c ON c.clone_id = m.clone_id
             WHERE m.org_id = :oid
@@ -2966,11 +3100,111 @@ async def get_org_members(
                 "display_name": r["display_name"],
                 "handle": r["handle"],
                 "access_mode": r["access_mode"],
+                "is_onboarding_resource": bool(r["is_onboarding_resource"]),
             } if r["clone_id"] else None,
         }
         for r in members_row.mappings().all()
     ]
     return {"members": members, "org_id": str(org_id)}
+
+
+class UpdateMemberRoleRequest(BaseModel):
+    admin_user_id: str   # must be org admin
+    target_user_id: str
+    new_role: str        # 'admin' | 'member'
+
+
+@app.patch("/org/members/role")
+async def update_member_role(
+    body: UpdateMemberRoleRequest,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Change a member's role. Only org admins can do this."""
+    if body.new_role not in ("admin", "member"):
+        raise HTTPException(status_code=422, detail="role must be 'admin' or 'member'")
+
+    # Verify admin_user_id is an org admin
+    admin_row = (await session.execute(
+        sql_text("""
+            SELECT m.org_id, m.role
+            FROM org_memberships m
+            WHERE m.user_id = :uid
+            LIMIT 1
+        """),
+        {"uid": body.admin_user_id},
+    )).mappings().first()
+
+    if not admin_row or admin_row["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Only org admins can change member roles")
+
+    org_id = admin_row["org_id"]
+
+    # Don't allow demoting yourself if you're the only admin
+    if body.admin_user_id == body.target_user_id and body.new_role != "admin":
+        admin_count = (await session.execute(
+            sql_text("SELECT COUNT(*) FROM org_memberships WHERE org_id = :oid AND role = 'admin'"),
+            {"oid": str(org_id)},
+        )).scalar() or 0
+        if admin_count <= 1:
+            raise HTTPException(status_code=409, detail="Cannot demote the only admin")
+
+    result = await session.execute(
+        sql_text("""
+            UPDATE org_memberships
+            SET role = :role
+            WHERE org_id = :org_id AND user_id = :target_uid
+            RETURNING user_id, role
+        """),
+        {"role": body.new_role, "org_id": str(org_id), "target_uid": body.target_user_id},
+    )
+    updated = result.mappings().first()
+    if not updated:
+        raise HTTPException(status_code=404, detail="Member not found in your org")
+
+    await session.commit()
+    return {"status": "updated", "user_id": body.target_user_id, "role": body.new_role}
+
+
+@app.get("/org/knowledge-directory")
+async def get_knowledge_directory(
+    user_id: str = Query(...),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Return org clones marked as onboarding resources, visible to org members."""
+    # Find caller's org
+    org_row = (await session.execute(
+        sql_text("""
+            SELECT m.org_id FROM org_memberships m
+            WHERE m.user_id = :uid LIMIT 1
+        """),
+        {"uid": user_id},
+    )).mappings().first()
+    if not org_row:
+        return {"clones": []}
+
+    org_id = str(org_row["org_id"])
+    rows = await session.execute(
+        sql_text("""
+            SELECT c.clone_id, c.display_name, c.handle, c.expertise_tags, m.role
+            FROM org_memberships m
+            JOIN clone_identity c ON c.clone_id = m.clone_id
+            WHERE m.org_id = :oid
+              AND c.is_onboarding_resource = TRUE
+            ORDER BY c.display_name
+        """),
+        {"oid": org_id},
+    )
+    clones = [
+        {
+            "clone_id": str(r["clone_id"]),
+            "display_name": r["display_name"],
+            "handle": r["handle"],
+            "expertise_tags": list(r["expertise_tags"] or []),
+            "member_role": r["role"],
+        }
+        for r in rows.mappings()
+    ]
+    return {"clones": clones}
 
 
 @app.post("/org/invite")
@@ -2993,6 +3227,115 @@ async def invite_org_member(
     )
     await session.commit()
     return {"status": "invited", "email": body.invited_email}
+
+
+@app.get("/org/pending-invite")
+async def get_pending_invite(
+    email: str = Query(...),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Check if an email has a pending org invite. Returns org info if found."""
+    row = await session.execute(
+        sql_text("""
+            SELECT i.org_id, i.role, i.invited_at,
+                   o.name AS org_name, o.slug AS org_slug
+            FROM org_invites i
+            JOIN orgs o ON o.id = i.org_id
+            WHERE LOWER(i.invited_email) = LOWER(:email)
+            ORDER BY i.invited_at DESC
+            LIMIT 1
+        """),
+        {"email": email},
+    )
+    rec = row.mappings().first()
+    if not rec:
+        return {"invite": None}
+    return {
+        "invite": {
+            "org_id": str(rec["org_id"]),
+            "org_name": rec["org_name"],
+            "org_slug": rec["org_slug"],
+            "role": rec["role"],
+        }
+    }
+
+
+class JoinOrgRequest(BaseModel):
+    user_id: str
+    email: str
+
+
+@app.post("/org/join")
+async def join_org(
+    body: JoinOrgRequest,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Accept a pending invite and add user to the org."""
+    # Find invite
+    inv_row = await session.execute(
+        sql_text("""
+            SELECT i.org_id, i.role, o.name, o.slug, o.owner_user_id
+            FROM org_invites i
+            JOIN orgs o ON o.id = i.org_id
+            WHERE LOWER(i.invited_email) = LOWER(:email)
+            ORDER BY i.invited_at DESC
+            LIMIT 1
+        """),
+        {"email": body.email},
+    )
+    inv = inv_row.mappings().first()
+    if not inv:
+        raise HTTPException(status_code=404, detail="No pending invite found for this email")
+
+    # Check if already a member
+    existing = await session.execute(
+        sql_text("SELECT 1 FROM org_memberships WHERE org_id = :oid AND user_id = :uid"),
+        {"oid": str(inv["org_id"]), "uid": body.user_id},
+    )
+    if existing.first():
+        return {
+            "status": "already_member",
+            "org": {"id": str(inv["org_id"]), "name": inv["name"], "slug": inv["slug"],
+                    "is_owner": inv["owner_user_id"] == body.user_id, "created_at": None},
+        }
+
+    # Get clone_id for this user
+    clone_row = await session.execute(
+        sql_text("SELECT clone_id FROM clone_identity WHERE user_id = :uid LIMIT 1"),
+        {"uid": body.user_id},
+    )
+    clone_rec = clone_row.mappings().first()
+
+    await session.execute(
+        sql_text("""
+            INSERT INTO org_memberships (org_id, user_id, clone_id, role)
+            VALUES (:oid, :uid, :cid, :role)
+            ON CONFLICT (org_id, user_id) DO NOTHING
+        """),
+        {
+            "oid": str(inv["org_id"]),
+            "uid": body.user_id,
+            "cid": str(clone_rec["clone_id"]) if clone_rec else None,
+            "role": inv["role"],
+        },
+    )
+    # Remove the used invite
+    await session.execute(
+        sql_text("DELETE FROM org_invites WHERE org_id = :oid AND LOWER(invited_email) = LOWER(:email)"),
+        {"oid": str(inv["org_id"]), "email": body.email},
+    )
+    await session.commit()
+
+    return {
+        "status": "joined",
+        "org": {
+            "id": str(inv["org_id"]),
+            "name": inv["name"],
+            "slug": inv["slug"],
+            "is_owner": inv["owner_user_id"] == body.user_id,
+            "created_at": None,
+        },
+    }
 
 
 class OrgSearchRequest(BaseModel):
@@ -3183,18 +3526,23 @@ async def v1_clone_chat(
         context_type=body.context_type,  # type: ignore[arg-type]
         metadata=body.metadata,
     )
-    result: BrainOutput = await brain.process(brain_input)
+    try:
+        result: BrainOutput = await brain.process(brain_input)
+    except Exception as e:
+        _log.error("v1_clone_chat brain.process failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Brain processing error: {e}")
+
     return {
         "response": result.response,
-        "confidence": result.confidence,
+        "confidence": float(result.confidence) if result.confidence is not None else None,
         "path_taken": result.path_taken,
-        "needs_escalation": result.needs_escalation,
+        "needs_escalation": bool(result.needs_escalation),
         "sources": [
-            {"content": s.content, "source": s.source, "similarity": s.similarity}
-            for s in result.sources
+            {"content": s.excerpt, "source": s.source, "similarity": float(s.similarity_score) if s.similarity_score is not None else None}
+            for s in (result.sources or [])
         ],
-        "trace_id": result.reasoning_trace_id,
-        "latency_ms": result.latency_ms,
+        "trace_id": str(result.reasoning_trace_id) if result.reasoning_trace_id else None,
+        "latency_ms": int(result.latency_ms) if result.latency_ms is not None else None,
     }
 
 
@@ -3309,6 +3657,7 @@ async def get_identity(
         sql_text("""
             SELECT clone_id, style_fingerprint, value_system,
                    epistemic_profile, admin_policies,
+                   COALESCE(relational_profile, '{}') AS relational_profile,
                    is_preserved, legal_hold_until,
                    retention_days_episodic, retention_days_traces
             FROM clone_identity WHERE user_id = :uid LIMIT 1
@@ -3324,6 +3673,7 @@ async def get_identity(
         "style_fingerprint": rec["style_fingerprint"] or {},
         "value_system": rec["value_system"] or {},
         "epistemic_profile": rec["epistemic_profile"] or {},
+        "relational_profile": rec["relational_profile"] or {},
         "admin_policies": rec["admin_policies"] or {},
         "is_preserved": bool(rec["is_preserved"]),
         "legal_hold_until": rec["legal_hold_until"].isoformat() if rec["legal_hold_until"] else None,
@@ -3345,7 +3695,7 @@ async def patch_identity(
 ) -> dict:
     """Partial-update one identity layer (merges with existing)."""
 
-    allowed = {"style_fingerprint", "value_system", "epistemic_profile"}
+    allowed = {"style_fingerprint", "value_system", "epistemic_profile", "relational_profile"}
     if body.layer not in allowed:
         raise HTTPException(status_code=422, detail=f"layer must be one of: {allowed}")
 
@@ -4067,25 +4417,40 @@ async def create_role_brain(
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     """Create or update a role brain for an org (e.g. 'support_lead', 'incident_commander')."""
-    result = await session.execute(
-        sql_text("""
-            INSERT INTO role_brains (org_id, role_name, description, member_clone_ids)
-            VALUES (:org_id, :role_name, :description, CAST(:ids AS uuid[]))
-            ON CONFLICT (org_id, role_name) DO UPDATE
-              SET description = EXCLUDED.description,
-                  member_clone_ids = EXCLUDED.member_clone_ids,
-                  updated_at = NOW()
-            RETURNING id, org_id, role_name, description, freshness_score, created_at
-        """),
-        {
-            "org_id": str(body.org_id),
-            "role_name": body.role_name,
-            "description": body.description,
-            "ids": "{" + ",".join(str(c) for c in body.member_clone_ids) + "}",
-        },
-    )
-    row = result.mappings().first()
-    await session.commit()
+    # Embed array literal directly — asyncpg mis-infers CAST(:param AS uuid[]) as
+    # a native array binding in INSERT VALUES context, expecting a Python list.
+    # UUIDs are Pydantic-validated so there's no injection risk.
+    ids_literal = "{" + ",".join(str(c) for c in body.member_clone_ids) + "}"
+    try:
+        result = await session.execute(
+            sql_text(f"""
+                INSERT INTO role_brains (org_id, role_name, description, member_clone_ids)
+                VALUES (:org_id, :role_name, :description, '{ids_literal}'::uuid[])
+                ON CONFLICT (org_id, role_name) DO UPDATE
+                  SET description = EXCLUDED.description,
+                      member_clone_ids = EXCLUDED.member_clone_ids
+                RETURNING id, org_id, role_name, description,
+                          COALESCE(freshness_score, 1.0) AS freshness_score, created_at
+            """),
+            {
+                "org_id": str(body.org_id),
+                "role_name": body.role_name,
+                "description": body.description,
+            },
+        )
+        row = result.mappings().first()
+        if not row:
+            raise HTTPException(status_code=422, detail="Org not found — make sure you're in a team workspace")
+        await session.commit()
+    except HTTPException:
+        raise
+    except Exception as e:
+        _log.error("create_role_brain failed org_id=%s: %s", body.org_id, e, exc_info=True)
+        if "foreign key" in str(e).lower() or "violates" in str(e).lower():
+            raise HTTPException(status_code=422, detail="Org not found — make sure you're in a team workspace")
+        if "role_brains" in str(e).lower() and "does not exist" in str(e).lower():
+            raise HTTPException(status_code=503, detail="Database migration pending — restart the backend to apply schema changes")
+        raise HTTPException(status_code=500, detail="Internal server error")
     return {
         "id": str(row["id"]),
         "org_id": str(row["org_id"]),
@@ -4122,26 +4487,29 @@ async def list_role_brains(
         member_ids = list(r["member_clone_ids"] or [])
         member_names: list[str] = []
         if member_ids:
+            ids_lit = "{" + ",".join(str(c) for c in member_ids) + "}"
             names_result = await session.execute(
-                sql_text("""
+                sql_text(f"""
                     SELECT display_name FROM clone_identity
-                    WHERE clone_id = ANY(CAST(:ids AS uuid[]))
+                    WHERE clone_id = ANY('{ids_lit}'::uuid[])
                     ORDER BY display_name
                 """),
-                {"ids": "{" + ",".join(str(c) for c in member_ids) + "}"},
             )
             member_names = [row[0] for row in names_result.fetchall()]
 
+        ks = r["knowledge_summary"]
         output.append({
             "id": str(r["id"]),
             "role_name": r["role_name"],
             "description": r["description"] or "",
             "member_clone_ids": [str(c) for c in member_ids],
             "member_names": member_names,
+            "member_count": len(member_ids),
             "freshness_score": float(r["freshness_score"] or 0),
             "last_extracted_at": r["last_extracted_at"].isoformat() if r["last_extracted_at"] else None,
             "skill_count": int(r["skill_count"] or 0),
-            "has_knowledge": bool(r["knowledge_summary"] and r["knowledge_summary"] != {}),
+            "has_knowledge": bool(ks and ks != {}),
+            "knowledge_summary": ks if (ks and ks != {}) else None,
             "created_at": r["created_at"].isoformat(),
         })
     return output
@@ -4188,13 +4556,14 @@ async def update_role_members(
 ) -> dict:
     """Update the member clones for a role brain."""
     member_ids = body.get("member_clone_ids", [])
+    ids_literal = "{" + ",".join(str(c) for c in member_ids) + "}"
     await session.execute(
-        sql_text("""
+        sql_text(f"""
             UPDATE role_brains
-            SET member_clone_ids = CAST(:ids AS uuid[]), updated_at = NOW()
+            SET member_clone_ids = '{ids_literal}'::uuid[], updated_at = NOW()
             WHERE id = :id
         """),
-        {"ids": "{" + ",".join(str(c) for c in member_ids) + "}", "id": str(role_id)},
+        {"id": str(role_id)},
     )
     await session.commit()
     return {"status": "updated", "member_count": len(member_ids)}
@@ -4225,32 +4594,69 @@ async def extract_role_brain_route(
     if member_ids:
         await load_clone_keys(session, member_ids[0])
 
-    knowledge = await extract_role_knowledge(
-        session=session,
-        org_id=row["org_id"],
-        role_brain_id=role_id,
-        role_name=row["role_name"],
-        member_clone_ids=member_ids,
-    )
+    try:
+        knowledge = await extract_role_knowledge(
+            session=session,
+            org_id=row["org_id"],
+            role_brain_id=role_id,
+            role_name=row["role_name"],
+            member_clone_ids=member_ids,
+        )
+    except Exception as e:
+        _log.error("extract_role_knowledge failed role_id=%s: %s", role_id, e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Knowledge extraction failed — check your Anthropic API key is configured")
 
     if knowledge.get("error"):
         raise HTTPException(status_code=422, detail=knowledge["error"])
 
-    skills = await extract_skills_from_role(
-        session=session,
-        org_id=row["org_id"],
-        role_brain_id=role_id,
-        role_name=row["role_name"],
-        org_name=row["org_name"],
-        knowledge_summary=knowledge,
+    skills_error: str | None = None
+    try:
+        skills = await extract_skills_from_role(
+            session=session,
+            org_id=row["org_id"],
+            role_brain_id=role_id,
+            role_name=row["role_name"],
+            org_name=row["org_name"],
+            knowledge_summary=knowledge,
+        )
+    except Exception as e:
+        _log.error("extract_skills_from_role failed role_id=%s: %s", role_id, e, exc_info=True)
+        skills = []
+        skills_error = str(e)
+
+    knowledge_keys = [k for k, v in knowledge.items() if v]
+    _log.info(
+        "extract result role_id=%s: knowledge_keys=%s parse_error=%s skills=%d error=%s",
+        role_id, knowledge_keys, knowledge.get("parse_error"), len(skills), skills_error,
     )
 
     return {
         "status": "extracted",
         "role_name": row["role_name"],
-        "procedures_found": len(knowledge.get("decision_procedures", [])),
+        "procedures_found": len(knowledge.get("decision_procedures") or []),
         "skills_extracted": len(skills),
+        "knowledge_keys": knowledge_keys,
+        "parse_error": knowledge.get("parse_error", False),
+        "skills_error": skills_error,
     }
+
+
+@app.patch("/org/roles/{role_id}")
+async def rename_role_brain(
+    role_id: UUID,
+    body: dict,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Rename a role brain."""
+    new_name = (body.get("role_name") or "").strip()
+    if not new_name:
+        raise HTTPException(status_code=422, detail="role_name is required")
+    await session.execute(
+        sql_text("UPDATE role_brains SET role_name = :name WHERE id = :id"),
+        {"name": new_name, "id": str(role_id)},
+    )
+    await session.commit()
+    return {"id": str(role_id), "role_name": new_name}
 
 
 @app.delete("/org/roles/{role_id}", status_code=204)
@@ -4764,6 +5170,213 @@ def _guard_preserved(rec: dict, action: str = "modify") -> None:
 
 
 # ---------------------------------------------------------------------------
+# Feature C — Knowledge Handoff
+# ---------------------------------------------------------------------------
+
+@app.post("/clones/{handle}/capture-handoff", status_code=202)
+async def capture_handoff(
+    handle: str,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """
+    Trigger a knowledge handoff capture for a clone.
+    Sets clone as preserved and generates a structured Knowledge Transfer Report.
+    Auth: owner or org admin (enforced by Next.js proxy via X-User-Id header).
+    """
+    triggered_by = request.headers.get("X-User-Id")
+
+    row = await session.execute(
+        sql_text("SELECT clone_id, display_name FROM clone_identity WHERE handle = :h"),
+        {"h": handle},
+    )
+    record = row.mappings().first()
+    if not record:
+        raise HTTPException(status_code=404, detail="Clone not found")
+    clone_id = UUID(str(record["clone_id"]))
+
+    # Mark as preserved immediately
+    await session.execute(
+        sql_text("""
+            UPDATE clone_identity
+            SET is_preserved = TRUE, preserved_at = COALESCE(preserved_at, NOW())
+            WHERE clone_id = :cid
+        """),
+        {"cid": str(clone_id)},
+    )
+
+    # Upsert handoff_reports row
+    await session.execute(
+        sql_text("""
+            INSERT INTO handoff_reports (clone_id, status, triggered_by)
+            VALUES (:cid, 'generating', :tby)
+            ON CONFLICT (clone_id) DO UPDATE
+              SET status = 'generating', triggered_by = EXCLUDED.triggered_by,
+                  generated_at = NULL, created_at = NOW()
+        """),
+        {"cid": str(clone_id), "tby": triggered_by},
+    )
+    await session.commit()
+
+    background_tasks.add_task(_run_handoff_capture, clone_id, triggered_by)
+    return {"status": "generating", "clone_id": str(clone_id)}
+
+
+async def _run_handoff_capture(clone_id: UUID, triggered_by: str | None) -> None:
+    """
+    Background: run full ingestion sweep, then generate Knowledge Transfer Report via brain.
+    """
+    from doppel.brain.db.connection import AsyncSessionLocal
+    import datetime as _dt
+
+    async with AsyncSessionLocal() as session:
+        try:
+            # --- Step 1: full sweep ingestion ---
+            # Gmail
+            gmail_tok = (await session.execute(
+                sql_text("SELECT 1 FROM oauth_tokens WHERE clone_id = :cid AND provider = 'gmail'"),
+                {"cid": str(clone_id)},
+            )).first()
+            if gmail_tok:
+                try:
+                    row = await session.execute(
+                        sql_text("SELECT display_name FROM clone_identity WHERE clone_id = :cid"),
+                        {"cid": str(clone_id)},
+                    )
+                    cname = (row.mappings().first() or {}).get("display_name", "")
+                    from doppel.ingestion.status import create_job
+                    job_id = await create_job(clone_id, "gmail", session)
+                    await _run_gmail_ingestion(clone_id=clone_id, clone_name=cname, job_id=job_id)
+                except Exception as e:
+                    _log.warning("Handoff Gmail sweep failed: %s", e)
+
+            # --- Step 2: query memory stats ---
+            counts = {}
+            for table in ("episodic_memory", "semantic_memory", "procedural_memory", "relational_memory"):
+                n = (await session.execute(
+                    sql_text(f"SELECT COUNT(*) FROM {table} WHERE clone_id = :cid"),
+                    {"cid": str(clone_id)},
+                )).scalar() or 0
+                counts[table] = int(n)
+
+            # --- Step 3: generate report via brain ---
+            await load_clone_keys(session, clone_id)
+            brain = DoppelBrain(session=session, clone_id=clone_id)
+            report_prompt = (
+                "You are about to generate a structured Knowledge Transfer Report for yourself. "
+                "Based on all of your memories, reasoning traces, and experiences, produce a JSON object "
+                "with exactly these keys:\n"
+                '- "domain_summary": a 2-3 sentence description of your core areas of expertise\n'
+                '- "key_decisions": array of up to 5 objects {title, date, rationale, outcome}\n'
+                '- "key_contacts": array of up to 8 objects {name, relationship, context}\n'
+                '- "processes_owned": array of up to 5 objects {name, description, steps}\n'
+                '- "successor_notes": a paragraph of advice for whoever takes over your responsibilities\n\n'
+                "Respond with ONLY valid JSON, no markdown, no explanation."
+            )
+            result = await brain.process(BrainInput(
+                clone_id=clone_id,
+                message=report_prompt,
+                context_type="handoff_report",
+                metadata={"memory_stats": counts},
+            ))
+
+            # Parse the brain response as JSON
+            report: dict = {}
+            try:
+                raw = result.response.strip()
+                if raw.startswith("```"):
+                    raw = raw.split("```")[1].lstrip("json").strip()
+                report = json.loads(raw)
+            except Exception:
+                # Brain didn't return pure JSON — use response as domain_summary
+                report = {
+                    "domain_summary": result.response[:500],
+                    "key_decisions": [],
+                    "key_contacts": [],
+                    "processes_owned": [],
+                    "successor_notes": "",
+                }
+
+            await session.execute(
+                sql_text("""
+                    UPDATE handoff_reports SET
+                        status = 'complete',
+                        domain_summary = :ds,
+                        key_decisions = :kd::jsonb,
+                        key_contacts = :kc::jsonb,
+                        processes_owned = :po::jsonb,
+                        successor_notes = :sn,
+                        memory_stats = :ms::jsonb,
+                        generated_at = NOW()
+                    WHERE clone_id = :cid
+                """),
+                {
+                    "cid": str(clone_id),
+                    "ds": report.get("domain_summary", ""),
+                    "kd": json.dumps(report.get("key_decisions", [])),
+                    "kc": json.dumps(report.get("key_contacts", [])),
+                    "po": json.dumps(report.get("processes_owned", [])),
+                    "sn": report.get("successor_notes", ""),
+                    "ms": json.dumps(counts),
+                },
+            )
+            await session.commit()
+
+        except Exception as e:
+            _log.error("_run_handoff_capture failed clone=%s: %s", clone_id, e, exc_info=True)
+            await session.execute(
+                sql_text("UPDATE handoff_reports SET status = 'failed' WHERE clone_id = :cid"),
+                {"cid": str(clone_id)},
+            )
+            await session.commit()
+
+
+@app.get("/clones/{handle}/handoff-report")
+async def get_handoff_report(
+    handle: str,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Return the handoff report for a clone. Owner or org admin only (enforced by proxy)."""
+    row = await session.execute(
+        sql_text("""
+            SELECT hr.* FROM handoff_reports hr
+            JOIN clone_identity c ON c.clone_id = hr.clone_id
+            WHERE c.handle = :h
+        """),
+        {"h": handle},
+    )
+    report = row.mappings().first()
+    if not report:
+        return {"status": "not_started"}
+    return {
+        "status": report["status"],
+        "domain_summary": report["domain_summary"],
+        "key_decisions": report["key_decisions"] or [],
+        "key_contacts": report["key_contacts"] or [],
+        "processes_owned": report["processes_owned"] or [],
+        "successor_notes": report["successor_notes"],
+        "memory_stats": report["memory_stats"] or {},
+        "generated_at": report["generated_at"].isoformat() if report["generated_at"] else None,
+    }
+
+
+@app.get("/clones/{handle}/handoff-report.json")
+async def download_handoff_report(
+    handle: str,
+    session: AsyncSession = Depends(get_session),
+):
+    """Download handoff report as a JSON file."""
+    from fastapi.responses import JSONResponse
+    data = await get_handoff_report(handle=handle, session=session)
+    if data.get("status") != "complete":
+        raise HTTPException(status_code=404, detail="Report not complete yet")
+    response = JSONResponse(content=data)
+    response.headers["Content-Disposition"] = f'attachment; filename="{handle}-handoff.json"'
+    return response
+
+
+# ---------------------------------------------------------------------------
 # 5.3  GDPR Data Export (Article 20)
 # ---------------------------------------------------------------------------
 
@@ -4954,7 +5567,8 @@ async def scim_create_user(
     except Exception as e:
         if "unique" in str(e).lower():
             raise HTTPException(status_code=409, detail="User already exists")
-        raise HTTPException(status_code=500, detail=str(e))
+        _log.error("SCIM user creation failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
     return _scim_user_from_row({"user_id": external_id, "display_name": display_name})
 
@@ -5392,4 +6006,157 @@ async def delete_audit_webhook(
         {"id": str(webhook_id), "oid": str(org["id"])},
     )
     await session.commit()
+
+
+# ===========================================================================
+# COMPUTER USE AGENT
+# ===========================================================================
+
+@app.get("/brain/task/monitors")
+async def get_monitors() -> dict:
+    """Return available physical monitors for the computer-use agent."""
+    from doppel.brain.tasks.computer_agent import list_monitors
+    try:
+        monitors = list_monitors()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Could not enumerate monitors: {exc}")
+    return {"monitors": monitors}
+
+
+@app.websocket("/brain/task/stream")
+async def computer_task_stream(
+    websocket: WebSocket,
+    clone_id: str,
+    monitor_index: int = 1,
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    """
+    WebSocket endpoint for the computer-use agent.
+
+    Query params:
+      clone_id       — which clone is running the task
+      monitor_index  — which physical monitor to control (default 1 = primary)
+
+    Flow:
+      1. Client connects: ws://host/brain/task/stream?clone_id=X&monitor_index=1
+      2. Client sends JSON: {"instruction": "…"}
+      3. Server streams event dicts until done/error
+      4. Client sends {"action": "stop"} to abort mid-task
+    """
+    from doppel.brain.tasks.computer_agent import run_computer_task
+    from doppel.brain.db.vector import embed, similarity_search
+    from doppel.brain.context import load_clone_keys
+    from uuid import UUID
+
+    await websocket.accept()
+
+    # Resolve clone
+    clone_row = await session.execute(
+        sql_text("SELECT display_name, api_keys FROM clone_identity WHERE clone_id = :cid LIMIT 1"),
+        {"cid": clone_id},
+    )
+    clone = clone_row.mappings().first()
+    clone_name: str = clone["display_name"] if clone else "the user"
+
+    # Load all stored API keys into ContextVars so embed() and other helpers use them
+    clone_uuid = UUID(clone_id)
+    await load_clone_keys(session, clone_uuid)
+
+    # Resolve Anthropic API key for the computer agent (needs it as an explicit arg)
+    stored_keys: dict = dict(clone["api_keys"] or {}) if clone else {}
+    anthropic_api_key: str = stored_keys.get("anthropic") or settings.anthropic_api_key
+
+    # Receive instruction
+    try:
+        payload = await asyncio.wait_for(websocket.receive_json(), timeout=30)
+    except Exception:
+        await websocket.close(code=1008)
+        return
+
+    instruction: str = payload.get("instruction", "").strip()
+    if not instruction:
+        await websocket.send_json({"type": "error", "message": "No instruction provided."})
+        await websocket.close()
+        return
+
+    # Build brain query fn — queries all 4 memory layers
+    async def brain_query(query: str) -> str:
+        try:
+            q_emb = await embed(query)
+            # Vector search on the three tables that have embeddings
+            vector_tables = [
+                ("episodic_memory",  "AND is_excluded = false", "content"),
+                ("semantic_memory",  "",                        "content"),
+                ("procedural_memory","",                        "content"),
+            ]
+            parts: list[str] = []
+            for table, extra, col in vector_tables:
+                rows = await similarity_search(
+                    session, table, clone_uuid, q_emb, limit=4, extra_where=extra
+                )
+                for row in rows:
+                    if row.get("similarity_score", 0) > 0.3:
+                        layer = table.replace("_memory", "")
+                        parts.append(f"[{layer}] {row.get(col, '')}")
+            # relational_memory has no embedding — fetch most recent contacts instead
+            rel_rows = await session.execute(
+                sql_text(
+                    "SELECT contact_name, relationship_type, notes FROM relational_memory "
+                    "WHERE clone_id = :cid ORDER BY updated_at DESC LIMIT 6"
+                ),
+                {"cid": str(clone_uuid)},
+            )
+            for row in rel_rows.mappings():
+                name = row.get("contact_name") or ""
+                rel  = row.get("relationship_type") or ""
+                note = row.get("notes") or ""
+                if name or note:
+                    parts.append(f"[relational] {name} ({rel}): {note}")
+            if not parts:
+                return "No relevant memories found for this query."
+            return "\n\n".join(parts[:12])
+        except Exception as exc:
+            return f"Brain query error: {exc}"
+
+    # Run agent + listen for stop simultaneously
+    stop_event = asyncio.Event()
+
+    async def _listen_for_stop() -> None:
+        try:
+            while True:
+                msg = await websocket.receive_json()
+                if msg.get("action") == "stop":
+                    stop_event.set()
+                    break
+        except Exception:
+            stop_event.set()
+
+    listen_task = asyncio.create_task(_listen_for_stop())
+
+    try:
+        async for event in run_computer_task(
+            clone_name=clone_name,
+            instruction=instruction,
+            monitor_index=monitor_index,
+            brain_query_fn=brain_query,
+            api_key=anthropic_api_key,
+        ):
+            if stop_event.is_set():
+                await websocket.send_json({"type": "done", "result": "Task stopped by user."})
+                break
+            try:
+                await websocket.send_json(event)
+            except Exception:
+                break
+    except Exception as exc:
+        try:
+            await websocket.send_json({"type": "error", "message": str(exc)})
+        except Exception:
+            pass
+    finally:
+        listen_task.cancel()
+        try:
+            await websocket.close()
+        except Exception:
+            pass
     return {"status": "deleted"}

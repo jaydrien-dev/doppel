@@ -112,7 +112,7 @@ export default function DeployPage() {
   }
 
   return (
-    <div className="p-8 max-w-2xl flex flex-col gap-6">
+    <div className="p-8 max-w-5xl flex flex-col gap-6">
       <div className="mb-2">
         <h1 className="text-2xl font-light text-white/85">Deploy</h1>
         <p className="text-sm text-white/35 mt-1">Share your clone with the world.</p>
@@ -177,167 +177,176 @@ export default function DeployPage() {
         )}
       </div>
 
-      {/* Access mode */}
-      <div className="glass rounded-2xl p-6">
-        <h3 className="text-sm font-medium text-white/60 mb-1">Access control</h3>
-        <p className="text-xs text-white/35 mb-4">Who can chat with your clone?</p>
+      {/* 2-col grid: left = access control + rate limiting, right = team access + embed */}
+      <div className="grid grid-cols-2 gap-6 items-start">
+        {/* Left column */}
+        <div className="flex flex-col gap-6">
+          {/* Access mode */}
+          <div className="glass rounded-2xl p-6">
+            <h3 className="text-sm font-medium text-white/60 mb-1">Access control</h3>
+            <p className="text-xs text-white/35 mb-4">Who can chat with your clone?</p>
 
-        <div className="flex flex-col gap-2">
-          {ACCESS_MODES.map(({ value, label, desc }) => {
-            const active = clone.access_mode === value;
-            return (
-              <button
-                key={value}
-                onClick={() => setAccessMode(value)}
-                disabled={updatingMode}
-                className={`flex items-center gap-4 rounded-xl px-4 py-3 text-left transition-all border ${
-                  active
-                    ? "glass-md border-white/[0.12]"
-                    : "glass border-transparent hover:glass"
-                }`}
-              >
-                <div
-                  className={`w-3 h-3 rounded-full border transition-all ${
-                    active ? "border-white/60 bg-white/30" : "border-white/20"
-                  }`}
-                />
-                <div>
-                  <p className={`text-sm ${active ? "text-white/80" : "text-white/45"}`}>{label}</p>
-                  <p className="text-xs text-white/30">{desc}</p>
-                </div>
-              </button>
-            );
-          })}
-        </div>
-
-        {modeError && (
-          <p className="mt-3 text-xs text-red-400/60 font-mono">{modeError}</p>
-        )}
-
-        {/* Allowlist email manager */}
-        {clone.access_mode === "allowlist" && (
-          <div className="mt-5 pt-5 border-t border-white/[0.06]">
-            <p className="text-xs text-white/40 mb-3">Allowed emails</p>
-
-            {allowedEmails.length > 0 && (
-              <div className="flex flex-wrap gap-2 mb-3">
-                {allowedEmails.map((email) => (
-                  <span
-                    key={email}
-                    className="flex items-center gap-1.5 glass rounded-xl px-3 py-1.5 text-xs text-white/60"
+            <div className="flex flex-col gap-2">
+              {ACCESS_MODES.map(({ value, label, desc }) => {
+                const active = clone.access_mode === value;
+                return (
+                  <button
+                    key={value}
+                    onClick={() => setAccessMode(value)}
+                    disabled={updatingMode}
+                    className={`flex items-center gap-4 rounded-xl px-4 py-3 text-left transition-all border ${
+                      active
+                        ? "glass-md border-white/[0.12]"
+                        : "glass border-transparent hover:glass"
+                    }`}
                   >
-                    {email}
-                    <button
-                      onClick={() => removeEmail(email)}
-                      disabled={savingEmails}
-                      className="text-white/25 hover:text-white/60 transition-colors ml-1 disabled:opacity-40"
-                    >
-                      ×
-                    </button>
-                  </span>
-                ))}
+                    <div
+                      className={`w-3 h-3 rounded-full border transition-all ${
+                        active ? "border-white/60 bg-white/30" : "border-white/20"
+                      }`}
+                    />
+                    <div>
+                      <p className={`text-sm ${active ? "text-white/80" : "text-white/45"}`}>{label}</p>
+                      <p className="text-xs text-white/30">{desc}</p>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            {modeError && (
+              <p className="mt-3 text-xs text-red-400/60 font-mono">{modeError}</p>
+            )}
+
+            {/* Allowlist email manager */}
+            {clone.access_mode === "allowlist" && (
+              <div className="mt-5 pt-5 border-t border-white/[0.06]">
+                <p className="text-xs text-white/40 mb-3">Allowed emails</p>
+
+                {allowedEmails.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mb-3">
+                    {allowedEmails.map((email) => (
+                      <span
+                        key={email}
+                        className="flex items-center gap-1.5 glass rounded-xl px-3 py-1.5 text-xs text-white/60"
+                      >
+                        {email}
+                        <button
+                          onClick={() => removeEmail(email)}
+                          disabled={savingEmails}
+                          className="text-white/25 hover:text-white/60 transition-colors ml-1 disabled:opacity-40"
+                        >
+                          ×
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                {allowedEmails.length === 0 && (
+                  <p className="text-xs text-white/25 mb-3">No emails yet — add some below.</p>
+                )}
+
+                <form onSubmit={addEmail} className="flex gap-2">
+                  <input
+                    type="email"
+                    value={emailInput}
+                    onChange={(e) => setEmailInput(e.target.value)}
+                    placeholder="colleague@example.com"
+                    className="flex-1 glass rounded-xl px-4 py-2.5 text-sm text-white/80 placeholder:text-white/25 outline-none"
+                  />
+                  <button
+                    type="submit"
+                    disabled={savingEmails || !emailInput.trim()}
+                    className="glass-md hover:glass-hi rounded-xl px-4 py-2.5 text-sm text-white/60 hover:text-white/80 transition-all disabled:opacity-40"
+                  >
+                    Add
+                  </button>
+                </form>
               </div>
             )}
-
-            {allowedEmails.length === 0 && (
-              <p className="text-xs text-white/25 mb-3">No emails yet — add some below.</p>
-            )}
-
-            <form onSubmit={addEmail} className="flex gap-2">
-              <input
-                type="email"
-                value={emailInput}
-                onChange={(e) => setEmailInput(e.target.value)}
-                placeholder="colleague@example.com"
-                className="flex-1 glass rounded-xl px-4 py-2.5 text-sm text-white/80 placeholder:text-white/25 outline-none"
-              />
-              <button
-                type="submit"
-                disabled={savingEmails || !emailInput.trim()}
-                className="glass-md hover:glass-hi rounded-xl px-4 py-2.5 text-sm text-white/60 hover:text-white/80 transition-all disabled:opacity-40"
-              >
-                Add
-              </button>
-            </form>
           </div>
-        )}
-      </div>
 
-      {/* Rate limiting */}
-      <RateLimitSection clone={clone} onUpdated={mutate} />
-
-      {/* Team access */}
-      <TeamAccessSection cloneHandle={clone.handle} />
-
-      {/* Embed widget */}
-      <div className="glass rounded-2xl p-6">
-        <div className="flex items-start justify-between mb-4">
-          <div>
-            <h3 className="text-sm font-medium text-white/60 mb-1">Embed widget</h3>
-            <p className="text-xs text-white/35">
-              Add a floating chat button to any website — one line of code.
-            </p>
-          </div>
-          {clone.access_mode !== "public" && (
-            <span className="text-[10px] text-amber-300/60 bg-amber-400/10 px-2 py-1 rounded-lg shrink-0 ml-3">
-              Set to Public first
-            </span>
-          )}
+          {/* Rate limiting */}
+          <RateLimitSection clone={clone} onUpdated={mutate} />
         </div>
 
-        <div className="flex gap-1 glass rounded-xl p-1 mb-4 w-fit">
-          {(["widget", "iframe"] as const).map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setEmbedTab(tab)}
-              className={cn(
-                "px-3 py-1.5 rounded-lg text-xs transition-all capitalize",
-                embedTab === tab ? "glass-md text-white/80" : "text-white/35 hover:text-white/55"
+        {/* Right column */}
+        <div className="flex flex-col gap-6">
+          {/* Team access */}
+          <TeamAccessSection cloneHandle={clone.handle} />
+
+          {/* Embed widget */}
+          <div className="glass rounded-2xl p-6">
+            <div className="flex items-start justify-between mb-4">
+              <div>
+                <h3 className="text-sm font-medium text-white/60 mb-1">Embed widget</h3>
+                <p className="text-xs text-white/35">
+                  Add a floating chat button to any website — one line of code.
+                </p>
+              </div>
+              {clone.access_mode !== "public" && (
+                <span className="text-[10px] text-amber-300/60 bg-amber-400/10 px-2 py-1 rounded-lg shrink-0 ml-3">
+                  Set to Public first
+                </span>
               )}
-            >
-              {tab === "widget" ? "Floating button" : "iFrame"}
-            </button>
-          ))}
-        </div>
+            </div>
 
-        <p className="text-[11px] text-white/25 mb-3">
-          {embedTab === "widget"
-            ? "Creates a floating chat bubble in the bottom-right corner of your page."
-            : "Embeds the chat inline at a fixed size — good for dedicated contact pages."}
-        </p>
+            <div className="flex gap-1 glass rounded-xl p-1 mb-4 w-fit">
+              {(["widget", "iframe"] as const).map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => setEmbedTab(tab)}
+                  className={cn(
+                    "px-3 py-1.5 rounded-lg text-xs transition-all capitalize",
+                    embedTab === tab ? "glass-md text-white/80" : "text-white/35 hover:text-white/55"
+                  )}
+                >
+                  {tab === "widget" ? "Floating button" : "iFrame"}
+                </button>
+              ))}
+            </div>
 
-        <div className="glass rounded-xl px-4 py-3 mb-3">
-          <pre className="text-xs text-white/50 font-mono whitespace-pre-wrap break-all leading-relaxed">
-            {activeSnippet}
-          </pre>
-        </div>
+            <p className="text-[11px] text-white/25 mb-3">
+              {embedTab === "widget"
+                ? "Creates a floating chat bubble in the bottom-right corner of your page."
+                : "Embeds the chat inline at a fixed size — good for dedicated contact pages."}
+            </p>
 
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => copyToClipboard(activeSnippet, "embed")}
-            className="glass-md hover:glass-hi rounded-xl px-4 py-2.5 text-sm text-white/60 hover:text-white/80 transition-all flex items-center gap-2"
-          >
-            {embedCopied ? (
-              <>
-                <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
-                  <path d="M1.5 7L5 10.5 11.5 2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
-                </svg>
-                Copied!
-              </>
-            ) : (
-              "Copy snippet"
-            )}
-          </button>
-          {embedTab === "widget" && (
-            <a
-              href={`/embed/${clone.handle}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-xs text-white/30 hover:text-white/55 transition-colors"
-            >
-              Preview embed →
-            </a>
-          )}
+            <div className="glass rounded-xl px-4 py-3 mb-3">
+              <pre className="text-xs text-white/50 font-mono whitespace-pre-wrap break-all leading-relaxed">
+                {activeSnippet}
+              </pre>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => copyToClipboard(activeSnippet, "embed")}
+                className="glass-md hover:glass-hi rounded-xl px-4 py-2.5 text-sm text-white/60 hover:text-white/80 transition-all flex items-center gap-2"
+              >
+                {embedCopied ? (
+                  <>
+                    <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+                      <path d="M1.5 7L5 10.5 11.5 2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                    Copied!
+                  </>
+                ) : (
+                  "Copy snippet"
+                )}
+              </button>
+              {embedTab === "widget" && (
+                <a
+                  href={`/embed/${clone.handle}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs text-white/30 hover:text-white/55 transition-colors"
+                >
+                  Preview embed →
+                </a>
+              )}
+            </div>
+          </div>
         </div>
       </div>
     </div>

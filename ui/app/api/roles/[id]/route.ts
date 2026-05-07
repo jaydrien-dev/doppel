@@ -14,6 +14,25 @@ export async function GET(
   return Response.json(data, { status: res.status });
 }
 
+export async function PATCH(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { userId } = await auth();
+  if (!userId) return Response.json({ error: "Unauthorized" }, { status: 401 });
+
+  const { id } = await params;
+  const body = await request.json();
+  const res = await backendFetch(`/org/roles/${id}?user_id=${encodeURIComponent(userId)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (res.status === 204) return new Response(null, { status: 204 });
+  const data = await res.json();
+  return Response.json(data, { status: res.status });
+}
+
 export async function DELETE(
   _request: Request,
   { params }: { params: Promise<{ id: string }> }

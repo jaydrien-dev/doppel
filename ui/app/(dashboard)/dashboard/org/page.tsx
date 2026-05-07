@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
+import { useUser } from "@clerk/nextjs";
 
 const ForceGraph2D = dynamic(() => import("react-force-graph-2d"), {
   ssr: false,
@@ -34,6 +35,7 @@ interface OrgMember {
     display_name: string;
     handle: string;
     access_mode: string;
+    is_onboarding_resource?: boolean;
   } | null;
 }
 
@@ -125,29 +127,98 @@ function CreateOrgPanel({ onCreate }: { onCreate: (org: Org) => void }) {
 // Clone card
 // ---------------------------------------------------------------------------
 
-function CloneCard({ member }: { member: OrgMember }) {
+function CloneCard({
+  member,
+  isAdmin,
+  onRoleChange,
+}: {
+  member: OrgMember;
+  isAdmin: boolean;
+  onRoleChange: (userId: string, newRole: "admin" | "member") => void;
+}) {
+  const [updatingRole, setUpdatingRole] = useState(false);
+  const [roleError, setRoleError] = useState("");
+  const [isKnowledgeResource, setIsKnowledgeResource] = useState(
+    member.clone?.is_onboarding_resource ?? false
+  );
+  const [togglingResource, setTogglingResource] = useState(false);
+  const [knowledgeError, setKnowledgeError] = useState("");
   const c = member.clone;
+
+  async function toggleKnowledgeResource() {
+    if (!c) return;
+    setTogglingResource(true);
+    setKnowledgeError("");
+    try {
+      const next = !isKnowledgeResource;
+      const res = await fetch(`/api/clones/${c.handle}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ is_onboarding_resource: next }),
+      });
+      if (res.ok) {
+        setIsKnowledgeResource(next);
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setKnowledgeError(data.detail ?? data.error ?? `Error ${res.status}`);
+      }
+    } catch {
+      setKnowledgeError("Network error");
+    } finally {
+      setTogglingResource(false);
+    }
+  }
+
+  async function handleRoleChange(newRole: "admin" | "member") {
+    if (newRole === member.role) return;
+    setUpdatingRole(true);
+    setRoleError("");
+    try {
+      const res = await fetch("/api/org/members/role", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ target_user_id: member.user_id, new_role: newRole }),
+      });
+      if (res.ok) {
+        onRoleChange(member.user_id, newRole);
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setRoleError(data.detail ?? data.error ?? `Error ${res.status}`);
+      }
+    } catch {
+      setRoleError("Network error");
+    } finally {
+      setUpdatingRole(false);
+    }
+  }
+
   if (!c) {
     return (
-      <div className="glass rounded-2xl p-4 opacity-50">
-        <p className="text-xs text-white/35">Member hasn&apos;t created a clone yet</p>
-        <p className="text-[11px] text-white/20 mt-1 font-mono">{member.user_id.slice(0, 12)}…</p>
+      <div className="glass rounded-2xl p-4 flex items-center gap-3 opacity-60">
+        <div className="w-8 h-8 rounded-full bg-white/[0.04] flex items-center justify-center text-xs text-white/30 shrink-0">?</div>
+        <div className="flex-1 min-w-0">
+          <p className="text-xs text-white/35">No clone yet</p>
+          <p className="text-[11px] text-white/20 font-mono">{member.user_id.slice(0, 12)}…</p>
+        </div>
+        {isAdmin && (
+          <RoleSelector role={member.role} disabled={updatingRole} onChange={handleRoleChange} />
+        )}
       </div>
     );
   }
+
   return (
-    <Link
-      href={`/c/${c.handle}`}
-      target="_blank"
-      className="glass rounded-2xl p-4 flex items-center gap-3 hover:glass-md transition-all group"
-    >
-      <div className="w-8 h-8 rounded-full bg-white/[0.06] flex items-center justify-center text-xs text-white/50 font-medium shrink-0">
-        {c.display_name.charAt(0).toUpperCase()}
-      </div>
-      <div className="flex-1 min-w-0">
-        <p className="text-sm text-white/75 truncate">{c.display_name}</p>
-        <p className="text-[11px] text-white/30 font-mono">@{c.handle}</p>
-      </div>
+    <div className="glass rounded-2xl overflow-hidden hover:glass-md transition-all group">
+    <div className="p-4 flex items-center gap-3">
+      <Link href={`/c/${c.handle}`} target="_blank" className="flex items-center gap-3 flex-1 min-w-0">
+        <div className="w-8 h-8 rounded-full bg-white/[0.06] flex items-center justify-center text-xs text-white/50 font-medium shrink-0">
+          {c.display_name.charAt(0).toUpperCase()}
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm text-white/75 truncate">{c.display_name}</p>
+          <p className="text-[11px] text-white/30 font-mono">@{c.handle}</p>
+        </div>
+      </Link>
       <div className="flex items-center gap-2 shrink-0">
         <span className={`text-[10px] px-2 py-0.5 rounded-full border ${
           c.access_mode === "public"
@@ -156,28 +227,66 @@ function CloneCard({ member }: { member: OrgMember }) {
         }`}>
           {c.access_mode}
         </span>
-        {member.role === "admin" && (
+        {isAdmin && (
+          <button
+            onClick={(e) => { e.stopPropagation(); e.preventDefault(); toggleKnowledgeResource(); }}
+            disabled={togglingResource}
+            title={isKnowledgeResource ? "Remove from Team Knowledge" : "Add to Team Knowledge"}
+            className={`text-[10px] px-2 py-0.5 rounded-full border transition-all disabled:opacity-40 ${
+              isKnowledgeResource
+                ? "text-white/50 bg-white/[0.06] border-white/15"
+                : "text-white/20 bg-white/[0.02] border-white/[0.05] hover:text-white/35"
+            }`}
+          >
+            {isKnowledgeResource ? "knowledge" : "+ knowledge"}
+          </button>
+        )}
+        {isAdmin ? (
+          <RoleSelector role={member.role} disabled={updatingRole} onChange={handleRoleChange} />
+        ) : member.role === "admin" ? (
           <span className="text-[10px] text-white/25 bg-white/[0.04] border border-white/[0.06] px-2 py-0.5 rounded-full">
             admin
           </span>
-        )}
-        <svg
-          width="11"
-          height="11"
-          viewBox="0 0 11 11"
-          fill="none"
-          className="text-white/20 group-hover:text-white/40 transition-colors"
-        >
-          <path
-            d="M2.5 8.5l6-6M8.5 8.5V2.5H2.5"
-            stroke="currentColor"
-            strokeWidth="1.2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
+        ) : null}
+        <Link href={`/c/${c.handle}`} target="_blank">
+          <svg width="11" height="11" viewBox="0 0 11 11" fill="none"
+            className="text-white/20 group-hover:text-white/40 transition-colors">
+            <path d="M2.5 8.5l6-6M8.5 8.5V2.5H2.5" stroke="currentColor"
+              strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </Link>
       </div>
-    </Link>
+    </div>
+    {(roleError || knowledgeError) && (
+      <div className="px-4 pb-3 flex flex-col gap-0.5">
+        {roleError && <p className="text-[11px] text-red-400/60">{roleError}</p>}
+        {knowledgeError && <p className="text-[11px] text-red-400/60">{knowledgeError}</p>}
+      </div>
+    )}
+    </div>
+  );
+}
+
+function RoleSelector({
+  role,
+  disabled,
+  onChange,
+}: {
+  role: string;
+  disabled: boolean;
+  onChange: (r: "admin" | "member") => void;
+}) {
+  return (
+    <select
+      value={role}
+      disabled={disabled}
+      onChange={(e) => { e.stopPropagation(); onChange(e.target.value as "admin" | "member"); }}
+      onClick={(e) => e.stopPropagation()}
+      className="text-[10px] bg-white/[0.04] border border-white/[0.08] rounded-lg px-2 py-0.5 text-white/40 outline-none cursor-pointer hover:border-white/20 transition-colors disabled:opacity-40"
+    >
+      <option value="member">member</option>
+      <option value="admin">admin</option>
+    </select>
   );
 }
 
@@ -460,10 +569,20 @@ function OrgGraph({ orgName, members }: { orgName: string; members: OrgMember[] 
 // Page
 // ---------------------------------------------------------------------------
 
+interface PendingInvite {
+  org_id: string;
+  org_name: string;
+  org_slug: string;
+  role: string;
+}
+
 export default function OrgPage() {
+  const { user } = useUser();
   const [org, setOrg] = useState<Org | null | undefined>(undefined);
   const [members, setMembers] = useState<OrgMember[]>([]);
   const [tab, setTab] = useState<"clones" | "search" | "graph">("clones");
+  const [pendingInvite, setPendingInvite] = useState<PendingInvite | null>(null);
+  const [joining, setJoining] = useState(false);
 
   useEffect(() => {
     fetch("/api/org")
@@ -473,12 +592,34 @@ export default function OrgPage() {
   }, []);
 
   useEffect(() => {
+    if (org !== null) return; // only check invite if not in org
+    fetch("/api/org/pending-invite")
+      .then((r) => r.json())
+      .then((d) => setPendingInvite(d.invite ?? null))
+      .catch(() => {});
+  }, [org]);
+
+  useEffect(() => {
     if (!org) return;
     fetch("/api/org/members")
       .then((r) => r.json())
       .then((d) => setMembers(d.members ?? []))
       .catch(() => {});
   }, [org]);
+
+  async function acceptInvite() {
+    setJoining(true);
+    try {
+      const res = await fetch("/api/org/join", { method: "POST" });
+      const data = await res.json();
+      if (res.ok && data.org) {
+        setOrg(data.org);
+        setPendingInvite(null);
+      }
+    } finally {
+      setJoining(false);
+    }
+  }
 
   if (org === undefined) {
     return (
@@ -491,20 +632,37 @@ export default function OrgPage() {
 
   if (!org) {
     return (
-      <div className="p-8 max-w-xl">
+      <div className="p-8 max-w-4xl">
         <div className="mb-8">
           <h1 className="text-2xl font-light text-white/85">Team</h1>
           <p className="text-sm text-white/35 mt-1">
             Share knowledge and search across your whole team&apos;s clones.
           </p>
         </div>
+        {pendingInvite && (
+          <div className="glass rounded-2xl p-6 mb-4">
+            <p className="text-sm font-medium text-white/70 mb-1">
+              You&apos;ve been invited to join <span className="text-white/85">{pendingInvite.org_name}</span>
+            </p>
+            <p className="text-xs text-white/35 mb-4">
+              As a {pendingInvite.role} · doppel.ai/team/{pendingInvite.org_slug}
+            </p>
+            <button
+              onClick={acceptInvite}
+              disabled={joining}
+              className="glass-md hover:glass-hi rounded-xl px-5 py-2.5 text-sm text-white/60 hover:text-white/80 transition-all disabled:opacity-40"
+            >
+              {joining ? "Joining…" : `Join ${pendingInvite.org_name}`}
+            </button>
+          </div>
+        )}
         <CreateOrgPanel onCreate={setOrg} />
       </div>
     );
   }
 
   return (
-    <div className="p-8 max-w-2xl">
+    <div className="p-8 max-w-5xl">
       <div className="mb-8 flex items-start justify-between">
         <div>
           <h1 className="text-2xl font-light text-white/85">{org.name}</h1>
@@ -545,7 +703,22 @@ export default function OrgPage() {
               <p className="text-sm text-white/30">No members yet — invite your team above.</p>
             </div>
           ) : (
-            members.map((m) => <CloneCard key={m.user_id} member={m} />)
+            members.map((m) => {
+              const currentUserIsAdmin = org.is_owner ||
+                members.find((x) => x.user_id === user?.id)?.role === "admin";
+              return (
+                <CloneCard
+                  key={m.user_id}
+                  member={m}
+                  isAdmin={currentUserIsAdmin}
+                  onRoleChange={(userId, newRole) =>
+                    setMembers((prev) =>
+                      prev.map((x) => x.user_id === userId ? { ...x, role: newRole } : x)
+                    )
+                  }
+                />
+              );
+            })
           )}
         </div>
       )}

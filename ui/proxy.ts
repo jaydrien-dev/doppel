@@ -10,6 +10,8 @@ const isPublicRoute = createRouteMatcher([
   "/api/chat",                // anyone can chat with a public clone
   "/api/meetings/webhook",    // Recall.ai calls this — no user auth
   "/api/slack/events",        // Slack posts here — no user auth
+  "/api/v1/(.*)",             // developer API — authenticated via Bearer key, not Clerk
+  "/v1/(.*)",                 // same routes via Next.js rewrite proxy
 ]);
 
 const isAuthPage = createRouteMatcher(["/sign-in(.*)", "/sign-up(.*)"]);

@@ -224,7 +224,7 @@ export default function TrainPage() {
   }
 
   return (
-    <div className="p-8 max-w-2xl flex flex-col gap-6">
+    <div className="p-8 max-w-4xl flex flex-col gap-6">
       <div className="mb-2">
         <h1 className="text-2xl font-light text-white/85">Train</h1>
         <p className="text-sm text-white/35 mt-1">Feed your clone data to make it think like you.</p>
@@ -450,8 +450,8 @@ export default function TrainPage() {
       </Section>
 
       {/* Twitter — stub */}
-      <Section title="Twitter / X" sub="Import your tweets to capture your public opinions and hot takes." integration="Twitter Developer — see INTEGRATIONS.md">
-        <IntegrationStub label="Connect Twitter →" />
+      <Section title="Twitter / X" sub="Import your tweets to capture your public opinions and hot takes." integration="Twitter Developer API — coming soon">
+        <IntegrationStub label="Coming soon" />
       </Section>
 
       {/* Seed Q&A */}

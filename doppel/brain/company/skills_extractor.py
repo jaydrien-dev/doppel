@@ -10,6 +10,7 @@ exceptions, confidence score, and source attribution.
 from __future__ import annotations
 
 import json
+import logging
 import time
 from uuid import UUID
 
@@ -19,6 +20,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from doppel.brain.context import get_anthropic_key
 from doppel.config import settings
+
+_log = logging.getLogger(__name__)
 
 
 _SKILLS_PROMPT = """\
@@ -31,10 +34,14 @@ You are converting company knowledge into a structured skills file that AI agent
 
 ## Task
 
-Convert the decision_procedures from this knowledge summary into executable skills.
-Each skill must be concrete enough for an AI agent to apply correctly in a new situation.
+Extract ALL executable skills from this knowledge summary.
+Draw from every section: decision_procedures, key_responsibilities, common_heuristics,
+domain_knowledge, tools_and_systems — anything that describes HOW to do something.
 
-Output ONLY a JSON array of skills (no markdown):
+A skill is any concrete, repeatable action or decision pattern an agent can apply.
+Even a simple heuristic ("always check X before doing Y") is a valid skill.
+
+Output ONLY a JSON array of skills (no markdown, no extra text):
 
 [
   {{
@@ -55,8 +62,13 @@ Output ONLY a JSON array of skills (no markdown):
   }}
 ]
 
-Be specific. A skill is only useful if an agent can apply it without guessing.
-Confidence should be 0.9+ only if the procedure has clear rules and few exceptions.
+Rules:
+- Produce at least one skill even if the knowledge is thin — extract whatever is most actionable.
+- Be specific. A skill is only useful if an agent can apply it without guessing.
+- Confidence 0.9+ only if the procedure has clear rules and few exceptions.
+- Confidence 0.5–0.7 for heuristics or partially-documented patterns.
+- Keep each field concise — steps max 15 words each, trigger_context max 5 items, inputs_required max 5 items.
+- Output the COMPLETE JSON array. Do not truncate.
 """
 
 
@@ -75,8 +87,17 @@ async def extract_skills_from_role(
     if not knowledge_summary or knowledge_summary.get("error"):
         return []
 
-    decision_procedures = knowledge_summary.get("decision_procedures", [])
-    if not decision_procedures:
+    # If role brain JSON parsing failed, recover by using the raw text
+    if knowledge_summary.get("parse_error") and knowledge_summary.get("raw_extraction"):
+        knowledge_summary = {"role_summary": str(knowledge_summary["raw_extraction"])[:8000]}
+
+    # Check there's at least some usable content in the summary
+    has_content = any(
+        knowledge_summary.get(k)
+        for k in ("decision_procedures", "key_responsibilities",
+                  "common_heuristics", "domain_knowledge", "role_summary")
+    )
+    if not has_content:
         return []
 
     prompt = _SKILLS_PROMPT.format(
@@ -87,7 +108,7 @@ async def extract_skills_from_role(
 
     response = await anthropic.AsyncAnthropic(api_key=get_anthropic_key()).messages.create(
         model=settings.reasoning_model,
-        max_tokens=4000,
+        max_tokens=8000,
         messages=[{"role": "user", "content": prompt}],
     )
 
@@ -98,12 +119,33 @@ async def extract_skills_from_role(
             raw = raw[4:]
         raw = raw.strip().rstrip("`")
 
+    _log.info("skills_extractor raw LLM output (first 300): %s", raw[:300])
+
     try:
         skills_data = json.loads(raw)
         if not isinstance(skills_data, list):
-            skills_data = []
+            # Might be {"skills": [...]}
+            if isinstance(skills_data, dict):
+                skills_data = skills_data.get("skills") or []
+            else:
+                skills_data = []
     except json.JSONDecodeError:
-        return []
+        # Try to find JSON array boundaries
+        start = raw.find("[")
+        end = raw.rfind("]") + 1
+        if start != -1 and end > start:
+            try:
+                skills_data = json.loads(raw[start:end])
+                if not isinstance(skills_data, list):
+                    skills_data = []
+            except json.JSONDecodeError:
+                _log.error("skills_extractor: JSON parse failed. raw[:500]=%s", raw[:500])
+                return []
+        else:
+            _log.error("skills_extractor: no JSON array found. raw[:500]=%s", raw[:500])
+            return []
+
+    _log.info("skills_extractor: parsed %d skills", len(skills_data))
 
     # Delete old skills for this role brain and re-insert
     await session.execute(
@@ -111,35 +153,46 @@ async def extract_skills_from_role(
         {"id": str(role_brain_id)},
     )
 
+    source_count = sum(
+        len(knowledge_summary.get(k) or [])
+        for k in ("decision_procedures", "key_responsibilities", "common_heuristics")
+    )
+
     stored = []
     for skill in skills_data:
         if not isinstance(skill, dict) or not skill.get("skill_name"):
+            _log.warning("skills_extractor: skipping skill missing skill_name: %s", skill)
             continue
-        result = await session.execute(
-            text("""
-                INSERT INTO org_skills
-                  (org_id, role_brain_id, skill_name, trigger_context,
-                   inputs_required, procedure, confidence, source_count,
-                   last_verified_at)
-                VALUES
-                  (:org_id, :role_brain_id, :skill_name, CAST(:trigger AS text[]),
-                   CAST(:inputs AS text[]), CAST(:procedure AS jsonb),
-                   :confidence, :source_count, NOW())
-                RETURNING id
-            """),
-            {
-                "org_id": str(org_id),
-                "role_brain_id": str(role_brain_id),
-                "skill_name": skill.get("skill_name", ""),
-                "trigger": "{" + ",".join(f'"{t}"' for t in skill.get("trigger_context", [])) + "}",
-                "inputs": "{" + ",".join(f'"{i}"' for i in skill.get("inputs_required", [])) + "}",
-                "procedure": json.dumps(skill.get("procedure", {})),
-                "confidence": float(skill.get("confidence", 0.5)),
-                "source_count": len(knowledge_summary.get("decision_procedures", [])),
-            },
-        )
-        row = result.fetchone()
-        stored.append({**skill, "id": str(row[0])})
+        try:
+            result = await session.execute(
+                text("""
+                    INSERT INTO org_skills
+                      (org_id, role_brain_id, skill_name, trigger_context,
+                       inputs_required, procedure, confidence, source_count,
+                       last_verified_at)
+                    VALUES
+                      (:org_id, :role_brain_id, :skill_name,
+                       ARRAY(SELECT jsonb_array_elements_text(CAST(:trigger AS jsonb))),
+                       ARRAY(SELECT jsonb_array_elements_text(CAST(:inputs AS jsonb))),
+                       CAST(:procedure AS jsonb),
+                       :confidence, :source_count, NOW())
+                    RETURNING id
+                """),
+                {
+                    "org_id": str(org_id),
+                    "role_brain_id": str(role_brain_id),
+                    "skill_name": skill.get("skill_name", ""),
+                    "trigger": json.dumps([str(t) for t in (skill.get("trigger_context") or [])]),
+                    "inputs": json.dumps([str(i) for i in (skill.get("inputs_required") or [])]),
+                    "procedure": json.dumps(skill.get("procedure") or {}),
+                    "confidence": float(skill.get("confidence") or 0.5),
+                    "source_count": source_count,
+                },
+            )
+            row = result.fetchone()
+            stored.append({**skill, "id": str(row[0])})
+        except Exception as e:
+            _log.error("skills_extractor: INSERT failed for %s: %s", skill.get("skill_name"), e)
 
     await session.commit()
     return stored

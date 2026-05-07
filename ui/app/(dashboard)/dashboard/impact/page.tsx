@@ -57,7 +57,7 @@ export default function ImpactPage() {
   }
 
   return (
-    <div className="p-8 max-w-2xl flex flex-col gap-6">
+    <div className="p-8 max-w-4xl flex flex-col gap-6">
       <div className="mb-2">
         <h1 className="text-2xl font-light text-white/85">Impact</h1>
         <p className="text-sm text-white/35 mt-1">

@@ -7,6 +7,7 @@ const FASTAPI = process.env.FASTAPI_URL ?? "http://localhost:8000";
 
 interface CloneServerInfo extends ClonePublicInfo {
   allowed_emails: string[];
+  is_onboarding_resource?: boolean;
 }
 
 async function getClone(handle: string): Promise<CloneServerInfo | null> {
@@ -97,15 +98,20 @@ export default async function PublicClonePage({
         <div className="w-8 h-8 rounded-xl glass-md flex items-center justify-center">
           <span className="text-xs font-medium text-white/50">{clone.display_name[0]}</span>
         </div>
-        <div>
+        <div className="flex-1 min-w-0">
           <p className="text-sm font-medium text-white/80">{clone.display_name}</p>
           <p className="text-[11px] text-white/30">@{clone.handle}</p>
         </div>
+        {fullClone.is_onboarding_resource && (
+          <span className="text-[10px] text-white/35 bg-white/[0.05] border border-white/[0.08] rounded-full px-2.5 py-0.5 shrink-0">
+            Knowledge clone
+          </span>
+        )}
       </div>
 
       {/* Chat */}
       <div className="flex-1 overflow-hidden">
-        <PublicChatClient clone={clone} />
+        <PublicChatClient clone={clone} isOnboardingResource={fullClone.is_onboarding_resource} />
       </div>
 
       <DoppelFooter inline />

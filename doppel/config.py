@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     reasoning_model: str = "claude-sonnet-4-6"
     # Classification model — used for fast, cheap perception calls
     classification_model: str = "claude-haiku-4-5-20251001"
+    # Computer use agent model — must support computer-use-2025-01-24 beta
+    computer_use_model: str = "claude-opus-4-5"
     # Embedding model
     embedding_model: str = "text-embedding-3-small"
     embedding_dim: int = 1536
@@ -95,6 +97,10 @@ class Settings(BaseSettings):
         default="http://localhost:8000/ingestion/notion/callback",
         alias="NOTION_REDIRECT_URI",
     )
+
+    # --- Gmail Push (Pub/Sub) ---
+    gmail_pubsub_topic: str = Field(default="", alias="GMAIL_PUBSUB_TOPIC")
+    pubsub_verification_token: str = Field(default="", alias="PUBSUB_VERIFICATION_TOKEN")
 
 
 settings = Settings()  # type: ignore[call-arg]

@@ -29,7 +29,8 @@ async function apiFetch<T>(
     const text = await res.text().catch(() => res.statusText);
     throw new Error(`${res.status}: ${text}`);
   }
-  return res.json() as Promise<T>;
+  const text = await res.text();
+  return (text ? JSON.parse(text) : null) as T;
 }
 
 // ---------------------------------------------------------------------------

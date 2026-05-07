@@ -1,9 +1,11 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { UserButton, useUser, useClerk } from "@clerk/nextjs";
 import { useClone } from "@/lib/hooks/useClone";
+import { useTour } from "@/components/tour/TourProvider";
 
 type NavItem = { href: string; label: string; icon: React.ReactNode };
 
@@ -74,6 +76,17 @@ const PERSONAL: NavItem[] = [
       </svg>
     ),
   },
+  {
+    href: "/dashboard/tasks",
+    label: "Tasks",
+    icon: (
+      <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+        <rect x="1.5" y="1.5" width="12" height="9" rx="1.5" stroke="currentColor" strokeWidth="1.3"/>
+        <path d="M4.5 13.5h6M7.5 10.5v3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+        <path d="M4.5 5.5l2 2 3.5-3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+      </svg>
+    ),
+  },
 ];
 
 const COMPANY: NavItem[] = [
@@ -90,8 +103,41 @@ const COMPANY: NavItem[] = [
     ),
   },
   {
+    href: "/dashboard/goals",
+    label: "Goals",
+    icon: (
+      <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+        <circle cx="7.5" cy="7.5" r="5.5" stroke="currentColor" strokeWidth="1.3"/>
+        <circle cx="7.5" cy="7.5" r="2.5" stroke="currentColor" strokeWidth="1.3"/>
+        <circle cx="7.5" cy="7.5" r="1" fill="currentColor"/>
+        <path d="M7.5 2V1M7.5 14v-1M13 7.5h1M1 7.5h1" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+      </svg>
+    ),
+  },
+  {
+    href: "/dashboard/feed",
+    label: "Intel Feed",
+    icon: (
+      <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+        <path d="M2 4.5h11M2 7.5h8M2 10.5h5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+        <circle cx="12" cy="10.5" r="1.5" stroke="currentColor" strokeWidth="1.2"/>
+        <path d="M13.5 10.5v2.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+      </svg>
+    ),
+  },
+  {
+    href: "/dashboard/alerts",
+    label: "Alerts",
+    icon: (
+      <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+        <path d="M7.5 1.5L13 12H2L7.5 1.5z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"/>
+        <path d="M7.5 6v3M7.5 10.5v.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+      </svg>
+    ),
+  },
+  {
     href: "/dashboard/skills",
-    label: "Skills API",
+    label: "Skills",
     icon: (
       <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
         <path d="M5 4.5L2 7.5l3 3M10 4.5l3 3-3 3M8.5 2.5l-2 10" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
@@ -107,6 +153,30 @@ const COMPANY: NavItem[] = [
         <circle cx="10.5" cy="5" r="2" stroke="currentColor" strokeWidth="1.3"/>
         <path d="M1 13c0-2.21 1.79-4 4-4s4 1.79 4 4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
         <path d="M10.5 9c1.38 0 2.5 1.12 2.5 2.5V13" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+      </svg>
+    ),
+  },
+  {
+    href: "/dashboard/team-knowledge",
+    label: "Team Knowledge",
+    icon: (
+      <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+        <circle cx="5" cy="5.5" r="2" stroke="currentColor" strokeWidth="1.3"/>
+        <circle cx="10.5" cy="5.5" r="2" stroke="currentColor" strokeWidth="1.3"/>
+        <path d="M1 12c0-1.66 1.79-3 4-3s4 1.34 4 3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+        <path d="M10.5 9.5c1.38 0 2.5.9 2.5 2V12" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+        <path d="M7.5 2.5l.5.5M10 2l.5.5" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round"/>
+      </svg>
+    ),
+  },
+  {
+    href: "/dashboard/handoff",
+    label: "Handoff Report",
+    icon: (
+      <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+        <rect x="2.5" y="1.5" width="8" height="10" rx="1" stroke="currentColor" strokeWidth="1.3"/>
+        <path d="M5 5h4M5 7.5h3M5 10h2" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+        <path d="M9.5 9l3 3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
       </svg>
     ),
   },
@@ -147,44 +217,12 @@ const SURFACES: NavItem[] = [
 
 const ACCOUNT: NavItem[] = [
   {
-    href: "/dashboard/usage",
-    label: "Usage",
-    icon: (
-      <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
-        <rect x="1.5" y="9.5" width="2" height="4" rx="0.5" stroke="currentColor" strokeWidth="1.3"/>
-        <rect x="5.5" y="6.5" width="2" height="7" rx="0.5" stroke="currentColor" strokeWidth="1.3"/>
-        <rect x="9.5" y="3.5" width="2" height="10" rx="0.5" stroke="currentColor" strokeWidth="1.3"/>
-        <path d="M1.5 8L5 5l4 2.5 4-5" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" strokeLinejoin="round"/>
-      </svg>
-    ),
-  },
-  {
     href: "/dashboard/api",
     label: "Developer",
     icon: (
       <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
         <rect x="1.5" y="2.5" width="12" height="10" rx="1.5" stroke="currentColor" strokeWidth="1.3"/>
         <path d="M4.5 6L3 7.5 4.5 9M10.5 6L12 7.5 10.5 9M7.5 5.5l-1 4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
-      </svg>
-    ),
-  },
-  {
-    href: "/dashboard/activity",
-    label: "Activity",
-    icon: (
-      <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
-        <path d="M1.5 7.5h2l2-4 2 8 2-4 2 2h2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
-      </svg>
-    ),
-  },
-  {
-    href: "/dashboard/billing",
-    label: "Billing",
-    icon: (
-      <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
-        <rect x="1.5" y="3.5" width="12" height="8" rx="1.5" stroke="currentColor" strokeWidth="1.3"/>
-        <path d="M1.5 6.5h12" stroke="currentColor" strokeWidth="1.3"/>
-        <path d="M4 9.5h2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
       </svg>
     ),
   },
@@ -240,14 +278,14 @@ export function Sidebar() {
 
       {/* Nav */}
       <nav className="flex-1 flex flex-col overflow-y-auto">
-        <NavGroup label="Personal Brain" items={PERSONAL} />
-        {hasCompanyBrain && <NavGroup label="Company Brain" items={COMPANY} />}
+        <NavGroup label="Clone" items={PERSONAL} />
+        {hasCompanyBrain && <NavGroup label="Company" items={COMPANY} />}
         <NavGroup label="Surfaces" items={SURFACES} />
         <NavGroup label="Account" items={ACCOUNT} />
       </nav>
 
       {/* Back to landing */}
-      <div className="px-1 mb-2">
+      <div className="px-1 mb-1">
         <Link
           href="/"
           className="flex items-center gap-3 px-3 py-2 rounded-xl text-xs text-white/25 hover:text-white/50 hover:bg-white/[0.04] transition-all"
@@ -258,6 +296,9 @@ export function Sidebar() {
           Back to site
         </Link>
       </div>
+
+      {/* Tour trigger */}
+      <TourButton />
 
       {/* Admin link — only for admins */}
       <AdminLink />
@@ -322,6 +363,70 @@ function UserFooter() {
         </svg>
         Sign out
       </button>
+    </div>
+  );
+}
+
+function TourButton() {
+  const { startTour } = useTour();
+  const { clone } = useClone();
+  const [open, setOpen] = useState(false);
+  const tier = clone?.subscription_tier ?? "free";
+  const hasCompany = tier === "enterprise_pro" || tier === "enterprise_max";
+
+  return (
+    <div className="px-1 mb-2 relative">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-xs text-white/20 hover:text-white/50 hover:bg-white/[0.04] transition-all"
+      >
+        <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+          <circle cx="6.5" cy="6.5" r="5.5" stroke="currentColor" strokeWidth="1.2"/>
+          <path d="M5 5c0-1.1.9-1.5 1.5-1.5S8 4 8 5c0 .8-.5 1.2-1 1.5-.5.3-.5.7-.5 1" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+          <circle cx="6.5" cy="9" r=".6" fill="currentColor"/>
+        </svg>
+        Take a tour
+      </button>
+
+      {open && (
+        <>
+          {/* Backdrop */}
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          {/* Popover */}
+          <div className="absolute bottom-full left-0 right-0 mb-1 z-50 backdrop-blur-xl bg-white/[0.07] border border-white/[0.10] rounded-xl p-1.5 shadow-xl">
+            <button
+              onClick={() => { startTour("getting_started"); setOpen(false); }}
+              className="w-full flex items-start gap-2.5 px-3 py-2.5 rounded-lg hover:bg-white/[0.06] transition-colors text-left"
+            >
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" className="mt-0.5 shrink-0 text-white/40">
+                <circle cx="7" cy="7" r="5.5" stroke="currentColor" strokeWidth="1.2"/>
+                <path d="M5 7l2 2 3-3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+              <div>
+                <p className="text-xs text-white/65">Getting started</p>
+                <p className="text-[11px] text-white/25 mt-0.5">Clone · Train · Brain · Deploy · Tasks · Email · API</p>
+              </div>
+            </button>
+            {hasCompany && (
+              <button
+                onClick={() => { startTour("company"); setOpen(false); }}
+                className="w-full flex items-start gap-2.5 px-3 py-2.5 rounded-lg hover:bg-white/[0.06] transition-colors text-left"
+              >
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" className="mt-0.5 shrink-0 text-violet-400/50">
+                  <rect x="1.5" y="5" width="3.5" height="3.5" rx="1" stroke="currentColor" strokeWidth="1.2"/>
+                  <rect x="8.5" y="1.5" width="3.5" height="3.5" rx="1" stroke="currentColor" strokeWidth="1.2"/>
+                  <rect x="8.5" y="8.5" width="3.5" height="3.5" rx="1" stroke="currentColor" strokeWidth="1.2"/>
+                  <path d="M5 6.75h2M7 3.25H6a.5.5 0 00-.5.5v7a.5.5 0 00.5.5h1" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+                </svg>
+                <div>
+                  <p className="text-xs text-violet-400/60">Company features</p>
+                  <p className="text-[11px] text-white/25 mt-0.5">Brain · Goals · Feed · Alerts · Skills API · Team</p>
+                </div>
+              </button>
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 }

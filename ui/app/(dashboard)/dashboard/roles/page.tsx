@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useOrg } from "@/lib/hooks/useOrg";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 
@@ -28,8 +28,10 @@ export default function RolesPage() {
   const [roles, setRoles] = useState<RoleBrain[]>([]);
   const [members, setMembers] = useState<OrgMember[]>([]);
   const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
   const [newRole, setNewRole] = useState({ role_name: "", description: "" });
   const [extractingId, setExtractingId] = useState<string | null>(null);
+  const [extractErrors, setExtractErrors] = useState<Record<string, string>>({});
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [knowledgeMap, setKnowledgeMap] = useState<Record<string, object>>({});
 
@@ -62,12 +64,18 @@ export default function RolesPage() {
     e.preventDefault();
     if (!org || !newRole.role_name.trim()) return;
     setCreating(true);
+    setCreateError(null);
     try {
-      await fetch("/api/roles", {
+      const res = await fetch("/api/roles", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ org_id: org.id, ...newRole }),
       });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setCreateError(data.detail ?? data.error ?? `Error ${res.status}`);
+        return;
+      }
       setNewRole({ role_name: "", description: "" });
       await fetchRoles(org.id);
     } finally {
@@ -77,8 +85,13 @@ export default function RolesPage() {
 
   async function handleExtract(roleId: string) {
     setExtractingId(roleId);
+    setExtractErrors((prev) => { const n = { ...prev }; delete n[roleId]; return n; });
     try {
-      await fetch(`/api/roles/${roleId}/extract`, { method: "POST" });
+      const res = await fetch(`/api/roles/${roleId}/extract`, { method: "POST" });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setExtractErrors((prev) => ({ ...prev, [roleId]: data.detail ?? data.error ?? `Error ${res.status}` }));
+      }
       await fetchRoles(org!.id);
     } finally {
       setExtractingId(null);
@@ -97,6 +110,15 @@ export default function RolesPage() {
   async function handleDelete(roleId: string) {
     if (!confirm("Delete this role brain? This also removes its extracted skills.")) return;
     await fetch(`/api/roles/${roleId}`, { method: "DELETE" });
+    await fetchRoles(org!.id);
+  }
+
+  async function handleRename(roleId: string, newName: string) {
+    await fetch(`/api/roles/${roleId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ role_name: newName }),
+    });
     await fetchRoles(org!.id);
   }
 
@@ -126,7 +148,7 @@ export default function RolesPage() {
   }
 
   return (
-    <div className="p-8 max-w-3xl flex flex-col gap-6">
+    <div className="p-8 max-w-5xl flex flex-col gap-6">
       <div className="mb-2">
         <h1 className="text-2xl font-light text-white/85">Company Brain</h1>
         <p className="text-sm text-white/35 mt-1">
@@ -171,6 +193,9 @@ export default function RolesPage() {
             placeholder="Description (optional)"
             className="glass rounded-xl px-4 py-2.5 text-sm text-white/80 placeholder:text-white/25 outline-none"
           />
+          {createError && (
+            <p className="text-xs text-red-400/70 px-1">{createError}</p>
+          )}
         </form>
       </div>
 
@@ -188,12 +213,14 @@ export default function RolesPage() {
               role={role}
               allMembers={members}
               extracting={extractingId === role.id}
+              extractError={extractErrors[role.id]}
               expanded={expandedId === role.id}
               knowledge={knowledgeMap[role.id]}
               onExtract={() => handleExtract(role.id)}
               onUpdateMembers={(ids) => handleUpdateMembers(role.id, ids)}
               onDelete={() => handleDelete(role.id)}
               onExpand={() => expandKnowledge(role)}
+              onRename={(name) => handleRename(role.id, name)}
             />
           ))}
         </div>
@@ -225,21 +252,33 @@ function FreshnessBar({ score }: { score: number }) {
 }
 
 function RoleBrainCard({
-  role, allMembers, extracting, expanded, knowledge,
-  onExtract, onUpdateMembers, onDelete, onExpand,
+  role, allMembers, extracting, extractError, expanded, knowledge,
+  onExtract, onUpdateMembers, onDelete, onExpand, onRename,
 }: {
   role: RoleBrain;
   allMembers: OrgMember[];
   extracting: boolean;
+  extractError?: string;
   expanded: boolean;
   knowledge: object | undefined;
   onExtract: () => void;
   onUpdateMembers: (ids: string[]) => void;
   onDelete: () => void;
   onExpand: () => void;
+  onRename: (newName: string) => void;
 }) {
   const [editingMembers, setEditingMembers] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>(role.member_clone_ids);
+  const [editingName, setEditingName] = useState(false);
+  const [nameValue, setNameValue] = useState(role.role_name);
+  const nameInputRef = useRef<HTMLInputElement>(null);
+
+  function commitRename() {
+    const trimmed = nameValue.trim();
+    if (trimmed && trimmed !== role.role_name) onRename(trimmed);
+    else setNameValue(role.role_name);
+    setEditingName(false);
+  }
 
   function toggleMember(id: string) {
     setSelectedIds((prev) =>
@@ -258,7 +297,28 @@ function RoleBrainCard({
       <div className="flex items-start justify-between gap-4">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            <h3 className="text-sm font-medium text-white/70">{role.role_name}</h3>
+            {editingName ? (
+              <input
+                ref={nameInputRef}
+                value={nameValue}
+                onChange={(e) => setNameValue(e.target.value)}
+                onBlur={commitRename}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") commitRename();
+                  if (e.key === "Escape") { setNameValue(role.role_name); setEditingName(false); }
+                }}
+                className="text-sm font-medium text-white/80 bg-transparent border-b border-white/25 outline-none pb-px w-48"
+                autoFocus
+              />
+            ) : (
+              <h3
+                className="text-sm font-medium text-white/70 cursor-text hover:text-white/90 transition-colors"
+                onClick={() => { setEditingName(true); setTimeout(() => nameInputRef.current?.select(), 10); }}
+                title="Click to rename"
+              >
+                {role.role_name}
+              </h3>
+            )}
             {role.skill_count > 0 && (
               <span className="text-[10px] text-emerald-400/70 bg-emerald-400/10 rounded-full px-2 py-0.5">
                 {role.skill_count} skills
@@ -294,6 +354,10 @@ function RoleBrainCard({
           </button>
         </div>
       </div>
+
+      {extractError && (
+        <p className="text-xs text-red-400/60 px-1">{extractError}</p>
+      )}
 
       {/* Members */}
       <div>

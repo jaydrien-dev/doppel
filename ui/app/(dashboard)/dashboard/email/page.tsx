@@ -9,13 +9,14 @@ import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
-type Filter = "pending" | "approved" | "edited" | "rejected" | "all";
+type Filter = "pending" | "approved" | "edited" | "rejected" | "sent" | "all";
 
 const FILTERS: { value: Filter; label: string }[] = [
   { value: "pending", label: "Needs review" },
   { value: "all", label: "All" },
   { value: "approved", label: "Approved" },
   { value: "edited", label: "Edited" },
+  { value: "sent", label: "Sent" },
   { value: "rejected", label: "Rejected" },
 ];
 
@@ -26,22 +27,24 @@ function formatDate(iso: string | null) {
   });
 }
 
-function StatusBadge({ status }: { status: EmailDraft["status"] }) {
+function StatusBadge({ status }: { status: string }) {
   const styles: Record<string, string> = {
     pending: "text-amber-300/60 bg-amber-400/[0.08] border-amber-400/15",
     approved: "text-white/50 bg-white/[0.05] border-white/10",
     edited: "text-blue-200/60 bg-blue-400/[0.08] border-blue-400/15",
     rejected: "text-white/25 bg-white/[0.03] border-white/[0.06]",
+    sent: "text-emerald-400/70 bg-emerald-400/[0.08] border-emerald-400/20",
   };
   const labels: Record<string, string> = {
     pending: "needs review",
     approved: "approved",
-    edited: "edited & sent",
+    edited: "edited",
     rejected: "rejected",
+    sent: "sent",
   };
   return (
-    <span className={cn("text-[10px] border rounded-full px-2 py-0.5", styles[status])}>
-      {labels[status]}
+    <span className={cn("text-[10px] border rounded-full px-2 py-0.5", styles[status] ?? styles.rejected)}>
+      {labels[status] ?? status}
     </span>
   );
 }
@@ -59,6 +62,7 @@ function DraftCard({
   const [editMode, setEditMode] = useState(false);
   const [editedText, setEditedText] = useState(draft.draft);
   const [saving, setSaving] = useState(false);
+  const [sending, setSending] = useState(false);
 
   async function review(status: "approved" | "edited" | "rejected", edited?: string) {
     setSaving(true);
@@ -75,7 +79,18 @@ function DraftCard({
     }
   }
 
+  async function send() {
+    setSending(true);
+    try {
+      await fetch(`/api/email/drafts/${draft.id}/send`, { method: "POST" });
+      onUpdated();
+    } finally {
+      setSending(false);
+    }
+  }
+
   const isPending = draft.status === "pending";
+  const canSend = draft.status === "approved" || draft.status === "edited";
 
   return (
     <div className={cn("glass rounded-2xl overflow-hidden transition-all", !isPending && "opacity-60 hover:opacity-80")}>
@@ -150,9 +165,9 @@ function DraftCard({
           </div>
 
           {/* Actions */}
-          {isPending && (
+          {(isPending || canSend) && (
             <div className="flex items-center gap-2">
-              {editMode ? (
+              {isPending && editMode ? (
                 <>
                   <button
                     onClick={() => review("edited", editedText)}
@@ -168,7 +183,7 @@ function DraftCard({
                     Cancel
                   </button>
                 </>
-              ) : (
+              ) : isPending ? (
                 <>
                   <button
                     onClick={() => review("approved")}
@@ -185,7 +200,15 @@ function DraftCard({
                     Reject
                   </button>
                 </>
-              )}
+              ) : canSend ? (
+                <button
+                  onClick={send}
+                  disabled={sending}
+                  className="glass-md hover:glass-hi rounded-xl px-4 py-2 text-xs text-white/70 hover:text-white/90 transition-all disabled:opacity-40"
+                >
+                  {sending ? "Sending…" : "Send via Gmail →"}
+                </button>
+              ) : null}
             </div>
           )}
         </div>
@@ -281,6 +304,54 @@ function TestDraftForm({ cloneId, onCreated }: { cloneId: string; onCreated: () 
   );
 }
 
+function GmailWatchToggle({ cloneId }: { cloneId: string }) {
+  const [enabling, setEnabling] = useState(false);
+  const [enabled, setEnabled] = useState(false);
+  const [expiresAt, setExpiresAt] = useState<string | null>(null);
+  const [error, setError] = useState("");
+
+  async function enable() {
+    setEnabling(true);
+    setError("");
+    try {
+      const res = await fetch("/api/email/watch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clone_id: cloneId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail ?? "Failed");
+      setEnabled(true);
+      setExpiresAt(data.expires_at ?? null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to enable");
+    } finally {
+      setEnabling(false);
+    }
+  }
+
+  if (enabled) {
+    return (
+      <span className="text-[10px] text-emerald-400/70 bg-emerald-400/[0.08] border border-emerald-400/20 rounded-full px-2.5 py-0.5">
+        Auto-receive on{expiresAt ? ` · expires ${new Date(expiresAt).toLocaleDateString()}` : ""}
+      </span>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      <button
+        onClick={enable}
+        disabled={enabling}
+        className="text-[10px] text-white/45 hover:text-white/65 underline underline-offset-2 transition-colors disabled:opacity-50"
+      >
+        {enabling ? "Enabling…" : "Enable auto-receive →"}
+      </button>
+      {error && <span className="text-[10px] text-red-400/60">{error}</span>}
+    </div>
+  );
+}
+
 export default function EmailPage() {
   const { clone, isLoading } = useClone();
   const [filter, setFilter] = useState<Filter>("pending");
@@ -310,13 +381,11 @@ export default function EmailPage() {
   const total = data?.total ?? 0;
 
   return (
-    <div className="p-8 max-w-2xl flex flex-col gap-5">
+    <div className="p-8 max-w-4xl flex flex-col gap-5">
       <div className="mb-2">
         <div className="flex items-center gap-3 mb-1">
           <h1 className="text-2xl font-light text-white/85">Email drafts</h1>
-          <span className="text-xs text-white/25 bg-amber-400/[0.08] text-amber-300/50 border border-amber-400/15 rounded-full px-2 py-0.5">
-            Gmail push — integration needed
-          </span>
+          <GmailWatchToggle cloneId={clone.clone_id} />
         </div>
         <p className="text-sm text-white/35">
           Review draft replies your clone wrote for incoming emails.

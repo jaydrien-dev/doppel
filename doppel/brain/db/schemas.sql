@@ -164,6 +164,7 @@ ALTER TABLE clone_identity ADD COLUMN IF NOT EXISTS allowed_emails TEXT[] NOT NU
 ALTER TABLE clone_identity ADD COLUMN IF NOT EXISTS rate_limit_per_day INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE clone_identity ADD COLUMN IF NOT EXISTS epistemic_profile JSONB NOT NULL DEFAULT '{}';
 ALTER TABLE clone_identity ADD COLUMN IF NOT EXISTS admin_policies JSONB NOT NULL DEFAULT '{}';
+ALTER TABLE clone_identity ADD COLUMN IF NOT EXISTS relational_profile JSONB NOT NULL DEFAULT '{}';
 
 
 -- ---------------------------------------------------------------------------
@@ -367,6 +368,12 @@ CREATE TABLE IF NOT EXISTS role_brains (
 
 CREATE INDEX IF NOT EXISTS role_brains_org_idx ON role_brains (org_id);
 
+-- Safety: add columns that may be missing on tables created from older schema versions
+ALTER TABLE role_brains ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+ALTER TABLE role_brains ADD COLUMN IF NOT EXISTS last_extracted_at TIMESTAMPTZ;
+ALTER TABLE role_brains ADD COLUMN IF NOT EXISTS knowledge_summary JSONB NOT NULL DEFAULT '{}';
+ALTER TABLE role_brains ADD COLUMN IF NOT EXISTS freshness_score FLOAT NOT NULL DEFAULT 1.0;
+
 
 -- ---------------------------------------------------------------------------
 -- ORG SKILLS  (Phase 4 — Skills API)
@@ -389,6 +396,8 @@ CREATE TABLE IF NOT EXISTS org_skills (
 
 CREATE INDEX IF NOT EXISTS org_skills_org_idx ON org_skills (org_id);
 CREATE INDEX IF NOT EXISTS org_skills_role_idx ON org_skills (role_brain_id);
+
+ALTER TABLE org_skills ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
 
 
 -- ---------------------------------------------------------------------------
@@ -463,3 +472,54 @@ CREATE TABLE IF NOT EXISTS audit_webhooks (
     enabled    BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+
+-- ---------------------------------------------------------------------------
+-- ACCESS AUDIT LOG  (Block 1.6 — security hardening)
+-- Every access event: queries, denials, injection attempts, settings changes.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS access_audit_log (
+    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    clone_id        UUID NOT NULL REFERENCES clone_identity(clone_id) ON DELETE CASCADE,
+    event_type      TEXT NOT NULL,   -- 'query'|'access_denied'|'settings_change'|'injection_attempt'
+    actor_user_id   TEXT,
+    actor_ip        TEXT,
+    request_surface TEXT,            -- 'chat'|'slack'|'api'|'email'|'meeting'
+    metadata        JSONB DEFAULT '{}',
+    created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS audit_log_clone_idx ON access_audit_log (clone_id, created_at DESC);
+
+
+-- ---------------------------------------------------------------------------
+-- FEATURE A — Email triage: close the loop
+-- ---------------------------------------------------------------------------
+ALTER TABLE email_drafts ADD COLUMN IF NOT EXISTS trace_id UUID;
+
+
+-- ---------------------------------------------------------------------------
+-- FEATURE B — Onboarding Buddy
+-- ---------------------------------------------------------------------------
+ALTER TABLE clone_identity ADD COLUMN IF NOT EXISTS is_onboarding_resource BOOLEAN DEFAULT FALSE;
+ALTER TABLE clone_identity ADD COLUMN IF NOT EXISTS expertise_tags TEXT[] DEFAULT '{}';
+
+
+-- ---------------------------------------------------------------------------
+-- FEATURE C — Knowledge Handoff
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS handoff_reports (
+    id               UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    clone_id         UUID NOT NULL REFERENCES clone_identity(clone_id) ON DELETE CASCADE,
+    status           TEXT NOT NULL DEFAULT 'generating', -- generating | complete | failed
+    triggered_by     TEXT,
+    domain_summary   TEXT,
+    key_decisions    JSONB DEFAULT '[]',   -- [{title, date, rationale, outcome}]
+    key_contacts     JSONB DEFAULT '[]',   -- [{name, relationship, context}]
+    processes_owned  JSONB DEFAULT '[]',   -- [{name, description, steps}]
+    successor_notes  TEXT,
+    memory_stats     JSONB DEFAULT '{}',
+    generated_at     TIMESTAMPTZ,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (clone_id)
+);
+CREATE INDEX IF NOT EXISTS handoff_reports_clone_idx ON handoff_reports (clone_id);

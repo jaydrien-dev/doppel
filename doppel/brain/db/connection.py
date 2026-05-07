@@ -9,6 +9,8 @@ engine = create_async_engine(
     echo=settings.app_env == "development",
     pool_size=10,
     max_overflow=20,
+    pool_pre_ping=True,
+    pool_recycle=300,
 )
 
 AsyncSessionLocal = async_sessionmaker(
@@ -27,7 +29,10 @@ async def get_session() -> AsyncSession:
     async with AsyncSessionLocal() as session:
         try:
             yield session
-            await session.commit()
+            # Only commit if there's an active transaction (endpoint may have already committed)
+            if session.in_transaction():
+                await session.commit()
         except Exception:
-            await session.rollback()
+            if session.in_transaction():
+                await session.rollback()
             raise

@@ -75,33 +75,32 @@ async def extract_role_knowledge(
 
     # Pull episodic memories from all member clones
     clone_id_strings = [str(cid) for cid in member_clone_ids]
+    ids_lit = "{" + ",".join(clone_id_strings) + "}"
     result = await session.execute(
-        text("""
+        text(f"""
             SELECT ci.display_name, em.content, em.source, em.context_type, em.created_at
             FROM episodic_memory em
             JOIN clone_identity ci ON ci.clone_id = em.clone_id
-            WHERE em.clone_id = ANY(CAST(:ids AS uuid[]))
+            WHERE em.clone_id = ANY('{ids_lit}'::uuid[])
               AND em.authored_by_user = true
               AND em.is_excluded = false
               AND LENGTH(em.content) > 80
             ORDER BY em.created_at DESC
             LIMIT 300
         """),
-        {"ids": "{" + ",".join(clone_id_strings) + "}"},
     )
     episodic_rows = result.fetchall()
 
     # Pull procedural memories
     result2 = await session.execute(
-        text("""
+        text(f"""
             SELECT ci.display_name, pm.pattern_type, pm.description, pm.examples
             FROM procedural_memory pm
             JOIN clone_identity ci ON ci.clone_id = pm.clone_id
-            WHERE pm.clone_id = ANY(CAST(:ids AS uuid[]))
+            WHERE pm.clone_id = ANY('{ids_lit}'::uuid[])
             ORDER BY pm.confidence DESC, pm.occurrence_count DESC
             LIMIT 100
         """),
-        {"ids": "{" + ",".join(clone_id_strings) + "}"},
     )
     procedural_rows = result2.fetchall()
 
@@ -160,7 +159,16 @@ async def extract_role_knowledge(
     try:
         knowledge = json.loads(raw)
     except json.JSONDecodeError:
-        knowledge = {"raw_extraction": raw, "parse_error": True}
+        # Try to find JSON object boundaries in case of extra prose
+        start = raw.find("{")
+        end = raw.rfind("}") + 1
+        if start != -1 and end > start:
+            try:
+                knowledge = json.loads(raw[start:end])
+            except json.JSONDecodeError:
+                knowledge = {"raw_extraction": raw, "parse_error": True}
+        else:
+            knowledge = {"raw_extraction": raw, "parse_error": True}
 
     # Compute freshness (1.0 if extracted now)
     await session.execute(
@@ -196,16 +204,14 @@ async def compute_freshness(session: AsyncSession, role_brain_id: UUID) -> float
         return 0.0
 
     # Count memories ingested after last extraction
+    ids_lit2 = "{" + ",".join(str(c) for c in (row["member_clone_ids"] or [])) + "}"
     result2 = await session.execute(
-        text("""
+        text(f"""
             SELECT COUNT(*) FROM episodic_memory
-            WHERE clone_id = ANY(CAST(:ids AS uuid[]))
+            WHERE clone_id = ANY('{ids_lit2}'::uuid[])
               AND ingested_at > :since
         """),
-        {
-            "ids": "{" + ",".join(str(c) for c in (row["member_clone_ids"] or [])) + "}",
-            "since": row["last_extracted_at"],
-        },
+        {"since": row["last_extracted_at"]},
     )
     new_count = result2.scalar() or 0
 
