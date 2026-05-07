@@ -43,7 +43,7 @@ export default function DeployPage() {
     );
   }
 
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://doppel-pi.vercel.app";
   const publicUrl = `${appUrl}/c/${clone.handle}`;
   const widgetSnippet = `<script src="${appUrl}/api/widget?handle=${clone.handle}" async></script>`;
   const iframeSnippet = `<iframe\n  src="${appUrl}/embed/${clone.handle}"\n  width="400" height="560"\n  style="border:none;border-radius:16px"\n  allow="clipboard-write"\n/>`;

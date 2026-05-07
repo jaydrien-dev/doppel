@@ -10,8 +10,10 @@ import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 // Web Speech API ambient types
 declare global {
   interface Window {
-    SpeechRecognition: typeof SpeechRecognition;
-    webkitSpeechRecognition: typeof SpeechRecognition;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    SpeechRecognition: any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    webkitSpeechRecognition: any;
   }
 }
 
@@ -60,7 +62,7 @@ const STATUS_DOT: Record<string, string> = {
 };
 
 function getWsBase(): string {
-  const http = process.env.NEXT_PUBLIC_FASTAPI_URL ?? "http://localhost:8000";
+  const http = process.env.NEXT_PUBLIC_FASTAPI_URL ?? "https://doppel.up.railway.app";
   return http.replace(/^https:\/\//, "wss://").replace(/^http:\/\//, "ws://");
 }
 

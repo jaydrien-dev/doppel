@@ -35,7 +35,7 @@ const ACTION_LABELS: Record<string, string> = {
 };
 
 function getWsBase(): string {
-  const http = process.env.NEXT_PUBLIC_FASTAPI_URL ?? "http://localhost:8000";
+  const http = process.env.NEXT_PUBLIC_FASTAPI_URL ?? "https://doppel.up.railway.app";
   return http.replace(/^https:\/\//, "wss://").replace(/^http:\/\//, "ws://");
 }
 

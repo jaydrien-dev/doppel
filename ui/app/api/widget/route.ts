@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 
 export async function GET(req: NextRequest) {
   const handle = req.nextUrl.searchParams.get("handle") ?? "";
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://doppel-pi.vercel.app";
 
   const js = buildWidgetScript(handle, appUrl);
 
