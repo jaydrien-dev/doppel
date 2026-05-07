@@ -57,8 +57,8 @@ function StatsBar({ cloneId }: { cloneId: string }) {
       label: "Responses",
       value: quality?.total_responses != null ? quality.total_responses.toLocaleString() : "—",
       sub:
-        quality?.pending_review > 0
-          ? `${quality.pending_review} pending review`
+        (quality?.pending_review ?? 0) > 0
+          ? `${quality!.pending_review} pending review`
           : quality
           ? "all reviewed"
           : "",
