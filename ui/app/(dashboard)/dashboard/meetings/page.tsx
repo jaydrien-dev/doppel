@@ -153,7 +153,7 @@ function ActiveSession({
       recognition.lang = "en-US";
       recognitionRef.current = recognition;
 
-      recognition.onresult = (event) => {
+      recognition.onresult = (event: { resultIndex: number; results: ({ isFinal: boolean } & { [i: number]: { transcript: string } })[]; }) => {
         for (let i = event.resultIndex; i < event.results.length; i++) {
           if (event.results[i].isFinal) {
             const text = event.results[i][0].transcript.trim();
