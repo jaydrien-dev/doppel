@@ -165,12 +165,15 @@ export default function TrainPage() {
         const fd = new FormData();
         fd.append("clone_id", clone.clone_id);
         fd.append("file", item.file);
-        const res = await fetch("/api/ingestion/file", { method: "POST", body: fd });
-        const data = await res.json();
+        // Upload directly to FastAPI to bypass Vercel's 4.5 MB body limit
+        const fastapiUrl = process.env.NEXT_PUBLIC_FASTAPI_URL ?? "https://doppel.up.railway.app";
+        const res = await fetch(`${fastapiUrl}/ingestion/file`, { method: "POST", body: fd });
+        let data: Record<string, unknown> = {};
+        try { data = await res.json(); } catch { data = { error: res.statusText || `HTTP ${res.status}` }; }
         if (!res.ok) {
           setFileQueue((prev) =>
             prev.map((f) =>
-              f.id === item.id ? { ...f, status: "error", result: data.detail ?? data.error ?? `${res.status}` } : f
+              f.id === item.id ? { ...f, status: "error", result: String(data.detail ?? data.error ?? `Upload failed (${res.status})`) } : f
             )
           );
         } else {
