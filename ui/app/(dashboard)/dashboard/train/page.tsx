@@ -165,9 +165,8 @@ export default function TrainPage() {
         const fd = new FormData();
         fd.append("clone_id", clone.clone_id);
         fd.append("file", item.file);
-        // Upload directly to FastAPI to bypass Vercel's 4.5 MB body limit
-        const fastapiUrl = process.env.NEXT_PUBLIC_FASTAPI_URL ?? "https://doppel.up.railway.app";
-        const res = await fetch(`${fastapiUrl}/ingestion/file`, { method: "POST", body: fd });
+        // Use /fastapi/* rewrite (edge layer) to bypass Vercel's 4.5 MB serverless limit
+        const res = await fetch("/fastapi/ingestion/file", { method: "POST", body: fd });
         let data: Record<string, unknown> = {};
         try { data = await res.json(); } catch { data = { error: res.statusText || `HTTP ${res.status}` }; }
         if (!res.ok) {

@@ -23,6 +23,12 @@ const nextConfig: NextConfig = {
         source: "/v1/:path*",
         destination: `${fastapiUrl}/v1/:path*`,
       },
+      // Edge-layer proxy for large file uploads — bypasses Vercel's 4.5 MB
+      // serverless function body limit. Uses Vercel's edge network (no limit issue).
+      {
+        source: "/fastapi/:path*",
+        destination: `${fastapiUrl}/:path*`,
+      },
     ];
   },
   async headers() {
