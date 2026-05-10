@@ -45,6 +45,7 @@ from fastapi.responses import RedirectResponse, StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from doppel.brain.security.encryption import encrypt_field, decrypt_field
 from doppel.brain.context import (
     load_clone_keys,
     get_github_client_id, get_github_client_secret,
@@ -1510,7 +1511,7 @@ async def _generate_and_store_draft(
             "subject": subject,
             "body": body,
             "thread_id": thread_id,
-            "draft": result.response.strip(),
+            "draft": encrypt_field(result.response.strip()),
             "reasoning": f"Drafted based on email from {sender} about '{subject}'.",
             "trace_id": trace_id,
         },
@@ -2667,7 +2668,7 @@ async def generate_email_draft(
         {"id": draft_id},
     )
     r = row.mappings().first()
-    return {"draft_id": draft_id, "draft": r["draft"] if r else "", "reasoning": r["reasoning"] if r else ""}
+    return {"draft_id": draft_id, "draft": decrypt_field(r["draft"]) if r else "", "reasoning": r["reasoning"] if r else ""}
 
 
 @app.get("/email/drafts")
@@ -2706,10 +2707,10 @@ async def list_email_drafts(
             "sender_email": r["sender_email"],
             "subject": r["subject"],
             "body": r["body"],
-            "draft": r["draft"],
+            "draft": decrypt_field(r["draft"]),
             "reasoning": r["reasoning"],
             "status": r["status"],
-            "edited_version": r["edited_version"],
+            "edited_version": decrypt_field(r["edited_version"]),
             "received_at": r["received_at"].isoformat() if r["received_at"] else None,
             "reviewed_at": r["reviewed_at"].isoformat() if r["reviewed_at"] else None,
         })
@@ -2750,7 +2751,7 @@ async def review_email_draft(
                 reviewed_at = NOW()
             WHERE id = :id
         """),
-        {"status": body.status, "edited": body.edited_version, "id": str(draft_id)},
+        {"status": body.status, "edited": encrypt_field(body.edited_version), "id": str(draft_id)},
     )
     if result.rowcount == 0:
         raise HTTPException(status_code=404, detail="Draft not found")
@@ -2795,7 +2796,7 @@ async def send_email_draft(
     if draft["status"] not in ("approved", "edited"):
         raise HTTPException(status_code=422, detail="Draft must be approved or edited before sending")
 
-    final_text = draft["edited_version"] if draft["status"] == "edited" else draft["draft"]
+    final_text = decrypt_field(draft["edited_version"]) if draft["status"] == "edited" else decrypt_field(draft["draft"])
     subject = draft["subject"]
     if not subject.lower().startswith("re:"):
         subject = f"Re: {subject}"
@@ -3846,7 +3847,7 @@ async def slack_callback(
             "cid": clone_id,
             "team_id": team_id,
             "team_name": team_name,
-            "token": bot_token,
+            "token": encrypt_field(bot_token),
             "bot_uid": bot_user_id,
         },
     )
@@ -3957,7 +3958,7 @@ async def slack_events(
             _respond_in_slack,
             clone_id=str(rec["clone_id"]),
             display_name=rec["display_name"],
-            bot_token=rec["bot_token"],
+            bot_token=decrypt_field(rec["bot_token"]) or "",
             channel=channel,
             thread_ts=thread_ts,
             message=clean_text,

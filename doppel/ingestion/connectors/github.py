@@ -21,6 +21,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from doppel.brain.context import get_github_client_id, get_github_client_secret
+from doppel.brain.security.encryption import encrypt_field, decrypt_field
 from doppel.config import settings
 from doppel.ingestion.connectors.base import RawItem
 
@@ -77,7 +78,7 @@ async def handle_callback(code: str, session: AsyncSession, clone_id: UUID) -> s
             ON CONFLICT (clone_id, provider)
             DO UPDATE SET access_token = EXCLUDED.access_token, created_at = now()
         """),
-        {"cid": str(clone_id), "token": access_token},
+        {"cid": str(clone_id), "token": encrypt_field(access_token)},
     )
     await session.commit()
     return access_token
@@ -89,7 +90,7 @@ async def get_access_token(session: AsyncSession, clone_id: UUID) -> str | None:
         {"cid": str(clone_id)},
     )
     rec = row.mappings().first()
-    return rec["access_token"] if rec else None
+    return decrypt_field(rec["access_token"]) if rec else None
 
 
 async def fetch_items(

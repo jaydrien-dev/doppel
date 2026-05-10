@@ -26,6 +26,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from doppel.brain.context import get_google_client_id, get_google_client_secret
+from doppel.brain.security.encryption import encrypt_field, decrypt_field
 from doppel.config import settings
 from doppel.ingestion.connectors.base import BaseConnector, RawItem
 
@@ -108,8 +109,8 @@ async def handle_callback(
         {
             "id": str(uuid4()),
             "clone_id": str(clone_id),
-            "access_token": token_data["access_token"],
-            "refresh_token": token_data.get("refresh_token"),
+            "access_token": encrypt_field(token_data["access_token"]),
+            "refresh_token": encrypt_field(token_data.get("refresh_token")),
             "expires_at": expires_at,
             "scope": token_data.get("scope"),
         },
@@ -139,9 +140,9 @@ async def _get_valid_token(clone_id: UUID, session: AsyncSession) -> str:
     if expires_at and expires_at <= datetime.now(timezone.utc) + timedelta(minutes=5):
         if not row["refresh_token"]:
             raise ValueError("Token expired and no refresh token available. Reconnect Gmail.")
-        return await _refresh_token(clone_id, row["refresh_token"], session)
+        return await _refresh_token(clone_id, decrypt_field(row["refresh_token"]) or "", session)
 
-    return row["access_token"]
+    return decrypt_field(row["access_token"]) or ""
 
 
 async def _refresh_token(
@@ -173,7 +174,7 @@ async def _refresh_token(
                 updated_at   = NOW()
             WHERE clone_id = :clone_id AND provider = 'gmail'
         """),
-        {"access_token": new_access, "expires_at": expires_at, "clone_id": str(clone_id)},
+        {"access_token": encrypt_field(new_access), "expires_at": expires_at, "clone_id": str(clone_id)},
     )
     await session.commit()
     return new_access

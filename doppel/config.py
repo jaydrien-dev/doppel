@@ -70,6 +70,11 @@ class Settings(BaseSettings):
     # e.g. https://yourdomain.com,https://www.yourdomain.com
     allowed_origins: str = Field(default="", alias="ALLOWED_ORIGINS")
 
+    # --- At-rest encryption ---
+    # 32-byte key, base64-encoded. Generate with:
+    # python -c "import os,base64; print(base64.urlsafe_b64encode(os.urandom(32)).decode())"
+    encryption_key: str = Field(default="", alias="ENCRYPTION_KEY")
+
     # --- Admin ---
     admin_user_id: str = Field(default="", alias="ADMIN_USER_ID")
 
