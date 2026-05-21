@@ -96,6 +96,15 @@ export interface ClonePublicInfo {
   display_name: string;
   handle: string;
   access_mode: "private" | "allowlist" | "public" | "org_scoped";
+  // Marketplace / public-facing fields
+  avatar_url?: string | null;
+  listing_banner_url?: string | null;
+  listing_title?: string | null;
+  is_verified?: boolean;
+  is_listed?: boolean;
+  price_per_query?: number;
+  category?: string | null;
+  listing_description?: string | null;
 }
 
 export interface CloneOwnerInfo extends ClonePublicInfo {
@@ -107,16 +116,6 @@ export interface CloneOwnerInfo extends ClonePublicInfo {
   stripe_customer_id?: string;
   allowed_emails: string[];
   rate_limit_per_day: number;
-  // Identity
-  avatar_url?: string | null;
-  listing_banner_url?: string | null;
-  listing_title?: string | null;
-  is_verified?: boolean;
-  // Marketplace
-  is_listed?: boolean;
-  price_per_query?: number;
-  category?: string;
-  listing_description?: string;
 }
 
 export interface EmailDraft {
