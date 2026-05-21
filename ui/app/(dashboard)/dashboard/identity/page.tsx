@@ -895,7 +895,7 @@ export default function IdentityPage() {
               onClick={() => setTab(t.id)}
               style={{
                 display: "flex", alignItems: "center", gap: 10,
-                padding: "10px 18px", borderRadius: 14, border: "none", cursor: "pointer",
+                padding: "10px 18px", borderRadius: 14, cursor: "pointer",
                 background: on ? t.accent.bg : "rgba(255,255,255,0.03)",
                 border: `1px solid ${on ? t.accent.border : "rgba(255,255,255,0.07)"}`,
                 color: on ? t.accent.color : "rgba(255,255,255,0.40)",
