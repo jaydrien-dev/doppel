@@ -1,23 +1,52 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { v4 as uuidv4 } from "uuid";
 import type { ChatMessage, ContextType, MemorySource } from "../types";
 
 interface UseChatOptions {
   cloneId: string;
   contextType?: ContextType;
+  sessionId?: string; // if provided, continue this session and load its history
+  ownerMode?: boolean; // true = skip credits for owner (training); false = charge owner too (consumer test)
 }
 
-export function useChat({ cloneId, contextType = "chat" }: UseChatOptions) {
+export function useChat({ cloneId, contextType = "chat", sessionId: initialSessionId, ownerMode = true }: UseChatOptions) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(!!initialSessionId);
   const [error, setError] = useState<string | null>(null);
-  const sessionId = useRef(uuidv4());
+  const sessionId = useRef(initialSessionId ?? uuidv4());
+
+  // Load previous messages when a session ID is provided
+  useEffect(() => {
+    if (!initialSessionId) return;
+    setHistoryLoading(true);
+    fetch(`/api/brain/sessions/${initialSessionId}/messages`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data?.messages?.length) {
+          setMessages(
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            data.messages.map((m: any) => ({
+              id: uuidv4(),
+              role: m.role as "user" | "clone",
+              content: m.content ?? "",
+              timestamp: m.timestamp ? new Date(m.timestamp) : new Date(),
+              path_taken: m.path_taken,
+              confidence: m.confidence ?? undefined,
+              isHistory: true,
+            }))
+          );
+        }
+      })
+      .catch(() => {/* non-fatal */})
+      .finally(() => setHistoryLoading(false));
+  }, [initialSessionId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const sendMessage = useCallback(
-    async (content: string) => {
+    async (content: string, responseMode: "fast" | "pro" | "extended" = "fast", metadata?: Record<string, unknown>) => {
       if (!content.trim() || isLoading) return;
 
       const userMsg: ChatMessage = {
@@ -53,6 +82,9 @@ export function useChat({ cloneId, contextType = "chat" }: UseChatOptions) {
             session_id: sessionId.current,
             message: content.trim(),
             context_type: contextType,
+            response_mode: responseMode,
+            owner_mode: ownerMode,
+            ...(metadata ? { metadata } : {}),
           }),
         });
 
@@ -131,7 +163,7 @@ export function useChat({ cloneId, contextType = "chat" }: UseChatOptions) {
         setIsThinking(false);
       }
     },
-    [cloneId, contextType, isLoading]
+    [cloneId, contextType, ownerMode, isLoading] // eslint-disable-line react-hooks/exhaustive-deps
   );
 
   const clearMessages = useCallback(() => {
@@ -139,5 +171,5 @@ export function useChat({ cloneId, contextType = "chat" }: UseChatOptions) {
     sessionId.current = uuidv4();
   }, []);
 
-  return { messages, isLoading, isThinking, error, sendMessage, clearMessages };
+  return { messages, isLoading, isThinking, historyLoading, error, sendMessage, clearMessages, sessionId: sessionId.current };
 }

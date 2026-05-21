@@ -16,7 +16,7 @@
 - **Light/dark:** Dark only — no light mode, no system preference detection
 
 ### Typography
-- **Font:** Manrope (Google Fonts), loaded as `var(--font-manrope)`
+- **Font:** Plus Jakarta Sans — loaded as `var(--font-sans)`, applied globally via root layout
 - **Max weight:** 600 — never use 700, 800, or 900
 - **Heading style:** `font-light` (300) for large headings, `font-medium` (500) for labels, `font-normal` (400) for body
 - **Text opacity scale:** `/85` (primary), `/60` (secondary), `/40` (tertiary), `/25` (placeholder/hint)

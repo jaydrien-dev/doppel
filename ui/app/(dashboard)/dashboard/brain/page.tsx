@@ -3,10 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { useClone } from "@/lib/hooks/useClone";
-import { cn } from "@/lib/utils";
 import type { MemoryChunk, MemorySource } from "@/lib/types";
 
-// react-force-graph-2d uses window — must be dynamically imported
 const ForceGraph2D = dynamic(() => import("react-force-graph-2d"), {
   ssr: false,
   loading: () => <GraphSkeleton />,
@@ -23,19 +21,9 @@ interface MemoryNode {
   content: string;
   meta: Record<string, unknown>;
   created_at: string;
-  // Injected by force graph
-  x?: number;
-  y?: number;
-  fx?: number | null;
-  fy?: number | null;
+  x?: number; y?: number; fx?: number | null; fy?: number | null;
 }
-
-interface MemoryEdge {
-  source: string;
-  target: string;
-  weight: number;
-}
-
+interface MemoryEdge { source: string; target: string; weight: number; }
 interface GraphData {
   nodes: MemoryNode[];
   edges: MemoryEdge[];
@@ -43,55 +31,53 @@ interface GraphData {
 }
 
 // ---------------------------------------------------------------------------
-// Colours per memory type
+// Design tokens
 // ---------------------------------------------------------------------------
 
 const TYPE_COLOR: Record<MemoryNode["type"], string> = {
-  episodic: "rgba(255,255,255,0.75)",
-  semantic: "rgba(147,197,253,0.85)",
-  procedural: "rgba(253,186,116,0.85)",
-  relational: "rgba(196,181,253,0.85)",
+  episodic:   "rgba(26,115,232,0.85)",
+  semantic:   "rgba(52,168,83,0.85)",
+  procedural: "rgba(251,188,4,0.90)",
+  relational: "rgba(156,39,176,0.80)",
 };
-
+const TYPE_DOT_COLOR: Record<MemoryNode["type"], string> = {
+  episodic:   "#1A73E8",
+  semantic:   "#34A853",
+  procedural: "#FBBC04",
+  relational: "#9C27B0",
+};
 const TYPE_LABEL: Record<MemoryNode["type"], string> = {
-  episodic: "Memory",
-  semantic: "Fact",
-  procedural: "Pattern",
-  relational: "Person",
+  episodic: "Memory", semantic: "Fact", procedural: "Pattern", relational: "Person",
 };
-
-const TYPE_DOT: Record<MemoryNode["type"], string> = {
-  episodic: "bg-white/70",
-  semantic: "bg-blue-300/80",
-  procedural: "bg-amber-300/80",
-  relational: "bg-purple-300/80",
+const TYPE_LABEL_PLURAL: Record<MemoryNode["type"], string> = {
+  episodic: "Memories", semantic: "Facts", procedural: "Patterns", relational: "People",
 };
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Skeleton / empty
 // ---------------------------------------------------------------------------
 
 function GraphSkeleton() {
   return (
-    <div className="flex-1 flex items-center justify-center">
-      <div className="w-5 h-5 rounded-full border border-white/20 border-t-white/60 animate-spin" />
+    <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ width: 20, height: 20, borderRadius: "50%", border: "2px solid rgba(255,255,255,0.1)", borderTopColor: "#1A73E8", animation: "spin 0.8s linear infinite" }} />
     </div>
   );
 }
 
 function EmptyState() {
   return (
-    <div className="flex-1 flex flex-col items-center justify-center gap-4 text-center px-8">
-      <div className="w-14 h-14 rounded-2xl glass-md flex items-center justify-center">
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16, textAlign: "center", padding: "0 32px" }}>
+      <div style={{ width: 56, height: 56, borderRadius: 16, background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.06)", display: "flex", alignItems: "center", justifyContent: "center" }}>
         <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
-          <circle cx="11" cy="11" r="9" stroke="white" strokeOpacity="0.3" strokeWidth="1.4" />
-          <circle cx="11" cy="11" r="3" stroke="white" strokeOpacity="0.3" strokeWidth="1.4" />
-          <path d="M11 2v3M11 17v3M2 11h3M17 11h3" stroke="white" strokeOpacity="0.3" strokeWidth="1.4" strokeLinecap="round" />
+          <circle cx="11" cy="11" r="9" stroke="currentColor" opacity="0.25" strokeWidth="1.4"/>
+          <circle cx="11" cy="11" r="3" stroke="currentColor" opacity="0.25" strokeWidth="1.4"/>
+          <path d="M11 2v3M11 17v3M2 11h3M17 11h3" stroke="currentColor" opacity="0.25" strokeWidth="1.4" strokeLinecap="round"/>
         </svg>
       </div>
       <div>
-        <p className="text-white/60 text-sm mb-1">No brain data yet</p>
-        <p className="text-white/25 text-xs">Train your clone with Gmail or Q&A to see your memory graph.</p>
+        <p style={{ fontSize: 14, color: "rgba(255,255,255,0.5)", marginBottom: 4 }}>No brain data yet</p>
+        <p style={{ fontSize: 12, color: "rgba(255,255,255,0.3)" }}>Train your clone with Gmail or Q&amp;A to see your memory graph.</p>
       </div>
     </div>
   );
@@ -103,69 +89,42 @@ function EmptyState() {
 
 function NodePanel({ node, onClose }: { node: MemoryNode; onClose: () => void }) {
   const color = TYPE_COLOR[node.type];
-  const badgeColors: Record<MemoryNode["type"], string> = {
-    episodic: "text-white/60 bg-white/10",
-    semantic: "text-blue-200 bg-blue-400/10",
-    procedural: "text-amber-200 bg-amber-400/10",
-    relational: "text-purple-200 bg-purple-400/10",
-  };
-
   const metaEntries = Object.entries(node.meta).filter(
     ([, v]) => v !== null && v !== undefined && v !== "" && !(Array.isArray(v) && (v as unknown[]).length === 0)
   );
-
   return (
-    <div className="w-72 shrink-0 glass border-l border-white/[0.06] flex flex-col h-full overflow-hidden">
-      {/* Header */}
-      <div className="px-5 py-4 border-b border-white/[0.06] flex items-center justify-between">
-        <span
-          className={cn("text-[10px] font-medium px-2 py-0.5 rounded-full", badgeColors[node.type])}
-        >
+    <div style={{ width: 280, flexShrink: 0, background: "#0D0D0D", borderLeft: "1px solid rgba(255,255,255,0.06)", display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+      <div style={{ padding: "14px 20px", borderBottom: "1px solid rgba(255,255,255,0.06)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <span style={{ fontSize: 9, fontWeight: 600, letterSpacing: "0.14em", textTransform: "uppercase", color, padding: "2px 8px", borderRadius: 6, background: `color-mix(in srgb, ${color} 14%, transparent)` }}>
           {TYPE_LABEL[node.type]}
         </span>
-        <button
-          onClick={onClose}
-          className="text-white/25 hover:text-white/60 transition-colors"
-        >
+        <button onClick={onClose} style={{ background: "none", border: "none", color: "rgba(255,255,255,0.3)", cursor: "pointer", padding: 4, display: "flex", alignItems: "center", justifyContent: "center" }}>
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-            <path d="M1 1l12 12M13 1L1 13" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+            <path d="M1 1l12 12M13 1L1 13" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
           </svg>
         </button>
       </div>
-
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto p-5 space-y-4">
-        {/* Node colour accent */}
-        <div
-          className="w-2 h-2 rounded-full"
-          style={{ backgroundColor: color, boxShadow: `0 0 8px ${color}` }}
-        />
-
-        <p className="text-sm text-white/80 leading-relaxed">{node.content}</p>
-
+      <div style={{ flex: 1, overflowY: "auto", padding: 20, display: "flex", flexDirection: "column", gap: 16 }}>
+        <div style={{ width: 8, height: 8, borderRadius: "50%", background: color, boxShadow: `0 0 8px ${color}` }} />
+        <p style={{ fontSize: 13, color: "rgba(255,255,255,0.75)", lineHeight: 1.6, margin: 0 }}>{node.content}</p>
         {metaEntries.length > 0 && (
-          <div className="space-y-2">
-            <p className="text-[10px] text-white/25 uppercase tracking-wider">Details</p>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <p style={{ fontSize: 10, color: "rgba(255,255,255,0.25)", textTransform: "uppercase", letterSpacing: "0.12em" }}>Details</p>
             {metaEntries.map(([k, v]) => (
-              <div key={k} className="flex items-start gap-2">
-                <span className="text-xs text-white/30 shrink-0 min-w-[80px] capitalize">
+              <div key={k} style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+                <span style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", flexShrink: 0, minWidth: 80, textTransform: "capitalize" }}>
                   {k.replace(/_/g, " ")}
                 </span>
-                <span className="text-xs text-white/60">
+                <span style={{ fontSize: 11, color: "rgba(255,255,255,0.6)" }}>
                   {Array.isArray(v) ? (v as string[]).join(", ") : String(v)}
                 </span>
               </div>
             ))}
           </div>
         )}
-
         {node.created_at && (
-          <p className="text-[10px] text-white/20">
-            {new Date(node.created_at).toLocaleDateString("en-US", {
-              month: "short",
-              day: "numeric",
-              year: "numeric",
-            })}
+          <p style={{ fontSize: 10, color: "rgba(255,255,255,0.2)" }}>
+            {new Date(node.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
           </p>
         )}
       </div>
@@ -177,10 +136,12 @@ function NodePanel({ node, onClose }: { node: MemoryNode; onClose: () => void })
 // Timeline panel
 // ---------------------------------------------------------------------------
 
-interface TimelineMonth {
-  label: string;
-  chunks: MemoryChunk[];
-}
+interface TimelineMonth { label: string; chunks: MemoryChunk[]; }
+
+const SOURCE_COLOR_MAP: Record<string, string> = {
+  gmail:   "#F87171", slack:   "#A78BFA", notion: "rgba(255,255,255,0.4)",
+  upload:  "#60A5FA", chat:    "#34D399", seed_qa: "#FBBF24", meeting: "#67E8F9",
+};
 
 function TimelinePanel({ cloneId }: { cloneId: string }) {
   const [months, setMonths] = useState<TimelineMonth[]>([]);
@@ -236,67 +197,49 @@ function TimelinePanel({ cloneId }: { cloneId: string }) {
       });
   }
 
-  const SOURCE_COLOR: Record<string, string> = {
-    gmail: "text-red-300/60",
-    slack: "text-purple-300/60",
-    notion: "text-white/40",
-    upload: "text-blue-300/60",
-    chat: "text-emerald-300/60",
-    seed_qa: "text-amber-300/60",
-    meeting: "text-cyan-300/60",
-  };
-
   if (loading) {
     return (
-      <div className="flex items-center gap-2 p-8">
-        <div className="w-1.5 h-1.5 rounded-full bg-white/20 animate-pulse" />
-        <span className="text-sm text-white/30">Loading timeline…</span>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: 32, color: "rgba(255,255,255,0.3)", fontSize: 13 }}>
+        <div style={{ width: 6, height: 6, borderRadius: "50%", background: "rgba(255,255,255,0.2)", animation: "pulse 1.5s ease-in-out infinite" }} />
+        Loading timeline…
       </div>
     );
   }
 
   if (months.length === 0) {
     return (
-      <div className="p-8 text-center">
-        <p className="text-sm text-white/30">No memories yet. Train your clone to see the timeline.</p>
+      <div style={{ padding: 32, textAlign: "center" }}>
+        <p style={{ fontSize: 13, color: "rgba(255,255,255,0.35)" }}>No memories yet. Train your clone to see the timeline.</p>
       </div>
     );
   }
 
   return (
-    <div className="flex-1 overflow-y-auto px-6 py-5 space-y-8">
+    <div style={{ flex: 1, overflowY: "auto", padding: "20px 24px", display: "flex", flexDirection: "column", gap: 32 }}>
       {months.map(({ label, chunks }) => (
         <div key={label}>
-          <div className="flex items-center gap-3 mb-3">
-            <span className="text-[10px] uppercase tracking-widest text-white/25 font-medium">{label}</span>
-            <div className="flex-1 h-px bg-white/[0.06]" />
-            <span className="text-[10px] text-white/20">{chunks.length}</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
+            <span style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.18em", color: "rgba(255,255,255,0.25)", fontWeight: 500 }}>{label}</span>
+            <div style={{ flex: 1, height: 1, background: "rgba(255,255,255,0.06)" }} />
+            <span style={{ fontSize: 10, color: "rgba(255,255,255,0.2)" }}>{chunks.length}</span>
           </div>
-          <div className="space-y-2">
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             {chunks.map((c) => (
-              <div key={c.id} className="glass rounded-xl p-3 flex items-start gap-3 group">
-                <div className={cn(
-                  "shrink-0 text-[10px] font-mono mt-0.5",
-                  SOURCE_COLOR[c.source] ?? "text-white/30"
-                )}>
+              <div key={c.id} style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, padding: "10px 14px", display: "flex", alignItems: "flex-start", gap: 12 }}>
+                <span style={{ flexShrink: 0, fontSize: 10, fontFamily: "ui-monospace, Menlo, monospace", marginTop: 2, color: SOURCE_COLOR_MAP[c.source] ?? "rgba(255,255,255,0.3)" }}>
                   {c.source}
-                </div>
-                <p className="flex-1 text-xs text-white/55 leading-relaxed line-clamp-3">{c.content}</p>
-                <div className="shrink-0 flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                  {c.is_pinned && (
-                    <span className="text-[9px] text-amber-300/60 bg-amber-400/10 px-1.5 py-0.5 rounded-full">pinned</span>
-                  )}
-                </div>
+                </span>
+                <p style={{ flex: 1, fontSize: 12, color: "rgba(255,255,255,0.55)", lineHeight: 1.55, margin: 0, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical" as const }}>{c.content}</p>
+                {c.is_pinned && (
+                  <span style={{ fontSize: 9, color: "#FBBF24", background: "rgba(251,191,36,0.10)", padding: "2px 6px", borderRadius: 999, flexShrink: 0 }}>pinned</span>
+                )}
               </div>
             ))}
           </div>
         </div>
       ))}
       {hasMore && (
-        <button
-          onClick={loadMore}
-          className="w-full py-2 rounded-xl text-xs text-white/30 glass hover:glass-md transition-all"
-        >
+        <button onClick={loadMore} className="btn" style={{ alignSelf: "center" }}>
           Load more
         </button>
       )}
@@ -321,80 +264,69 @@ function TestBeliefPanel({ cloneId }: { cloneId: string }) {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          clone_id: cloneId,
-          session_id: crypto.randomUUID(),
-          message: query.trim(),
-          context_type: "chat",
-        }),
+        body: JSON.stringify({ clone_id: cloneId, session_id: crypto.randomUUID(), message: query.trim(), context_type: "chat" }),
       });
-      const data = await res.json();
-      setResult(data);
+      setResult(await res.json());
     } finally {
       setTesting(false);
     }
   }
 
   return (
-    <div className="flex-1 overflow-y-auto px-6 py-5 max-w-2xl">
-      <p className="text-xs text-white/35 mb-5 leading-relaxed">
-        Ask your clone a question and see exactly which memories it pulls from. Useful for understanding what knowledge drives each response.
+    <div style={{ flex: 1, overflowY: "auto", padding: "20px 24px", maxWidth: 720 }}>
+      <p style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", marginBottom: 20, lineHeight: 1.6 }}>
+        Ask your clone a question and see exactly which memories it pulls from.
       </p>
 
-      <div className="flex gap-2 mb-6">
+      <div style={{ display: "flex", gap: 8, marginBottom: 24 }}>
         <input
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && test()}
           placeholder='Try "What do I believe about hiring?" or "How do I handle conflict?"'
-          className="flex-1 bg-white/[0.05] border border-white/[0.08] rounded-xl px-3 py-2 text-sm text-white/70 placeholder:text-white/25 outline-none focus:border-white/20 transition-colors"
+          className="input"
+          style={{ flex: 1 }}
         />
-        <button
-          onClick={test}
-          disabled={testing || !query.trim()}
-          className="shrink-0 px-4 py-2 rounded-xl text-xs text-white/60 glass hover:glass-md transition-all disabled:opacity-40"
-        >
+        <button onClick={test} disabled={testing || !query.trim()} className="btn btn--primary">
           {testing ? "Thinking…" : "Test"}
         </button>
       </div>
 
       {result && (
-        <div className="space-y-4">
-          {/* Response */}
-          <div className="glass rounded-2xl p-4">
-            <div className="flex items-center gap-2 mb-3">
-              <span className="text-[10px] uppercase tracking-widest text-white/25">Response</span>
-              <span className={cn(
-                "text-[10px] px-2 py-0.5 rounded-full border",
-                result.path_taken === "slow"
-                  ? "text-blue-300/50 bg-blue-400/[0.07] border-blue-400/15"
-                  : "text-emerald-300/50 bg-emerald-400/[0.07] border-emerald-400/15"
-              )}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <div className="card">
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+              <span style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.14em", color: "rgba(255,255,255,0.3)" }}>Response</span>
+              <span style={{
+                fontSize: 10, padding: "2px 8px", borderRadius: 999,
+                color: result.path_taken === "slow" ? "rgba(96,165,250,0.7)" : "rgba(52,211,153,0.7)",
+                background: result.path_taken === "slow" ? "rgba(96,165,250,0.08)" : "rgba(52,211,153,0.08)",
+                border: `1px solid ${result.path_taken === "slow" ? "rgba(96,165,250,0.2)" : "rgba(52,211,153,0.2)"}`,
+              }}>
                 {result.path_taken} path
               </span>
-              <span className="ml-auto text-[10px] text-white/25">
+              <span style={{ marginLeft: "auto", fontSize: 10, color: "rgba(255,255,255,0.25)", fontFamily: "ui-monospace, Menlo, monospace" }}>
                 {Math.round(result.confidence * 100)}% confidence
               </span>
             </div>
-            <p className="text-sm text-white/70 leading-relaxed">{result.response}</p>
+            <p style={{ fontSize: 13, color: "rgba(255,255,255,0.7)", lineHeight: 1.6, margin: 0 }}>{result.response}</p>
           </div>
 
-          {/* Sources */}
           {result.sources.length > 0 && (
             <div>
-              <p className="text-[10px] uppercase tracking-widest text-white/25 mb-2 px-1">
+              <p style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.14em", color: "rgba(255,255,255,0.25)", marginBottom: 8 }}>
                 Memories used ({result.sources.length})
               </p>
-              <div className="space-y-2">
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 {result.sources.map((s, i) => (
-                  <div key={i} className="glass rounded-xl p-3 flex items-start gap-3">
-                    <span className="text-[10px] font-mono text-white/25 shrink-0 mt-0.5 w-8">
+                  <div key={i} style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, padding: "10px 14px", display: "flex", alignItems: "flex-start", gap: 12 }}>
+                    <span style={{ fontSize: 10, fontFamily: "ui-monospace, Menlo, monospace", color: "rgba(255,255,255,0.25)", flexShrink: 0, marginTop: 1, width: 32 }}>
                       {(s.similarity * 100).toFixed(0)}%
                     </span>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs text-white/55 leading-relaxed line-clamp-3">{s.content}</p>
-                      <p className="text-[10px] text-white/25 mt-1 font-mono">{s.source}</p>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <p style={{ fontSize: 12, color: "rgba(255,255,255,0.55)", lineHeight: 1.55, margin: "0 0 4px" }}>{s.content}</p>
+                      <p style={{ fontSize: 10, color: "rgba(255,255,255,0.25)", fontFamily: "ui-monospace, Menlo, monospace", margin: 0 }}>{s.source}</p>
                     </div>
                   </div>
                 ))}
@@ -403,8 +335,8 @@ function TestBeliefPanel({ cloneId }: { cloneId: string }) {
           )}
 
           {result.sources.length === 0 && (
-            <div className="glass rounded-xl p-3">
-              <p className="text-xs text-white/30">No specific memories retrieved — response generated from identity layer only.</p>
+            <div className="card">
+              <p style={{ fontSize: 12, color: "rgba(255,255,255,0.3)", margin: 0 }}>No specific memories retrieved — response generated from identity layer only.</p>
             </div>
           )}
         </div>
@@ -432,34 +364,26 @@ export default function BrainPage() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const graphRef = useRef<any>(null);
 
-  // Measure container
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
-    const obs = new ResizeObserver(() => {
-      setDimensions({ width: el.offsetWidth, height: el.offsetHeight });
-    });
+    const obs = new ResizeObserver(() => setDimensions({ width: el.offsetWidth, height: el.offsetHeight }));
     obs.observe(el);
     setDimensions({ width: el.offsetWidth, height: el.offsetHeight });
     return () => obs.disconnect();
   }, []);
 
-  // Fetch graph data
   useEffect(() => {
     if (!clone) return;
     setLoading(true);
     setError("");
     fetch(`/api/brain/graph?clone_id=${clone.clone_id}`)
-      .then((r) => {
-        if (!r.ok) throw new Error("Failed to load brain graph");
-        return r.json();
-      })
+      .then((r) => { if (!r.ok) throw new Error("Failed to load brain graph"); return r.json(); })
       .then((d: GraphData) => setGraphData(d))
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   }, [clone]);
 
-  // Custom node rendering
   const nodeCanvasObject = useCallback(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (node: any, ctx: CanvasRenderingContext2D, globalScale: number) => {
@@ -467,12 +391,10 @@ export default function BrainPage() {
       const isSelected = selectedNode?.id === n.id;
       const isHovered = hoveredNode?.id === n.id;
       const isPinned = n.meta?.is_pinned === true;
-
       const baseRadius = n.type === "relational" ? 5 : 4;
       const radius = baseRadius + (isPinned ? 2 : 0);
       const color = TYPE_COLOR[n.type];
 
-      // Glow for selected/hovered
       if (isSelected || isHovered) {
         ctx.beginPath();
         ctx.arc(n.x, n.y, radius + 4, 0, 2 * Math.PI);
@@ -482,19 +404,16 @@ export default function BrainPage() {
         ctx.fillStyle = gradient;
         ctx.fill();
       }
-
-      // Main dot
       ctx.beginPath();
       ctx.arc(n.x, n.y, radius, 0, 2 * Math.PI);
-      ctx.fillStyle = isSelected || isHovered ? color : color.replace(/[\d.]+\)$/, "0.5)");
+      ctx.fillStyle = isSelected || isHovered ? color : color.replace(/[\d.]+\)$/, "0.88)");
       ctx.fill();
 
-      // Label (only when zoomed in enough)
       if (globalScale >= 1.5 || isSelected || isHovered) {
         const label = n.label.length > 40 ? n.label.slice(0, 40) + "…" : n.label;
         const fontSize = Math.max(10 / globalScale, 2.5);
-        ctx.font = `${fontSize}px sans-serif`;
-        ctx.fillStyle = "rgba(255,255,255,0.55)";
+        ctx.font = `${fontSize}px "Plus Jakarta Sans", system-ui, sans-serif`;
+        ctx.fillStyle = "rgba(255,255,255,0.45)";
         ctx.textAlign = "center";
         ctx.fillText(label, n.x, n.y + radius + fontSize + 1);
       }
@@ -503,23 +422,11 @@ export default function BrainPage() {
   );
 
   const handleNodeClick = useCallback((node: unknown) => {
-    setSelectedNode((prev) => {
-      const n = node as MemoryNode;
-      return prev?.id === n.id ? null : n;
-    });
+    setSelectedNode((prev) => { const n = node as MemoryNode; return prev?.id === n.id ? null : n; });
   }, []);
-
-  const handleNodeHover = useCallback((node: unknown) => {
-    setHoveredNode(node ? (node as MemoryNode) : null);
-  }, []);
-
-  const handleBackgroundClick = useCallback(() => {
-    setSelectedNode(null);
-  }, []);
-
-  const handleZoomFit = useCallback(() => {
-    graphRef.current?.zoomToFit(400);
-  }, []);
+  const handleNodeHover = useCallback((node: unknown) => { setHoveredNode(node ? (node as MemoryNode) : null); }, []);
+  const handleBackgroundClick = useCallback(() => setSelectedNode(null), []);
+  const handleZoomFit = useCallback(() => graphRef.current?.zoomToFit(400), []);
 
   if (cloneLoading) return <GraphSkeleton />;
 
@@ -534,65 +441,57 @@ export default function BrainPage() {
   ];
 
   return (
-    <div className="flex h-full overflow-hidden">
-      <div className="flex-1 flex flex-col min-w-0">
+    <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
+
         {/* Top bar */}
-        <div className="flex items-center justify-between px-6 py-3 border-b border-white/[0.06] shrink-0">
-          {/* Tabs */}
-          <div className="flex items-center gap-1 bg-white/[0.03] rounded-xl p-1">
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          padding: "12px 24px", borderBottom: "1px solid rgba(255,255,255,0.06)", flexShrink: 0,
+          background: "rgba(8,8,8,0.82)", backdropFilter: "blur(20px) saturate(140%)",
+        }}>
+          {/* Tab switcher */}
+          <div style={{ display: "flex", gap: 2, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, padding: 3 }}>
             {TABS.map((t) => (
-              <button
-                key={t.id}
-                onClick={() => setView(t.id)}
-                className={cn(
-                  "px-3 py-1 rounded-lg text-xs transition-all",
-                  view === t.id
-                    ? "glass-md text-white/75"
-                    : "text-white/30 hover:text-white/55"
-                )}
-              >
+              <button key={t.id} onClick={() => setView(t.id)} style={{
+                padding: "6px 14px", borderRadius: 9, border: "none",
+                background: view === t.id ? "rgba(255,255,255,0.07)" : "transparent",
+                color: view === t.id ? "rgba(255,255,255,0.85)" : "rgba(255,255,255,0.4)",
+                fontFamily: "inherit", fontSize: 12, fontWeight: 500, cursor: "pointer",
+                transition: "all 180ms cubic-bezier(0.25,0.46,0.45,0.94)",
+              }}>
                 {t.label}
               </button>
             ))}
           </div>
 
-          {/* Graph legend + controls (only on graph tab) */}
-          {view === "graph" && (
-            <div className="flex items-center gap-4">
-              {graphData && totalNodes > 0 && (
-                <>
-                  <div className="flex items-center gap-4">
-                    {(["episodic", "semantic", "procedural", "relational"] as const).map((type) => (
-                      graphData.stats[type] > 0 && (
-                        <div key={type} className="flex items-center gap-1.5">
-                          <div className={cn("w-1.5 h-1.5 rounded-full", TYPE_DOT[type])} />
-                          <span className="text-xs text-white/30">
-                            {graphData.stats[type]} {TYPE_LABEL[type]}
-                            {graphData.stats[type] !== 1 ? "s" : ""}
-                          </span>
-                        </div>
-                      )
-                    ))}
-                  </div>
-                  <button
-                    onClick={handleZoomFit}
-                    className="glass rounded-lg px-3 py-1.5 text-xs text-white/40 hover:text-white/70 transition-colors"
-                  >
-                    Fit view
-                  </button>
-                </>
-              )}
+          {/* Graph legend */}
+          {view === "graph" && graphData && totalNodes > 0 && (
+            <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+                {(["episodic", "semantic", "procedural", "relational"] as const).map((type) =>
+                  graphData.stats[type] > 0 ? (
+                    <div key={type} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <div style={{ width: 6, height: 6, borderRadius: "50%", background: TYPE_DOT_COLOR[type] }} />
+                      <span style={{ fontSize: 11, color: "rgba(255,255,255,0.4)" }}>
+                        {graphData.stats[type]} {graphData.stats[type] === 1 ? TYPE_LABEL[type] : TYPE_LABEL_PLURAL[type]}
+                      </span>
+                    </div>
+                  ) : null
+                )}
+              </div>
+              <button onClick={handleZoomFit} className="btn btn--sm btn--ghost">Fit view</button>
             </div>
           )}
         </div>
 
-        {/* Panel content */}
+        {/* Panel */}
         {view === "graph" && (
-          <div ref={containerRef} className="flex-1 relative overflow-hidden">
+          <div ref={containerRef} style={{ flex: 1, position: "relative", overflow: "hidden" }}>
             {loading && <GraphSkeleton />}
             {!loading && error && (
-              <div className="flex-1 flex items-center justify-center h-full">
-                <p className="text-xs text-white/30">{error}</p>
+              <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", height: "100%" }}>
+                <p style={{ fontSize: 12, color: "rgba(255,255,255,0.3)" }}>{error}</p>
               </div>
             )}
             {!loading && !error && graphData && totalNodes === 0 && <EmptyState />}
@@ -601,11 +500,7 @@ export default function BrainPage() {
                 ref={graphRef}
                 graphData={{
                   nodes: graphData.nodes as object[],
-                  links: graphData.edges.map((e) => ({
-                    source: e.source,
-                    target: e.target,
-                    weight: e.weight,
-                  })),
+                  links: graphData.edges.map((e) => ({ source: e.source, target: e.target, weight: e.weight })),
                 }}
                 width={dimensions.width}
                 height={dimensions.height}
@@ -614,48 +509,40 @@ export default function BrainPage() {
                 nodeCanvasObject={nodeCanvasObject}
                 nodeCanvasObjectMode={() => "replace"}
                 linkColor={() => "rgba(255,255,255,0.06)"}
-                linkWidth={(link) => {
-                  const l = link as { weight?: number };
-                  return (l.weight ?? 0.5) * 1.2;
-                }}
+                linkWidth={(link) => ((link as { weight?: number }).weight ?? 0.5) * 1.2}
                 onNodeClick={handleNodeClick}
                 onNodeHover={handleNodeHover}
                 onBackgroundClick={handleBackgroundClick}
                 cooldownTicks={120}
                 d3AlphaDecay={0.02}
                 d3VelocityDecay={0.4}
-                enableNodeDrag={true}
-                enableZoomInteraction={true}
-                enablePanInteraction={true}
+                enableNodeDrag
+                enableZoomInteraction
+                enablePanInteraction
               />
             )}
             {!loading && graphData && totalNodes > 0 && (
-              <p className="absolute bottom-4 left-1/2 -translate-x-1/2 text-[10px] text-white/15 pointer-events-none select-none">
+              <p style={{ position: "absolute", bottom: 16, left: "50%", transform: "translateX(-50%)", fontSize: 10, color: "rgba(255,255,255,0.2)", pointerEvents: "none", userSelect: "none" }}>
                 Drag nodes · Scroll to zoom · Click to inspect
               </p>
             )}
           </div>
         )}
 
-        {view === "timeline" && clone && (
-          <TimelinePanel cloneId={clone.clone_id} />
-        )}
-
-        {view === "test" && clone && (
-          <TestBeliefPanel cloneId={clone.clone_id} />
-        )}
-
+        {view === "timeline" && clone && <TimelinePanel cloneId={clone.clone_id} />}
+        {view === "test" && clone && <TestBeliefPanel cloneId={clone.clone_id} />}
         {(view === "timeline" || view === "test") && !clone && (
-          <div className="flex-1 flex items-center justify-center">
-            <p className="text-sm text-white/30">Create your clone first.</p>
+          <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <p style={{ fontSize: 13, color: "rgba(255,255,255,0.3)" }}>Create your clone first.</p>
           </div>
         )}
       </div>
 
-      {/* Side panel (graph view only) */}
       {view === "graph" && selectedNode && (
         <NodePanel node={selectedNode} onClose={() => setSelectedNode(null)} />
       )}
+
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 }

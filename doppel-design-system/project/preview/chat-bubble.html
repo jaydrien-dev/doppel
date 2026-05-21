@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<link rel="stylesheet" href="../colors_and_type.css"/>
+<link rel="stylesheet" href="_base.css"/>
+<style>html, body { width: 700px; margin:0; padding:0; }</style>
+</head>
+<body>
+<div style="background:#080808; padding:22px;">
+  <div style="font-size:10px; font-weight:500; letter-spacing:0.18em; text-transform:uppercase; color:rgba(255,255,255,0.4); margin-bottom:14px;">Chat · message bubble with citation</div>
+  <div style="display:flex; flex-direction:column; gap:10px;">
+    <div style="display:flex; justify-content:flex-end;">
+      <div style="background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.06); border-radius:16px; border-top-right-radius:4px; padding:9px 14px; font-size:13px; color:rgba(255,255,255,0.7); max-width:75%;">
+        Why did we choose Postgres over Dynamo for the events table?
+      </div>
+    </div>
+    <div style="display:flex; gap:10px; align-items:flex-start;">
+      <div style="width:24px; height:24px; border-radius:8px; background:rgba(255,255,255,0.05); display:flex; align-items:center; justify-content:center; font-size:11px; color:rgba(255,255,255,0.4); font-weight:600;">S</div>
+      <div style="flex:1; max-width:80%;">
+        <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.05); border-radius:16px; border-top-left-radius:4px; padding:9px 14px; font-size:13px; color:rgba(255,255,255,0.6); line-height:1.55;">
+          We evaluated both in Q3 2024. The main constraint was complex join patterns — Dynamo's single-table model would've forced duplicate writes everywhere.
+        </div>
+        <div style="display:flex; align-items:center; gap:8px; margin-top:6px; padding:0 4px;">
+          <span style="font-size:10px; font-weight:500; padding:2px 6px; border-radius:6px; border:1px solid rgba(52,211,153,0.25); color:#10B981;">92% confident</span>
+          <span style="font-size:10px; color:rgba(255,255,255,0.25);">3 sources · email, Slack, design doc</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div></body>
+</html>

@@ -1,0 +1,305 @@
+/* =============================================================================
+   Doppel — Colors & Type
+   -----------------------------------------------------------------------------
+   Doppel runs two distinct surfaces:
+     - Creator dashboard / chat (DARK) — #080808 base, glassmorphic panels
+     - Consumer marketplace / synthesis (LIGHT) — #F8F9FA base, white cards
+
+   These tokens cover both. Light surfaces opt in by wrapping in `.doppel-light`.
+   Dark is the default. Semantic vars (`--fg-1`, etc) flip automatically inside
+   `.doppel-light`.
+
+   Font: Plus Jakarta Sans, weights 300–600 only. Never 700/800/900.
+   ========================================================================== */
+
+/* ---- Webfont (use the .woff2 in fonts/ when offline) --------------------- */
+@import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600&display=swap");
+
+:root {
+  /* ---------------------------------------------------------------------- */
+  /* Brand / accent                                                          */
+  /* ---------------------------------------------------------------------- */
+  --doppel-blue:        #1A73E8;   /* consumer primary, also focus ring */
+  --doppel-blue-hover:  #1765C9;
+  --doppel-blue-soft:   rgba(26, 115, 232, 0.08);
+  --doppel-blue-ring:   rgba(26, 115, 232, 0.30);
+
+  /* ---------------------------------------------------------------------- */
+  /* Status accents — used SPARINGLY, only for these semantics.              */
+  /*   emerald = positive / preserved                                        */
+  /*   red     = destructive / lost                                          */
+  /*   violet  = enterprise badge ONLY                                       */
+  /*   amber   = warning / escalation                                        */
+  /* ---------------------------------------------------------------------- */
+  --emerald-400:        #34D399;
+  --emerald-soft:       rgba(52, 211, 153, 0.10);
+  --red-400:            #F87171;
+  --red-soft:           rgba(248, 113, 113, 0.10);
+  --violet-400:         #A78BFA;
+  --violet-soft:        rgba(167, 139, 250, 0.10);
+  --amber-400:          #FBBF24;
+  --amber-soft:         rgba(251, 191, 36, 0.10);
+
+  /* ---------------------------------------------------------------------- */
+  /* DARK surface (default — creator dashboard, chat, landing)               */
+  /* ---------------------------------------------------------------------- */
+  --bg-dark:            #080808;
+  --bg-dark-elev-1:     rgba(255, 255, 255, 0.04);   /* glass */
+  --bg-dark-elev-2:     rgba(255, 255, 255, 0.07);   /* glass-md */
+  --bg-dark-elev-3:     rgba(255, 255, 255, 0.11);   /* glass-hi */
+  --border-dark:        rgba(255, 255, 255, 0.06);
+  --border-dark-hover:  rgba(255, 255, 255, 0.12);
+
+  --fg-dark-1:          rgba(255, 255, 255, 0.85);   /* primary text */
+  --fg-dark-2:          rgba(255, 255, 255, 0.60);   /* secondary */
+  --fg-dark-3:          rgba(255, 255, 255, 0.40);   /* tertiary */
+  --fg-dark-4:          rgba(255, 255, 255, 0.25);   /* placeholder, disabled */
+
+  /* ---------------------------------------------------------------------- */
+  /* LIGHT surface (marketplace, synthesis, bundles)                         */
+  /* ---------------------------------------------------------------------- */
+  --bg-light:           #F8F9FA;
+  --bg-light-card:      #FFFFFF;
+  --bg-light-muted:     #F1F3F4;     /* search bg, hover row */
+  --border-light:       rgba(0, 0, 0, 0.08);
+  --border-light-hover: rgba(0, 0, 0, 0.14);
+  --border-light-strong:rgba(0, 0, 0, 0.10);
+
+  --fg-light-1:         #1D1D1F;     /* primary text */
+  --fg-light-2:         #5F6368;     /* secondary */
+  --fg-light-3:         #9CA3AF;     /* tertiary */
+  --fg-light-4:         #C7CACD;     /* placeholder, disabled */
+
+  /* ---------------------------------------------------------------------- */
+  /* Shadows                                                                  */
+  /*   Light surface uses real soft shadows; dark surface uses none           */
+  /*   (depth comes from glass overlay + border).                             */
+  /* ---------------------------------------------------------------------- */
+  --shadow-sm:  0 1px 3px rgba(0, 0, 0, 0.06), 0 0 0 1px rgba(0, 0, 0, 0.04);
+  --shadow-md:  0 4px 16px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(0, 0, 0, 0.05);
+  --shadow-lg:  0 8px 32px rgba(0, 0, 0, 0.10);
+  --shadow-blue:0 4px 14px rgba(26, 115, 232, 0.25);
+
+  /* ---------------------------------------------------------------------- */
+  /* Radii — strictly: 2xl for cards, xl for inputs/buttons                   */
+  /* ---------------------------------------------------------------------- */
+  --radius-sm:   6px;     /* tiny chips */
+  --radius-md:   8px;     /* small badges */
+  --radius-lg:   12px;    /* xl — inputs, buttons */
+  --radius-xl:   16px;    /* 2xl — cards, panels */
+  --radius-2xl:  24px;    /* large feature cards, hero */
+  --radius-full: 9999px;
+
+  /* ---------------------------------------------------------------------- */
+  /* Spacing scale (4-pt grid, capped at 64)                                  */
+  /* ---------------------------------------------------------------------- */
+  --space-1:   4px;
+  --space-2:   8px;
+  --space-3:   12px;
+  --space-4:   16px;
+  --space-5:   20px;
+  --space-6:   24px;
+  --space-8:   32px;
+  --space-10:  40px;
+  --space-12:  48px;
+  --space-16:  64px;
+
+  /* ---------------------------------------------------------------------- */
+  /* Motion — ALL ease curves; no spring/bounce in product UI.                */
+  /*   Reserve `--ease-spring` for landing-page hero only.                    */
+  /* ---------------------------------------------------------------------- */
+  --ease-ios:    cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --dur-fast:    180ms;
+  --dur-base:    280ms;
+  --dur-slow:    420ms;
+
+  /* ---------------------------------------------------------------------- */
+  /* Type                                                                     */
+  /* ---------------------------------------------------------------------- */
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, -apple-system,
+               "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+
+  --fw-light:    300;
+  --fw-regular:  400;
+  --fw-medium:   500;
+  --fw-semibold: 600;   /* HARD CAP — never use 700/800/900 */
+
+  /* Type scale (px) */
+  --fs-display:   56px;   /* hero */
+  --fs-h1:        40px;   /* page hero */
+  --fs-h2:        32px;
+  --fs-h3:        24px;
+  --fs-h4:        18px;
+  --fs-body:      15px;
+  --fs-body-sm:   13px;
+  --fs-caption:   11px;   /* uppercase eyebrow */
+  --fs-micro:     10px;
+
+  /* Letter-spacing */
+  --tracking-tight:   -0.02em;
+  --tracking-normal:  0;
+  --tracking-wide:    0.04em;
+  --tracking-widest:  0.18em;   /* uppercase eyebrows */
+
+  /* Line-height */
+  --lh-tight:    1.08;
+  --lh-snug:     1.3;
+  --lh-normal:   1.5;
+  --lh-relaxed:  1.65;
+
+  /* ---------------------------------------------------------------------- */
+  /* Defaults — dark surface, primary text                                    */
+  /* ---------------------------------------------------------------------- */
+  --bg:        var(--bg-dark);
+  --surface-1: var(--bg-dark-elev-1);
+  --surface-2: var(--bg-dark-elev-2);
+  --surface-3: var(--bg-dark-elev-3);
+  --border:    var(--border-dark);
+  --fg-1:      var(--fg-dark-1);
+  --fg-2:      var(--fg-dark-2);
+  --fg-3:      var(--fg-dark-3);
+  --fg-4:      var(--fg-dark-4);
+  --accent:    var(--doppel-blue);
+}
+
+/* ---- Light surface override ---------------------------------------------- */
+.doppel-light {
+  --bg:        var(--bg-light);
+  --surface-1: var(--bg-light-card);
+  --surface-2: var(--bg-light-card);
+  --surface-3: var(--bg-light-muted);
+  --border:    var(--border-light);
+  --fg-1:      var(--fg-light-1);
+  --fg-2:      var(--fg-light-2);
+  --fg-3:      var(--fg-light-3);
+  --fg-4:      var(--fg-light-4);
+  color-scheme: light;
+}
+
+/* =============================================================================
+   Base
+   ========================================================================== */
+html, body {
+  font-family: var(--font-sans);
+  font-feature-settings: "ss01" on, "cv11" on;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background: var(--bg);
+  color: var(--fg-1);
+}
+
+/* =============================================================================
+   Semantic type — apply via class or with @apply-equivalent.
+   ========================================================================== */
+
+.display {
+  font-size: var(--fs-display);
+  font-weight: var(--fw-light);
+  line-height: var(--lh-tight);
+  letter-spacing: var(--tracking-tight);
+}
+
+.h1 {
+  font-size: var(--fs-h1);
+  font-weight: var(--fw-light);
+  line-height: var(--lh-tight);
+  letter-spacing: var(--tracking-tight);
+}
+
+.h2 {
+  font-size: var(--fs-h2);
+  font-weight: var(--fw-light);
+  line-height: var(--lh-snug);
+  letter-spacing: var(--tracking-tight);
+}
+
+.h3 {
+  font-size: var(--fs-h3);
+  font-weight: var(--fw-medium);
+  line-height: var(--lh-snug);
+  letter-spacing: var(--tracking-tight);
+}
+
+.h4 {
+  font-size: var(--fs-h4);
+  font-weight: var(--fw-medium);
+  line-height: var(--lh-snug);
+}
+
+.body {
+  font-size: var(--fs-body);
+  font-weight: var(--fw-regular);
+  line-height: var(--lh-relaxed);
+}
+
+.body-sm {
+  font-size: var(--fs-body-sm);
+  font-weight: var(--fw-regular);
+  line-height: var(--lh-normal);
+}
+
+.caption {
+  font-size: var(--fs-caption);
+  font-weight: var(--fw-medium);
+  line-height: var(--lh-normal);
+  letter-spacing: var(--tracking-widest);
+  text-transform: uppercase;
+  color: var(--fg-3);
+}
+
+.micro {
+  font-size: var(--fs-micro);
+  font-weight: var(--fw-medium);
+  line-height: var(--lh-normal);
+  color: var(--fg-3);
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: var(--fs-body-sm);
+  font-weight: var(--fw-regular);
+}
+
+/* =============================================================================
+   Glass / surface utilities — dark surface only.
+   Light surface uses plain white cards with --shadow-sm and --border-light.
+   ========================================================================== */
+
+.glass {
+  background: var(--bg-dark-elev-1);
+  border: 1px solid var(--border-dark);
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+}
+
+.glass-md {
+  background: var(--bg-dark-elev-2);
+  border: 1px solid var(--border-dark);
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+}
+
+.glass-hi {
+  background: var(--bg-dark-elev-3);
+  border: 1px solid var(--border-dark-hover);
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+}
+
+.card-light {
+  background: var(--bg-light-card);
+  border: 1px solid var(--border-light);
+  box-shadow: var(--shadow-sm);
+  border-radius: var(--radius-xl);
+}
+
+/* =============================================================================
+   Focus — single, accessible blue ring on both surfaces.
+   ========================================================================== */
+*:focus-visible {
+  outline: 2px solid var(--doppel-blue-ring);
+  outline-offset: 2px;
+  border-radius: 6px;
+}

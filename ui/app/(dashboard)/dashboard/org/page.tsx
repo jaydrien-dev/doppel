@@ -8,8 +8,8 @@ import { useUser } from "@clerk/nextjs";
 const ForceGraph2D = dynamic(() => import("react-force-graph-2d"), {
   ssr: false,
   loading: () => (
-    <div className="flex-1 flex items-center justify-center">
-      <div className="w-4 h-4 rounded-full border border-white/20 border-t-white/60 animate-spin" />
+    <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ width: 16, height: 16, borderRadius: "50%", border: "1px solid rgba(255,255,255,0.20)", borderTopColor: "rgba(255,255,255,0.60)", animation: "spin 0.8s linear infinite" }} />
     </div>
   ),
 });
@@ -84,37 +84,37 @@ function CreateOrgPanel({ onCreate }: { onCreate: (org: Org) => void }) {
   }
 
   return (
-    <div className="glass rounded-2xl p-6 max-w-sm">
-      <p className="text-sm font-medium text-white/80 mb-1">Create a team workspace</p>
-      <p className="text-xs text-white/35 mb-5">
+    <div className="card" style={{ maxWidth: 384 }}>
+      <p style={{ fontSize: 13, fontWeight: 500, color: "rgba(255,255,255,0.80)", marginBottom: 4 }}>Create a team workspace</p>
+      <p style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", marginBottom: 20 }}>
         Invite colleagues, see everyone&apos;s clones, and search across your team&apos;s collective knowledge.
       </p>
-      <div className="space-y-3">
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         <input
           type="text"
           placeholder="Workspace name (e.g. Acme Corp)"
           value={name}
-          onChange={(e) => {
-            setName(e.target.value);
-            setSlug(slugify(e.target.value));
-          }}
-          className="w-full bg-white/[0.05] border border-white/[0.08] rounded-xl px-3 py-2 text-sm text-white/70 placeholder:text-white/25 outline-none focus:border-white/20 transition-colors"
+          onChange={(e) => { setName(e.target.value); setSlug(slugify(e.target.value)); }}
+          className="input"
+          style={{ width: "100%" }}
         />
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-white/25 shrink-0">doppel.ai/team/</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 12, color: "rgba(255,255,255,0.25)", flexShrink: 0 }}>doppel.ai/team/</span>
           <input
             type="text"
             placeholder="slug"
             value={slug}
             onChange={(e) => setSlug(slugify(e.target.value))}
-            className="flex-1 bg-white/[0.05] border border-white/[0.08] rounded-xl px-3 py-2 text-sm text-white/70 placeholder:text-white/25 outline-none focus:border-white/20 transition-colors font-mono"
+            className="input"
+            style={{ flex: 1, fontFamily: "monospace" }}
           />
         </div>
-        {error && <p className="text-[11px] text-red-400/70">{error}</p>}
+        {error && <p style={{ fontSize: 11, color: "rgba(248,113,113,0.70)" }}>{error}</p>}
         <button
           onClick={create}
           disabled={creating || !name.trim() || !slug.trim()}
-          className="w-full py-2 rounded-xl text-sm text-white/60 glass hover:glass-md transition-all disabled:opacity-40"
+          className="btn btn--primary"
+          style={{ width: "100%", justifyContent: "center" }}
         >
           {creating ? "Creating…" : "Create workspace"}
         </button>
@@ -194,11 +194,11 @@ function CloneCard({
 
   if (!c) {
     return (
-      <div className="glass rounded-2xl p-4 flex items-center gap-3 opacity-60">
-        <div className="w-8 h-8 rounded-full bg-white/[0.04] flex items-center justify-center text-xs text-white/30 shrink-0">?</div>
-        <div className="flex-1 min-w-0">
-          <p className="text-xs text-white/35">No clone yet</p>
-          <p className="text-[11px] text-white/20 font-mono">{member.user_id.slice(0, 12)}…</p>
+      <div className="card" style={{ display: "flex", alignItems: "center", gap: 12, opacity: 0.6 }}>
+        <div style={{ width: 32, height: 32, borderRadius: "50%", background: "rgba(255,255,255,0.04)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, color: "rgba(255,255,255,0.30)", flexShrink: 0 }}>?</div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <p style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", margin: 0 }}>No clone yet</p>
+          <p style={{ fontSize: 11, color: "rgba(255,255,255,0.20)", fontFamily: "monospace", margin: 0 }}>{member.user_id.slice(0, 12)}…</p>
         </div>
         {isAdmin && (
           <RoleSelector role={member.role} disabled={updatingRole} onChange={handleRoleChange} />
@@ -208,61 +208,63 @@ function CloneCard({
   }
 
   return (
-    <div className="glass rounded-2xl overflow-hidden hover:glass-md transition-all group">
-    <div className="p-4 flex items-center gap-3">
-      <Link href={`/c/${c.handle}`} target="_blank" className="flex items-center gap-3 flex-1 min-w-0">
-        <div className="w-8 h-8 rounded-full bg-white/[0.06] flex items-center justify-center text-xs text-white/50 font-medium shrink-0">
-          {c.display_name.charAt(0).toUpperCase()}
-        </div>
-        <div className="flex-1 min-w-0">
-          <p className="text-sm text-white/75 truncate">{c.display_name}</p>
-          <p className="text-[11px] text-white/30 font-mono">@{c.handle}</p>
-        </div>
-      </Link>
-      <div className="flex items-center gap-2 shrink-0">
-        <span className={`text-[10px] px-2 py-0.5 rounded-full border ${
-          c.access_mode === "public"
-            ? "text-emerald-300/60 bg-emerald-400/[0.07] border-emerald-400/15"
-            : "text-white/25 bg-white/[0.03] border-white/[0.06]"
-        }`}>
-          {c.access_mode}
-        </span>
-        {isAdmin && (
-          <button
-            onClick={(e) => { e.stopPropagation(); e.preventDefault(); toggleKnowledgeResource(); }}
-            disabled={togglingResource}
-            title={isKnowledgeResource ? "Remove from Team Knowledge" : "Add to Team Knowledge"}
-            className={`text-[10px] px-2 py-0.5 rounded-full border transition-all disabled:opacity-40 ${
-              isKnowledgeResource
-                ? "text-white/50 bg-white/[0.06] border-white/15"
-                : "text-white/20 bg-white/[0.02] border-white/[0.05] hover:text-white/35"
-            }`}
-          >
-            {isKnowledgeResource ? "knowledge" : "+ knowledge"}
-          </button>
-        )}
-        {isAdmin ? (
-          <RoleSelector role={member.role} disabled={updatingRole} onChange={handleRoleChange} />
-        ) : member.role === "admin" ? (
-          <span className="text-[10px] text-white/25 bg-white/[0.04] border border-white/[0.06] px-2 py-0.5 rounded-full">
-            admin
-          </span>
-        ) : null}
-        <Link href={`/c/${c.handle}`} target="_blank">
-          <svg width="11" height="11" viewBox="0 0 11 11" fill="none"
-            className="text-white/20 group-hover:text-white/40 transition-colors">
-            <path d="M2.5 8.5l6-6M8.5 8.5V2.5H2.5" stroke="currentColor"
-              strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
+    <div className="card" style={{ overflow: "hidden", padding: 0 }}>
+      <div style={{ padding: 16, display: "flex", alignItems: "center", gap: 12 }}>
+        <Link href={`/c/${c.handle}`} target="_blank" style={{ display: "flex", alignItems: "center", gap: 12, flex: 1, minWidth: 0, textDecoration: "none" }}>
+          <div style={{ width: 32, height: 32, borderRadius: "50%", background: "rgba(255,255,255,0.06)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, color: "rgba(255,255,255,0.50)", fontWeight: 500, flexShrink: 0 }}>
+            {c.display_name.charAt(0).toUpperCase()}
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <p style={{ fontSize: 13, color: "rgba(255,255,255,0.75)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", margin: 0 }}>{c.display_name}</p>
+            <p style={{ fontSize: 11, color: "rgba(255,255,255,0.30)", fontFamily: "monospace", margin: 0 }}>@{c.handle}</p>
+          </div>
         </Link>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+          {c.access_mode === "public"
+            ? <span className="badge badge--pos">{c.access_mode}</span>
+            : <span className="badge badge--neutral">{c.access_mode}</span>
+          }
+          {isAdmin && (
+            <button
+              onClick={(e) => { e.stopPropagation(); e.preventDefault(); toggleKnowledgeResource(); }}
+              disabled={togglingResource}
+              title={isKnowledgeResource ? "Remove from Team Knowledge" : "Add to Team Knowledge"}
+              style={{
+                fontSize: 10, padding: "2px 8px", borderRadius: 999,
+                border: isKnowledgeResource ? "1px solid rgba(255,255,255,0.15)" : "1px solid rgba(255,255,255,0.05)",
+                background: isKnowledgeResource ? "rgba(255,255,255,0.06)" : "rgba(255,255,255,0.02)",
+                color: isKnowledgeResource ? "rgba(255,255,255,0.50)" : "rgba(255,255,255,0.20)",
+                cursor: "pointer", transition: "all 0.15s", opacity: togglingResource ? 0.4 : 1,
+                fontFamily: "inherit",
+              }}
+            >
+              {isKnowledgeResource ? "knowledge" : "+ knowledge"}
+            </button>
+          )}
+          {isAdmin ? (
+            <RoleSelector role={member.role} disabled={updatingRole} onChange={handleRoleChange} />
+          ) : member.role === "admin" ? (
+            <span className="badge badge--neutral">admin</span>
+          ) : null}
+          <Link
+            href={`/c/${c.handle}`}
+            target="_blank"
+            style={{ color: "rgba(255,255,255,0.20)", transition: "color 0.15s", lineHeight: 0, display: "flex" }}
+            onMouseEnter={(e) => (e.currentTarget.style.color = "rgba(255,255,255,0.40)")}
+            onMouseLeave={(e) => (e.currentTarget.style.color = "rgba(255,255,255,0.20)")}
+          >
+            <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
+              <path d="M2.5 8.5l6-6M8.5 8.5V2.5H2.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </Link>
+        </div>
       </div>
-    </div>
-    {(roleError || knowledgeError) && (
-      <div className="px-4 pb-3 flex flex-col gap-0.5">
-        {roleError && <p className="text-[11px] text-red-400/60">{roleError}</p>}
-        {knowledgeError && <p className="text-[11px] text-red-400/60">{knowledgeError}</p>}
-      </div>
-    )}
+      {(roleError || knowledgeError) && (
+        <div style={{ padding: "0 16px 12px", display: "flex", flexDirection: "column", gap: 2 }}>
+          {roleError && <p style={{ fontSize: 11, color: "rgba(248,113,113,0.60)", margin: 0 }}>{roleError}</p>}
+          {knowledgeError && <p style={{ fontSize: 11, color: "rgba(248,113,113,0.60)", margin: 0 }}>{knowledgeError}</p>}
+        </div>
+      )}
     </div>
   );
 }
@@ -282,7 +284,8 @@ function RoleSelector({
       disabled={disabled}
       onChange={(e) => { e.stopPropagation(); onChange(e.target.value as "admin" | "member"); }}
       onClick={(e) => e.stopPropagation()}
-      className="text-[10px] bg-white/[0.04] border border-white/[0.08] rounded-lg px-2 py-0.5 text-white/40 outline-none cursor-pointer hover:border-white/20 transition-colors disabled:opacity-40"
+      className="input"
+      style={{ fontSize: 10, padding: "2px 8px", cursor: "pointer", opacity: disabled ? 0.4 : 1, width: "auto" }}
     >
       <option value="member">member</option>
       <option value="admin">admin</option>
@@ -319,45 +322,47 @@ function CrossCloneSearch() {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex gap-2">
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={{ display: "flex", gap: 8 }}>
         <input
           type="text"
           placeholder="Search across all team clones…"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && search()}
-          className="flex-1 bg-white/[0.05] border border-white/[0.08] rounded-xl px-3 py-2 text-sm text-white/70 placeholder:text-white/25 outline-none focus:border-white/20 transition-colors"
+          className="input"
+          style={{ flex: 1 }}
         />
         <button
           onClick={search}
           disabled={searching || !query.trim()}
-          className="shrink-0 px-4 py-2 rounded-xl text-xs text-white/60 glass hover:glass-md transition-all disabled:opacity-40"
+          className="btn btn--primary"
+          style={{ flexShrink: 0 }}
         >
           {searching ? "Searching…" : "Search"}
         </button>
       </div>
 
       {searched && results.length === 0 && (
-        <p className="text-sm text-white/30 px-1">No matching memories found across your team.</p>
+        <p style={{ fontSize: 13, color: "rgba(255,255,255,0.30)", padding: "0 4px" }}>No matching memories found across your team.</p>
       )}
 
       {results.length > 0 && (
-        <div className="space-y-2">
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {results.map((r, i) => (
-            <div key={i} className="glass rounded-2xl p-4">
-              <div className="flex items-center gap-2 mb-2">
-                <div className="w-5 h-5 rounded-full bg-white/[0.06] flex items-center justify-center text-[10px] text-white/40 font-medium">
+            <div key={i} className="card">
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                <div style={{ width: 20, height: 20, borderRadius: "50%", background: "rgba(255,255,255,0.06)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, color: "rgba(255,255,255,0.40)", fontWeight: 500 }}>
                   {r.clone_name?.charAt(0).toUpperCase()}
                 </div>
-                <span className="text-xs text-white/50">{r.clone_name}</span>
-                <span className="text-[10px] text-white/20 font-mono">@{r.clone_handle}</span>
-                <span className="ml-auto text-[10px] text-white/25 bg-white/[0.04] px-2 py-0.5 rounded-full font-mono">
+                <span style={{ fontSize: 12, color: "rgba(255,255,255,0.50)" }}>{r.clone_name}</span>
+                <span style={{ fontSize: 10, color: "rgba(255,255,255,0.20)", fontFamily: "monospace" }}>@{r.clone_handle}</span>
+                <span style={{ marginLeft: "auto", fontSize: 10, color: "rgba(255,255,255,0.25)", background: "rgba(255,255,255,0.04)", padding: "2px 8px", borderRadius: 999, fontFamily: "monospace" }}>
                   {(r.similarity * 100).toFixed(0)}%
                 </span>
               </div>
-              <p className="text-sm text-white/60 leading-relaxed line-clamp-3">{r.content}</p>
-              <p className="text-[11px] text-white/25 mt-1">{r.source}</p>
+              <p style={{ fontSize: 13, color: "rgba(255,255,255,0.60)", lineHeight: 1.6, margin: 0 }}>{r.content}</p>
+              <p style={{ fontSize: 11, color: "rgba(255,255,255,0.25)", marginTop: 4, marginBottom: 0 }}>{r.source}</p>
             </div>
           ))}
         </div>
@@ -399,27 +404,29 @@ function InvitePanel({ orgId }: { orgId: string }) {
   }
 
   return (
-    <div className="glass rounded-2xl p-4">
-      <p className="text-xs text-white/50 font-medium mb-3">Invite teammate</p>
-      <div className="flex gap-2">
+    <div className="card" style={{ padding: 16 }}>
+      <p style={{ fontSize: 12, color: "rgba(255,255,255,0.50)", fontWeight: 500, marginBottom: 12 }}>Invite teammate</p>
+      <div style={{ display: "flex", gap: 8 }}>
         <input
           type="email"
           placeholder="colleague@company.com"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && invite()}
-          className="flex-1 bg-white/[0.05] border border-white/[0.08] rounded-xl px-3 py-2 text-sm text-white/70 placeholder:text-white/25 outline-none focus:border-white/20 transition-colors"
+          className="input"
+          style={{ flex: 1 }}
         />
         <button
           onClick={invite}
           disabled={inviting || !email.trim()}
-          className="shrink-0 px-3 py-2 rounded-xl text-xs text-white/60 glass hover:glass-md transition-all disabled:opacity-40"
+          className="btn btn--primary"
+          style={{ flexShrink: 0 }}
         >
           {inviting ? "…" : sent ? "Invited" : "Invite"}
         </button>
       </div>
-      {error && <p className="text-[11px] text-red-400/70 mt-2">{error}</p>}
-      <p className="text-[11px] text-white/20 mt-2">
+      {error && <p style={{ fontSize: 11, color: "rgba(248,113,113,0.70)", marginTop: 8, marginBottom: 0 }}>{error}</p>}
+      <p style={{ fontSize: 11, color: "rgba(255,255,255,0.20)", marginTop: 8, marginBottom: 0 }}>
         They&apos;ll be added when they sign up with this email.
       </p>
     </div>
@@ -465,7 +472,6 @@ function OrgGraph({ orgName, members }: { orgName: string; members: OrgMember[] 
   const nodes: OrgNode[] = [];
   const links: OrgLink[] = [];
 
-  // Org node
   nodes.push({ id: "org", label: orgName, nodeType: "org" });
 
   for (const m of members) {
@@ -522,14 +528,14 @@ function OrgGraph({ orgName, members }: { orgName: string; members: OrgMember[] 
 
   if (members.length === 0) {
     return (
-      <div className="flex-1 flex items-center justify-center">
-        <p className="text-sm text-white/30">Invite teammates to see the org graph.</p>
+      <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <p style={{ fontSize: 13, color: "rgba(255,255,255,0.30)" }}>Invite teammates to see the org graph.</p>
       </div>
     );
   }
 
   return (
-    <div ref={containerRef} className="flex-1 relative rounded-2xl overflow-hidden bg-[#080808] border border-white/[0.06]">
+    <div ref={containerRef} style={{ flex: 1, position: "relative", borderRadius: 16, overflow: "hidden", background: "#080808", border: "1px solid rgba(255,255,255,0.06)" }}>
       <ForceGraph2D
         ref={graphRef}
         graphData={{ nodes: nodes as object[], links }}
@@ -548,16 +554,15 @@ function OrgGraph({ orgName, members }: { orgName: string; members: OrgMember[] 
         enableZoomInteraction={true}
         enablePanInteraction={true}
       />
-      {/* Legend */}
-      <div className="absolute bottom-3 left-3 flex items-center gap-4 pointer-events-none">
+      <div style={{ position: "absolute", bottom: 12, left: 12, display: "flex", alignItems: "center", gap: 16, pointerEvents: "none" }}>
         {[
-          { color: "bg-white/80", label: "Workspace" },
-          { color: "bg-purple-300/75", label: "Member" },
-          { color: "bg-blue-300/70", label: "Clone" },
+          { color: "rgba(255,255,255,0.80)", label: "Workspace" },
+          { color: "rgba(196,181,253,0.75)", label: "Member" },
+          { color: "rgba(147,197,253,0.70)", label: "Clone" },
         ].map(({ color, label }) => (
-          <div key={label} className="flex items-center gap-1.5">
-            <div className={`w-1.5 h-1.5 rounded-full ${color}`} />
-            <span className="text-[10px] text-white/25">{label}</span>
+          <div key={label} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <div style={{ width: 6, height: 6, borderRadius: "50%", background: color }} />
+            <span style={{ fontSize: 10, color: "rgba(255,255,255,0.25)" }}>{label}</span>
           </div>
         ))}
       </div>
@@ -592,7 +597,7 @@ export default function OrgPage() {
   }, []);
 
   useEffect(() => {
-    if (org !== null) return; // only check invite if not in org
+    if (org !== null) return;
     fetch("/api/org/pending-invite")
       .then((r) => r.json())
       .then((d) => setPendingInvite(d.invite ?? null))
@@ -623,34 +628,40 @@ export default function OrgPage() {
 
   if (org === undefined) {
     return (
-      <div className="p-8 flex items-center gap-2">
-        <div className="w-1.5 h-1.5 rounded-full bg-white/20 animate-pulse" />
-        <span className="text-sm text-white/30">Loading…</span>
+      <div style={{ padding: 32, display: "flex", alignItems: "center", gap: 8 }}>
+        <div style={{ width: 6, height: 6, borderRadius: "50%", background: "rgba(255,255,255,0.20)" }} />
+        <span style={{ fontSize: 13, color: "rgba(255,255,255,0.30)" }}>Loading…</span>
       </div>
     );
   }
 
+  const ORG_TABS = [
+    { id: "clones" as const, label: `Clones (${members.length})` },
+    { id: "graph" as const, label: "Graph" },
+    { id: "search" as const, label: "Search" },
+  ];
+
   if (!org) {
     return (
-      <div className="p-8 max-w-4xl">
-        <div className="mb-8">
-          <h1 className="text-2xl font-light text-white/85">Team</h1>
-          <p className="text-sm text-white/35 mt-1">
-            Share knowledge and search across your whole team&apos;s clones.
-          </p>
+      <div className="db-page">
+        <div className="db-page-head">
+          <div>
+            <p className="db-eyebrow">Workspace</p>
+            <h1 className="db-h1">Team</h1>
+          </div>
         </div>
         {pendingInvite && (
-          <div className="glass rounded-2xl p-6 mb-4">
-            <p className="text-sm font-medium text-white/70 mb-1">
-              You&apos;ve been invited to join <span className="text-white/85">{pendingInvite.org_name}</span>
+          <div className="card" style={{ marginBottom: 16 }}>
+            <p style={{ fontSize: 13, fontWeight: 500, color: "rgba(255,255,255,0.70)", marginBottom: 4 }}>
+              You&apos;ve been invited to join <span style={{ color: "rgba(255,255,255,0.85)" }}>{pendingInvite.org_name}</span>
             </p>
-            <p className="text-xs text-white/35 mb-4">
+            <p style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", marginBottom: 16 }}>
               As a {pendingInvite.role} · doppel.ai/team/{pendingInvite.org_slug}
             </p>
             <button
               onClick={acceptInvite}
               disabled={joining}
-              className="glass-md hover:glass-hi rounded-xl px-5 py-2.5 text-sm text-white/60 hover:text-white/80 transition-all disabled:opacity-40"
+              className="btn btn--primary"
             >
               {joining ? "Joining…" : `Join ${pendingInvite.org_name}`}
             </button>
@@ -662,34 +673,30 @@ export default function OrgPage() {
   }
 
   return (
-    <div className="p-8 max-w-5xl">
-      <div className="mb-8 flex items-start justify-between">
+    <div className="db-page">
+      <div className="db-page-head">
         <div>
-          <h1 className="text-2xl font-light text-white/85">{org.name}</h1>
-          <p className="text-sm text-white/35 mt-1">
-            <span className="font-mono text-white/25">doppel.ai/team/{org.slug}</span>
-            <span className="ml-3">·</span>
-            <span className="ml-3">{members.length} member{members.length !== 1 ? "s" : ""}</span>
+          <p className="db-eyebrow">Workspace</p>
+          <h1 className="db-h1">{org.name} <em>· {members.length} member{members.length !== 1 ? "s" : ""}</em></h1>
+          <p style={{ fontSize: 12, marginTop: 4, color: "var(--fg-dark-3)" }}>
+            <span style={{ fontFamily: "monospace" }}>doppel.ai/team/{org.slug}</span>
           </p>
         </div>
         {org.is_owner && <InvitePanel orgId={org.id} />}
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 mb-6 bg-white/[0.03] rounded-xl p-1 w-fit">
-        {([
-          { id: "clones", label: `Clones (${members.length})` },
-          { id: "graph", label: "Graph" },
-          { id: "search", label: "Search" },
-        ] as const).map((t) => (
+      <div style={{ display: "flex", gap: 4, marginBottom: 24, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 16, padding: 4, width: "fit-content" }}>
+        {ORG_TABS.map((t) => (
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
-            className={`px-4 py-1.5 rounded-lg text-xs transition-all ${
-              tab === t.id
-                ? "glass-md text-white/75"
-                : "text-white/35 hover:text-white/55"
-            }`}
+            style={{
+              padding: "8px 18px", borderRadius: 12, border: "none",
+              background: tab === t.id ? "rgba(255,255,255,0.08)" : "transparent",
+              color: tab === t.id ? "rgba(255,255,255,0.85)" : "rgba(255,255,255,0.40)",
+              fontFamily: "inherit", fontSize: 13, cursor: "pointer",
+            }}
           >
             {t.label}
           </button>
@@ -697,10 +704,10 @@ export default function OrgPage() {
       </div>
 
       {tab === "clones" && (
-        <div className="space-y-2">
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {members.length === 0 ? (
-            <div className="glass rounded-2xl p-6 text-center">
-              <p className="text-sm text-white/30">No members yet — invite your team above.</p>
+            <div className="card" style={{ textAlign: "center" }}>
+              <p style={{ fontSize: 13, color: "rgba(255,255,255,0.30)" }}>No members yet — invite your team above.</p>
             </div>
           ) : (
             members.map((m) => {
@@ -724,14 +731,14 @@ export default function OrgPage() {
       )}
 
       {tab === "graph" && (
-        <div className="flex flex-col" style={{ height: 480 }}>
+        <div style={{ display: "flex", flexDirection: "column", height: 480 }}>
           <OrgGraph orgName={org.name} members={members} />
         </div>
       )}
 
       {tab === "search" && (
-        <div className="space-y-4">
-          <p className="text-xs text-white/30 leading-relaxed">
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <p style={{ fontSize: 12, color: "rgba(255,255,255,0.30)", lineHeight: 1.6 }}>
             Semantic search across all memories from every clone in your workspace.
             Useful for finding shared context, avoiding duplicate work, or discovering
             what your colleagues know.

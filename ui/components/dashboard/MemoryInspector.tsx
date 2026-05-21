@@ -4,7 +4,6 @@ import { useState, useEffect, useRef } from "react";
 import useSWR from "swr";
 import { patchMemory } from "@/lib/api";
 import type { MemoryChunk } from "@/lib/types";
-import { cn } from "@/lib/utils";
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
@@ -28,6 +27,7 @@ function MemoryRow({
   onUpdated: () => void;
 }) {
   const [saving, setSaving] = useState(false);
+  const [hovered, setHovered] = useState(false);
 
   async function toggle(field: "is_pinned" | "is_excluded", value: boolean) {
     setSaving(true);
@@ -40,16 +40,35 @@ function MemoryRow({
   }
 
   return (
-    <div className={cn("py-3 px-4 flex items-start gap-3 group", chunk.is_excluded && "opacity-40")}>
-      {/* Pin indicator */}
+    <div
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        display: "flex",
+        alignItems: "flex-start",
+        gap: 12,
+        padding: "12px 18px",
+        opacity: chunk.is_excluded ? 0.40 : 1,
+        background: hovered ? "rgba(255,255,255,0.03)" : "transparent",
+        transition: "background 0.15s",
+      }}
+    >
+      {/* Pin button */}
       <button
         onClick={() => toggle("is_pinned", !chunk.is_pinned)}
         disabled={saving}
-        title={chunk.is_pinned ? "Unpin" : "Pin — always retrieved"}
-        className={cn(
-          "mt-0.5 shrink-0 transition-colors disabled:opacity-40",
-          chunk.is_pinned ? "text-white/60 hover:text-white/35" : "text-white/15 hover:text-white/50"
-        )}
+        title={chunk.is_pinned ? "Unpin" : "Pin \u2014 always retrieved"}
+        style={{
+          marginTop: 2,
+          flexShrink: 0,
+          background: "none",
+          border: "none",
+          cursor: saving ? "not-allowed" : "pointer",
+          padding: 0,
+          color: chunk.is_pinned ? "rgba(255,255,255,0.60)" : "rgba(255,255,255,0.15)",
+          opacity: saving ? 0.40 : 1,
+          transition: "color 0.15s",
+        }}
       >
         <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
           <path
@@ -63,19 +82,36 @@ function MemoryRow({
       </button>
 
       {/* Content */}
-      <div className="flex-1 min-w-0">
-        <p className="text-sm text-white/70 leading-relaxed line-clamp-2">{chunk.content}</p>
-        <div className="flex items-center gap-2 mt-1.5">
-          <span className="text-[10px] text-white/25 bg-white/[0.04] rounded px-1.5 py-0.5">
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <p style={{
+          fontSize: 13,
+          color: "rgba(255,255,255,0.70)",
+          lineHeight: 1.55,
+          display: "-webkit-box",
+          WebkitLineClamp: 2,
+          WebkitBoxOrient: "vertical",
+          overflow: "hidden",
+          margin: 0,
+        }}>
+          {chunk.content}
+        </p>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6 }}>
+          <span style={{
+            fontSize: 10,
+            color: "rgba(255,255,255,0.25)",
+            background: "rgba(255,255,255,0.04)",
+            borderRadius: 4,
+            padding: "2px 6px",
+          }}>
             {SOURCE_LABEL[chunk.source] ?? chunk.source}
           </span>
           {chunk.topics.slice(0, 2).map((t) => (
-            <span key={t} className="text-[10px] text-white/20">
+            <span key={t} style={{ fontSize: 10, color: "rgba(255,255,255,0.20)" }}>
               {t}
             </span>
           ))}
           {chunk.created_at && (
-            <span className="text-[10px] text-white/15 ml-auto">
+            <span style={{ fontSize: 10, color: "rgba(255,255,255,0.15)", marginLeft: "auto" }}>
               {new Date(chunk.created_at).toLocaleDateString("en-US", {
                 month: "short",
                 day: "numeric",
@@ -85,14 +121,22 @@ function MemoryRow({
         </div>
       </div>
 
-      {/* Actions */}
-      <div className="shrink-0 flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+      {/* Actions — visible on hover */}
+      <div style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 8, opacity: hovered ? 1 : 0, transition: "opacity 0.15s" }}>
         {!chunk.is_excluded ? (
           <button
             onClick={() => toggle("is_excluded", true)}
             disabled={saving}
-            className="text-[10px] text-white/25 hover:text-white/50 transition-colors disabled:opacity-40"
             title="Exclude from retrieval"
+            style={{
+              fontSize: 10,
+              color: "rgba(255,255,255,0.25)",
+              background: "none",
+              border: "none",
+              cursor: saving ? "not-allowed" : "pointer",
+              padding: 0,
+              opacity: saving ? 0.40 : 1,
+            }}
           >
             hide
           </button>
@@ -100,8 +144,16 @@ function MemoryRow({
           <button
             onClick={() => toggle("is_excluded", false)}
             disabled={saving}
-            className="text-[10px] text-white/40 hover:text-white/70 transition-colors disabled:opacity-40"
             title="Restore to retrieval"
+            style={{
+              fontSize: 10,
+              color: "rgba(255,255,255,0.40)",
+              background: "none",
+              border: "none",
+              cursor: saving ? "not-allowed" : "pointer",
+              padding: 0,
+              opacity: saving ? 0.40 : 1,
+            }}
           >
             restore
           </button>
@@ -150,25 +202,33 @@ export function MemoryInspector({ cloneId }: { cloneId: string }) {
   const totalPages = Math.ceil(total / LIMIT);
 
   return (
-    <div className="glass rounded-2xl overflow-hidden">
+    <div className="glass" style={{ borderRadius: 16, overflow: "hidden" }}>
       {/* Header + tabs */}
-      <div className="px-5 py-4 border-b border-white/[0.06]">
-        <div className="flex items-center justify-between mb-3">
+      <div style={{ padding: "16px 20px 14px", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
           <div>
-            <h3 className="text-sm font-medium text-white/60">Memory inspector</h3>
-            <p className="text-xs text-white/30 mt-0.5">
-              Pin important facts · Hide sensitive content from retrieval
+            <p className="db-h3">Memory inspector</p>
+            <p style={{ fontSize: 12, color: "rgba(255,255,255,0.30)", marginTop: 3 }}>
+              Pin important facts &middot; Hide sensitive content from retrieval
             </p>
           </div>
-          <div className="flex gap-1 glass rounded-xl p-1">
+          {/* Tab switcher */}
+          <div className="glass" style={{ borderRadius: 12, padding: 4, display: "flex", gap: 2 }}>
             {(["pinned", "all"] as const).map((t) => (
               <button
                 key={t}
                 onClick={() => { setTab(t); setPage(0); setSearchInput(""); }}
-                className={cn(
-                  "px-3 py-1.5 rounded-lg text-xs transition-all capitalize",
-                  tab === t ? "glass-md text-white/80" : "text-white/35 hover:text-white/55"
-                )}
+                className={tab === t ? "glass-md" : ""}
+                style={{
+                  padding: "5px 12px",
+                  borderRadius: 10,
+                  fontSize: 12,
+                  cursor: "pointer",
+                  border: "none",
+                  background: tab === t ? undefined : "transparent",
+                  color: tab === t ? "rgba(255,255,255,0.80)" : "rgba(255,255,255,0.35)",
+                  transition: "color 0.15s",
+                }}
               >
                 {t === "pinned" ? "Pinned" : "All memories"}
               </button>
@@ -177,9 +237,9 @@ export function MemoryInspector({ cloneId }: { cloneId: string }) {
         </div>
 
         {/* Search */}
-        <div className="relative">
+        <div style={{ position: "relative" }}>
           <svg
-            className="absolute left-3 top-1/2 -translate-y-1/2 text-white/25 pointer-events-none"
+            style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "rgba(255,255,255,0.25)", pointerEvents: "none" }}
             width="12" height="12" viewBox="0 0 12 12" fill="none"
           >
             <circle cx="5" cy="5" r="3.5" stroke="currentColor" strokeWidth="1.3"/>
@@ -189,15 +249,28 @@ export function MemoryInspector({ cloneId }: { cloneId: string }) {
             type="text"
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
-            placeholder="Search memories…"
-            className="w-full glass rounded-xl pl-8 pr-4 py-2 text-xs text-white/70 placeholder:text-white/25 outline-none"
+            placeholder="Search memories\u2026"
+            className="input"
+            style={{ paddingLeft: 32, fontSize: 12 }}
           />
           {searchInput && (
             <button
               onClick={() => setSearchInput("")}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-white/25 hover:text-white/50 transition-colors text-sm leading-none"
+              style={{
+                position: "absolute",
+                right: 12,
+                top: "50%",
+                transform: "translateY(-50%)",
+                color: "rgba(255,255,255,0.25)",
+                background: "none",
+                border: "none",
+                cursor: "pointer",
+                fontSize: 16,
+                lineHeight: 1,
+                padding: 0,
+              }}
             >
-              ×
+              &times;
             </button>
           )}
         </div>
@@ -205,14 +278,14 @@ export function MemoryInspector({ cloneId }: { cloneId: string }) {
 
       {/* Content */}
       {isLoading && (
-        <div className="px-5 py-6 text-sm text-white/30">Loading…</div>
+        <div style={{ padding: "20px 20px", fontSize: 13, color: "rgba(255,255,255,0.30)" }}>Loading&hellip;</div>
       )}
 
       {!isLoading && memories.length === 0 && (
-        <div className="px-5 py-8 text-center">
-          <p className="text-sm text-white/30">
+        <div style={{ padding: "28px 20px", textAlign: "center" }}>
+          <p style={{ fontSize: 13, color: "rgba(255,255,255,0.30)" }}>
             {search
-              ? `No memories matching "${search}".`
+              ? `No memories matching \u201c${search}\u201d.`
               : tab === "pinned"
               ? "No pinned memories yet. Pin facts to ensure they're always retrieved."
               : "No memories found. Train your clone to populate this list."}
@@ -221,38 +294,45 @@ export function MemoryInspector({ cloneId }: { cloneId: string }) {
       )}
 
       {memories.length > 0 && (
-        <div className="divide-y divide-white/[0.04]">
-          {memories.map((chunk) => (
-            <MemoryRow
-              key={chunk.id}
-              chunk={chunk}
-              cloneId={cloneId}
-              onUpdated={mutate}
-            />
+        <div>
+          {memories.map((chunk, idx) => (
+            <div key={chunk.id} style={{ borderTop: idx === 0 ? "none" : "1px solid rgba(255,255,255,0.04)" }}>
+              <MemoryRow
+                chunk={chunk}
+                cloneId={cloneId}
+                onUpdated={mutate}
+              />
+            </div>
           ))}
         </div>
       )}
 
       {/* Pagination */}
       {totalPages > 1 && (
-        <div className="px-5 py-3 border-t border-white/[0.06] flex items-center justify-between">
-          <p className="text-xs text-white/25">
-            {page * LIMIT + 1}–{Math.min((page + 1) * LIMIT, total)} of {total}
+        <div style={{
+          padding: "10px 20px",
+          borderTop: "1px solid rgba(255,255,255,0.06)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+        }}>
+          <p style={{ fontSize: 12, color: "rgba(255,255,255,0.25)" }}>
+            {page * LIMIT + 1}&ndash;{Math.min((page + 1) * LIMIT, total)} of {total}
           </p>
-          <div className="flex gap-2">
+          <div style={{ display: "flex", gap: 8 }}>
             <button
               onClick={() => setPage((p) => p - 1)}
               disabled={page === 0}
-              className="text-xs text-white/30 hover:text-white/60 transition-colors disabled:opacity-30"
+              className="btn btn--ghost btn--sm"
             >
-              ← Prev
+              &larr; Prev
             </button>
             <button
               onClick={() => setPage((p) => p + 1)}
               disabled={page >= totalPages - 1}
-              className="text-xs text-white/30 hover:text-white/60 transition-colors disabled:opacity-30"
+              className="btn btn--ghost btn--sm"
             >
-              Next →
+              Next &rarr;
             </button>
           </div>
         </div>

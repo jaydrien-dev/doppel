@@ -2,8 +2,6 @@
 
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Check, ExternalLink } from "lucide-react";
-import { cn } from "@/lib/utils";
 
 type Tier = "free" | "personal" | "enterprise_pro" | "enterprise_max";
 type Period = "monthly" | "yearly";
@@ -17,96 +15,81 @@ interface BillingStatus {
 const PLANS: {
   id: Tier;
   name: string;
+  color: string;
   desc: string;
   monthly: number;
   yearly: number;
-  queriesLabel: string;
-  monthlyPriceEnvKey: string;
-  yearlyPriceEnvKey: string;
+  perSeat?: boolean;
+  monthlyEnvKey: string;
+  yearlyEnvKey: string;
   features: string[];
-  companyBrain: boolean;
+  featured: boolean;
   contactSales: boolean;
 }[] = [
   {
     id: "free",
     name: "Free",
-    desc: "Try every feature. No credit card required.",
+    color: "#34D399",
+    desc: "Your personal clone. Keep it forever.",
     monthly: 0,
     yearly: 0,
-    queriesLabel: "50 queries / month",
-    monthlyPriceEnvKey: "",
-    yearlyPriceEnvKey: "",
-    features: [
-      "1 clone",
-      "50 queries / month",
-      "All ingestion sources",
-      "Public shareable link",
-      "Confidence + source UI",
-      "Gmail, Slack, GitHub connectors",
-    ],
-    companyBrain: false,
+    monthlyEnvKey: "",
+    yearlyEnvKey: "",
+    features: ["1 personal clone", "All connectors", "50 queries / month", "Shareable link"],
+    featured: false,
     contactSales: false,
   },
   {
     id: "personal",
     name: "Personal",
-    desc: "Full power for individuals.",
+    color: "#1A73E8",
+    desc: "Full individual power.",
     monthly: 15,
     yearly: 150,
-    queriesLabel: "250 queries / month",
-    monthlyPriceEnvKey: "NEXT_PUBLIC_STRIPE_PERSONAL_MONTHLY_PRICE_ID",
-    yearlyPriceEnvKey: "NEXT_PUBLIC_STRIPE_PERSONAL_YEARLY_PRICE_ID",
-    features: [
-      "Everything in Free",
-      "250 queries / month (5×)",
-      "Priority response speed",
-      "Data export (GDPR Art. 20)",
-      "Clone preservation + legal hold",
-      "API access",
-    ],
-    companyBrain: false,
+    monthlyEnvKey: "NEXT_PUBLIC_STRIPE_PERSONAL_MONTHLY_PRICE_ID",
+    yearlyEnvKey: "NEXT_PUBLIC_STRIPE_PERSONAL_YEARLY_PRICE_ID",
+    features: ["Everything in Free", "250 queries / month", "Meeting bot", "API access", "Data export"],
+    featured: false,
     contactSales: false,
   },
   {
     id: "enterprise_pro",
-    name: "Enterprise Pro",
-    desc: "Company Brain for teams.",
+    name: "Pro",
+    color: "#A78BFA",
+    desc: "Company Brain for your team.",
     monthly: 59,
     yearly: 590,
-    queriesLabel: "1,250 queries / seat / month",
-    monthlyPriceEnvKey: "NEXT_PUBLIC_STRIPE_ENT_PRO_MONTHLY_PRICE_ID",
-    yearlyPriceEnvKey: "NEXT_PUBLIC_STRIPE_ENT_PRO_YEARLY_PRICE_ID",
+    perSeat: true,
+    monthlyEnvKey: "NEXT_PUBLIC_STRIPE_ENT_PRO_MONTHLY_PRICE_ID",
+    yearlyEnvKey: "NEXT_PUBLIC_STRIPE_ENT_PRO_YEARLY_PRICE_ID",
     features: [
-      "Everything in Personal",
-      "1,250 queries / seat / month",
+      "Everything in Personal · per seat",
       "Company Brain + Role Brains",
-      "Skills API for AI agents",
-      "Cross-clone org search",
-      "SCIM provisioning",
-      "SSO / SAML",
-      "Audit log + webhooks",
+      "Skills API",
+      "SSO · SCIM",
+      "Audit log",
     ],
-    companyBrain: true,
+    featured: true,
     contactSales: false,
   },
   {
     id: "enterprise_max",
-    name: "Enterprise Max",
-    desc: "Full scale. Dedicated support.",
+    name: "Max",
+    color: "#E91E63",
+    desc: "The full intelligence layer.",
     monthly: 179,
     yearly: 1790,
-    queriesLabel: "5,000 queries / seat / month",
-    monthlyPriceEnvKey: "",
-    yearlyPriceEnvKey: "",
+    perSeat: true,
+    monthlyEnvKey: "",
+    yearlyEnvKey: "",
     features: [
-      "Everything in Enterprise Pro",
-      "5,000 queries / seat / month",
-      "Dedicated CSM",
+      "Everything in Pro",
+      "Org intelligence feed",
+      "Drift detection",
       "SOC 2 Type II",
-      "Custom SLAs",
-      "Volume discounts at 50+ seats",
+      "Dedicated CSM",
     ],
-    companyBrain: true,
+    featured: false,
     contactSales: true,
   },
 ];
@@ -114,13 +97,31 @@ const PLANS: {
 const PRICE_IDS: Partial<Record<Tier, Record<Period, string>>> = {
   personal: {
     monthly: process.env.NEXT_PUBLIC_STRIPE_PERSONAL_MONTHLY_PRICE_ID ?? "",
-    yearly: process.env.NEXT_PUBLIC_STRIPE_PERSONAL_YEARLY_PRICE_ID ?? "",
+    yearly:  process.env.NEXT_PUBLIC_STRIPE_PERSONAL_YEARLY_PRICE_ID ?? "",
   },
   enterprise_pro: {
     monthly: process.env.NEXT_PUBLIC_STRIPE_ENT_PRO_MONTHLY_PRICE_ID ?? "",
-    yearly: process.env.NEXT_PUBLIC_STRIPE_ENT_PRO_YEARLY_PRICE_ID ?? "",
+    yearly:  process.env.NEXT_PUBLIC_STRIPE_ENT_PRO_YEARLY_PRICE_ID ?? "",
+  },
+  enterprise_max: {
+    monthly: process.env.NEXT_PUBLIC_STRIPE_ENT_MAX_MONTHLY_PRICE_ID ?? "",
+    yearly:  process.env.NEXT_PUBLIC_STRIPE_ENT_MAX_YEARLY_PRICE_ID ?? "",
   },
 };
+
+const ISparkle = (
+  <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor">
+    <path d="M8 2l1.2 3.6L13 7l-3.8 1.4L8 12l-1.2-3.6L3 7l3.8-1.4z" opacity="0.9"/>
+  </svg>
+);
+
+function CheckIcon({ color }: { color: string }) {
+  return (
+    <svg width="13" height="13" viewBox="0 0 13 13" fill="none" style={{ flexShrink: 0, marginTop: 1 }}>
+      <path d="M2.5 6.5l3 3 5-5" stroke={color} strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  );
+}
 
 export default function BillingPage() {
   return (
@@ -151,7 +152,7 @@ function BillingContent() {
   async function handleUpgrade(planId: Tier) {
     const priceId = PRICE_IDS[planId]?.[period];
     if (!priceId) {
-      alert("Stripe price not configured. Add the relevant NEXT_PUBLIC_STRIPE_* env vars.");
+      alert("Stripe price not configured. Add the relevant NEXT_PUBLIC_STRIPE_* env vars to .env.local and restart.");
       return;
     }
     setLoadingPlan(planId);
@@ -183,140 +184,197 @@ function BillingContent() {
   const isSubscribed = !!status?.stripe_subscription_id;
 
   return (
-    <div className="p-8 max-w-4xl">
-      <div className="mb-8">
-        <h1 className="text-2xl font-light text-white/85">Billing</h1>
-        <p className="text-sm text-white/35 mt-1">Manage your plan and subscription.</p>
-      </div>
-
-      {success && (
-        <div className="glass-md rounded-2xl px-5 py-3 mb-6 flex items-center gap-3">
-          <Check className="w-4 h-4 text-white/50 shrink-0" />
-          <p className="text-sm text-white/70">Plan updated. Thanks!</p>
-        </div>
-      )}
-      {canceled && (
-        <div className="glass rounded-2xl px-5 py-3 mb-6">
-          <p className="text-sm text-white/40">Checkout canceled — no charge was made.</p>
-        </div>
-      )}
-
-      {/* Current plan */}
-      <div className="glass rounded-2xl p-5 mb-6 flex items-center justify-between">
+    <div className="db-page" style={{ "--page-accent": "#F59E0B" } as React.CSSProperties}>
+      <div className="db-page-head">
         <div>
-          <p className="text-[11px] uppercase tracking-widest text-white/25 mb-1">Current plan</p>
-          <p className="text-lg font-light text-white/85">
-            {PLANS.find((p) => p.id === currentTier)?.name ?? currentTier}
-          </p>
-          <p className="text-xs text-white/30 mt-0.5">
-            {PLANS.find((p) => p.id === currentTier)?.queriesLabel}
-          </p>
+          <p className="db-eyebrow">Account</p>
+          <h1 className="db-h1">Billing <em>&amp; Plans</em></h1>
         </div>
         {isSubscribed && (
-          <button
-            onClick={handlePortal}
-            disabled={portalLoading}
-            className="flex items-center gap-1.5 text-sm text-white/40 hover:text-white/65 transition-colors disabled:opacity-40"
-          >
-            {portalLoading ? "Opening…" : "Manage billing"}
-            <ExternalLink className="w-3.5 h-3.5" />
+          <button onClick={handlePortal} disabled={portalLoading} className="btn btn--sm">
+            {portalLoading ? "Opening…" : "Manage billing ↗"}
           </button>
         )}
       </div>
 
+      {/* Banners */}
+      {success && (
+        <div style={{ display: "flex", alignItems: "center", gap: 12, borderRadius: 14, padding: "12px 18px", marginBottom: 20, background: "rgba(52,211,153,0.07)", border: "1px solid rgba(52,211,153,0.18)" }}>
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="6" fill="rgba(52,211,153,0.15)"/><path d="M4 7l2.5 2.5 4-4" stroke="#34D399" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>
+          <p style={{ fontSize: 13, color: "rgba(52,211,153,0.80)", margin: 0 }}>Plan updated successfully.</p>
+        </div>
+      )}
+      {canceled && (
+        <div style={{ display: "flex", alignItems: "center", gap: 12, borderRadius: 14, padding: "12px 18px", marginBottom: 20, background: "rgba(251,191,36,0.06)", border: "1px solid rgba(251,191,36,0.16)" }}>
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="6" stroke="rgba(251,191,36,0.55)" strokeWidth="1.2"/><path d="M7 4.5v3M7 9v.5" stroke="rgba(251,191,36,0.55)" strokeWidth="1.2" strokeLinecap="round"/></svg>
+          <p style={{ fontSize: 13, color: "rgba(251,191,36,0.70)", margin: 0 }}>Checkout canceled — no charge was made.</p>
+        </div>
+      )}
+
       {/* Period toggle */}
-      <div className="flex items-center gap-3 mb-6">
-        <div className="glass rounded-full p-1 flex gap-1">
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 28 }}>
+        <div style={{ display: "flex", gap: 3, padding: 4, borderRadius: 999, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.07)" }}>
           {(["monthly", "yearly"] as Period[]).map((p) => (
             <button
               key={p}
               onClick={() => setPeriod(p)}
-              className={cn(
-                "px-4 py-1.5 rounded-full text-sm transition-all capitalize",
-                period === p ? "glass-md text-white/85" : "text-white/35 hover:text-white/55"
-              )}
+              style={{
+                padding: "5px 18px", borderRadius: 999, fontSize: 12, fontWeight: 500,
+                cursor: "pointer", border: "none", fontFamily: "inherit",
+                background: period === p ? "rgba(255,255,255,0.10)" : "transparent",
+                color: period === p ? "rgba(255,255,255,0.85)" : "rgba(255,255,255,0.35)",
+                transition: "all 180ms",
+                textTransform: "capitalize",
+              }}
             >
               {p}
             </button>
           ))}
         </div>
-        {period === "yearly" && <span className="text-xs text-white/30">2 months free</span>}
+        {period === "yearly" && (
+          <span style={{ fontSize: 11, fontWeight: 500, padding: "3px 10px", borderRadius: 999, background: "rgba(52,211,153,0.10)", color: "rgba(52,211,153,0.80)", border: "1px solid rgba(52,211,153,0.20)" }}>
+            save 2 months
+          </span>
+        )}
       </div>
 
-      {/* Plan cards — 2×2 grid */}
-      <div className="grid md:grid-cols-2 gap-4">
+      {/* Plan cards — landing page visual style */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14 }}>
         {PLANS.map((plan) => {
           const isCurrent = plan.id === currentTier;
-          const price = period === "yearly"
-            ? (plan.monthly > 0 ? Math.round(plan.yearly / 12) : 0)
+          const price = period === "yearly" && plan.monthly > 0
+            ? Math.round(plan.yearly / 12)
             : plan.monthly;
           const isLoading = loadingPlan === plan.id;
-          const isEnterprisePro = plan.id === "enterprise_pro";
 
           return (
             <div
               key={plan.id}
-              className={cn(
-                "rounded-2xl p-5 border flex flex-col transition-all",
-                isCurrent ? "glass-hi border-white/[0.14]" : "glass border-white/[0.08]",
-                isEnterprisePro && !isCurrent && "border-white/[0.10]"
-              )}
+              style={{
+                position: "relative", overflow: "hidden",
+                background: plan.featured
+                  ? "rgba(26,115,232,0.05)"
+                  : isCurrent
+                  ? "rgba(255,255,255,0.06)"
+                  : "rgba(255,255,255,0.02)",
+                border: plan.featured
+                  ? "1px solid rgba(26,115,232,0.38)"
+                  : isCurrent
+                  ? "1px solid rgba(255,255,255,0.18)"
+                  : "1px solid rgba(255,255,255,0.07)",
+                borderRadius: 20,
+                padding: 24,
+                display: "flex", flexDirection: "column", gap: 14,
+                boxShadow: plan.featured ? "0 12px 40px rgba(26,115,232,0.16)" : "none",
+                transition: "transform 260ms ease, border-color 260ms ease",
+              }}
+              onMouseEnter={(e) => { if (!plan.featured) (e.currentTarget as HTMLDivElement).style.transform = "translateY(-2px)"; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.transform = ""; }}
             >
-              {isCurrent && (
-                <p className="text-[10px] uppercase tracking-widest text-white/35 mb-3">Current</p>
+              {/* Top glow for featured */}
+              {plan.featured && (
+                <div style={{ position: "absolute", inset: 0, background: "radial-gradient(ellipse at 50% 0%, rgba(26,115,232,0.18) 0%, transparent 55%)", pointerEvents: "none" }} />
               )}
 
-              <div className="flex items-start justify-between gap-2 mb-1">
-                <h3 className="text-base font-medium text-white/85">{plan.name}</h3>
-                {plan.companyBrain && (
-                  <span className="text-[10px] text-violet-400/60 bg-violet-400/[0.07] border border-violet-400/12 rounded-full px-2 py-0.5 shrink-0">
-                    Company Brain
+              {/* Plan name row */}
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 14, fontWeight: 500, color: "rgba(255,255,255,0.85)" }}>
+                  <span style={{ width: 8, height: 8, borderRadius: 999, background: plan.color, flexShrink: 0 }} />
+                  {plan.name}
+                </div>
+                {plan.featured && !isCurrent && (
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10, fontWeight: 500, padding: "3px 8px", borderRadius: 999, background: "rgba(26,115,232,0.22)", color: "#6BAEFF" }}>
+                    {ISparkle} Most popular
+                  </span>
+                )}
+                {isCurrent && (
+                  <span style={{ fontSize: 10, fontWeight: 500, padding: "3px 8px", borderRadius: 999, background: "rgba(255,255,255,0.07)", color: "rgba(255,255,255,0.40)", border: "1px solid rgba(255,255,255,0.10)" }}>
+                    Current
                   </span>
                 )}
               </div>
-              <p className="text-xs text-white/35 mb-4 leading-relaxed">{plan.desc}</p>
 
-              <div className="mb-4">
-                <div className="flex items-baseline gap-1">
-                  <span className="text-2xl font-light text-white/80">
-                    {plan.monthly === 0 ? "Free" : `$${price}`}
-                  </span>
-                  {plan.monthly > 0 && (
-                    <span className="text-xs text-white/30">
-                      /seat/mo{period === "yearly" && ", billed annually"}
+              {/* Price */}
+              {plan.monthly === 0 ? (
+                <div>
+                  <div style={{ fontSize: 14, color: "#34D399", fontWeight: 500 }}>Free forever</div>
+                  <div style={{ fontSize: 11, visibility: "hidden" }}>–</div>
+                </div>
+              ) : (
+                <div>
+                  <div style={{ display: "flex", alignItems: "baseline", gap: 4, marginTop: 4 }}>
+                    <span style={{ fontSize: 36, fontWeight: 300, letterSpacing: "-0.025em", lineHeight: 1, color: "rgba(255,255,255,0.85)" }}>
+                      ${price}
                     </span>
-                  )}
+                    <span style={{ fontSize: 12, color: "rgba(255,255,255,0.35)" }}>
+                      /mo{plan.perSeat ? " · per seat" : ""}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 11, color: "rgba(255,255,255,0.28)", marginTop: 3, visibility: period === "yearly" ? "visible" : "hidden" }}>
+                    billed ${plan.yearly}/yr
+                  </div>
                 </div>
-                <p className="text-[11px] text-white/25 mt-0.5">{plan.queriesLabel}</p>
-              </div>
+              )}
 
+              {/* Desc */}
+              <p style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", lineHeight: 1.5, margin: 0 }}>{plan.desc}</p>
+
+              {/* CTA */}
               {isCurrent ? (
-                <div className="w-full py-2 rounded-xl text-center text-sm text-white/30 glass mb-4">
-                  Active
-                </div>
+                <button disabled style={{
+                  width: "100%", padding: "10px", border: "1px solid rgba(255,255,255,0.08)",
+                  borderRadius: 12, fontSize: 13, fontWeight: 500, cursor: "default",
+                  background: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.30)",
+                  fontFamily: "inherit",
+                }}>
+                  Current plan
+                </button>
               ) : plan.contactSales ? (
-                <a
-                  href="mailto:team@doppel.ai"
-                  className="w-full py-2 rounded-xl text-center text-sm text-white/55 hover:text-white/75 glass hover:glass-md transition-all mb-4 block"
-                >
-                  Talk to us →
+                <a href="mailto:team@doppel.ai" style={{
+                  display: "block", width: "100%", padding: "10px", textAlign: "center",
+                  border: "1px solid rgba(255,255,255,0.12)", borderRadius: 12,
+                  fontSize: 13, fontWeight: 500, cursor: "pointer",
+                  background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.75)",
+                  fontFamily: "inherit", textDecoration: "none",
+                  transition: "background 180ms, border-color 180ms",
+                }}>
+                  Talk to us
                 </a>
               ) : plan.id === "free" ? (
-                <div className="w-full py-2 mb-4" />
+                <button disabled style={{
+                  width: "100%", padding: "10px", border: "1px solid rgba(255,255,255,0.06)",
+                  borderRadius: 12, fontSize: 13, fontWeight: 500, cursor: "default",
+                  background: "transparent", color: "rgba(255,255,255,0.25)",
+                  fontFamily: "inherit",
+                }}>
+                  Default plan
+                </button>
               ) : (
                 <button
                   onClick={() => handleUpgrade(plan.id)}
-                  disabled={isLoading}
-                  className="w-full py-2 rounded-xl text-sm text-white/65 hover:text-white/85 glass hover:glass-md transition-all disabled:opacity-40 mb-4"
+                  disabled={!!loadingPlan}
+                  style={{
+                    width: "100%", padding: "10px", border: "none",
+                    borderRadius: 12, fontSize: 13, fontWeight: 500, cursor: "pointer",
+                    background: plan.featured
+                      ? "linear-gradient(135deg, #1A73E8, #4A90E2)"
+                      : "rgba(255,255,255,0.09)",
+                    color: "rgba(255,255,255,0.85)",
+                    fontFamily: "inherit",
+                    boxShadow: plan.featured ? "0 4px 18px rgba(26,115,232,0.38)" : "none",
+                    transition: "opacity 180ms",
+                    opacity: loadingPlan ? 0.6 : 1,
+                  }}
                 >
-                  {isLoading ? "Redirecting…" : `Upgrade to ${plan.name}`}
+                  {isLoading ? "Redirecting…" : plan.featured ? `Get ${plan.name}` : `Upgrade to ${plan.name}`}
                 </button>
               )}
 
-              <ul className="space-y-2 mt-auto">
+              {/* Features */}
+              <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 9, marginTop: "auto" }}>
                 {plan.features.map((f) => (
-                  <li key={f} className="flex items-start gap-2 text-xs text-white/40">
-                    <Check className="w-3 h-3 text-white/25 shrink-0 mt-0.5" />
+                  <li key={f} style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 12, color: "rgba(255,255,255,0.65)", lineHeight: 1.5 }}>
+                    <CheckIcon color={plan.color} />
                     {f}
                   </li>
                 ))}
@@ -326,13 +384,18 @@ function BillingContent() {
         })}
       </div>
 
-      <p className="mt-4 text-xs text-white/20 text-center">
+      <p style={{ marginTop: 20, fontSize: 12, color: "rgba(255,255,255,0.25)", textAlign: "center" }}>
         Enterprise Pro requires a 5-seat minimum.{" "}
-        <a href="mailto:team@doppel.ai" className="underline underline-offset-2 hover:text-white/40">
+        <a href="mailto:team@doppel.ai" style={{ color: "rgba(255,255,255,0.45)", textDecoration: "underline", textUnderlineOffset: 2 }}>
           Contact us
         </a>{" "}
-        for volume pricing.
+        for volume pricing and custom contracts.
       </p>
+
+      <div style={{ marginTop: 16, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, fontSize: 12, color: "rgba(255,255,255,0.25)" }}>
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><rect x="1" y="4.5" width="10" height="7" rx="1.5" stroke="currentColor" strokeWidth="1.1"/><path d="M3.5 4.5V3A2.5 2.5 0 018.5 3v1.5" stroke="currentColor" strokeWidth="1.1"/></svg>
+        Payments processed securely by Stripe. We never store card details.
+      </div>
     </div>
   );
 }

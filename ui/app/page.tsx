@@ -1,73 +1,106 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState, useMemo, useCallback } from "react";
 import Link from "next/link";
-import { motion, useInView } from "framer-motion";
-import { MoveRight, ArrowUpRight, Check } from "lucide-react";
-import NumberFlow from "@number-flow/react";
-import { ContainerScroll } from "@/components/ui/container-scroll-animation";
-import { VerticalCutReveal } from "@/components/ui/vertical-cut-reveal";
-import { cn } from "@/lib/utils";
+import { useUser } from "@clerk/nextjs";
 
 // ---------------------------------------------------------------------------
-// Nav
+// Icons
 // ---------------------------------------------------------------------------
+// Logo mark — two overlapping circles
+// ---------------------------------------------------------------------------
+function DoppelMark({ size = 22 }: { size?: number }) {
+  const rx = size * 0.31;
+  // Two circles matching the sidebar CSS mark proportions
+  const c1x = size * 0.404; const c1y = size * 0.404; const c1r = size * 0.212;
+  const c2x = size * 0.635; const c2y = size * 0.635; const c2r = size * 0.173;
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} fill="none" style={{ flexShrink: 0 }}>
+      <rect x="0.5" y="0.5" width={size - 1} height={size - 1} rx={rx}
+        fill="rgba(255,255,255,0.07)" stroke="rgba(255,255,255,0.12)" />
+      <circle cx={c1x} cy={c1y} r={c1r} fill="rgba(255,255,255,0.95)" />
+      <circle cx={c2x} cy={c2y} r={c2r} fill="rgba(255,255,255,0.55)" />
+    </svg>
+  );
+}
 
+// ---------------------------------------------------------------------------
+const I = {
+  arrow: (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+      <path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  ),
+  arrowS: (
+    <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
+      <path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  ),
+  check: (
+    <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+      <path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  ),
+  send: (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+      <path d="M2 8l12-5-4 12-3-5-5-2z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" fill="currentColor" />
+    </svg>
+  ),
+  chevL: (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+      <path d="M10 4L5 8l5 4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  ),
+  chevR: (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+      <path d="M6 4l5 4-5 4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  ),
+  sparkle: (
+    <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor">
+      <path d="M8 2l1.2 3.6L13 7l-3.8 1.4L8 12l-1.2-3.6L3 7l3.8-1.4z" />
+    </svg>
+  ),
+};
+
+// ---------------------------------------------------------------------------
+// NAV
+// ---------------------------------------------------------------------------
 function Nav() {
   const [scrolled, setScrolled] = useState(false);
-
+  const { isSignedIn } = useUser();
   useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 20);
+    const onScroll = () => setScrolled(window.scrollY > 8);
+    onScroll();
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
   return (
-    <header
-      className={cn(
-        "fixed top-0 left-0 right-0 z-50 transition-all duration-300",
-        scrolled
-          ? "glass border-b border-white/[0.06]"
-          : "bg-transparent border-b border-transparent"
-      )}
-    >
-      <div className="max-w-6xl mx-auto px-6 h-14 flex items-center justify-between">
-        <Link href="/" className="text-sm font-semibold text-white/80 tracking-tight">
+    <header className={`nav ${scrolled ? "nav--scrolled" : ""}`}>
+      <div className="nav__inner">
+        <Link href="/" className="nav__brand">
+          <DoppelMark size={22} />
           doppel
         </Link>
-
-        <nav className="hidden md:flex items-center gap-6">
-          <a href="#for-you" className="text-sm text-white/40 hover:text-white/70 transition-colors">
-            For individuals
-          </a>
-          <a href="#for-teams" className="text-sm text-white/40 hover:text-white/70 transition-colors">
-            For teams
-          </a>
-          <a href="#how" className="text-sm text-white/40 hover:text-white/70 transition-colors">
-            How it works
-          </a>
-          <a href="#pricing" className="text-sm text-white/40 hover:text-white/70 transition-colors">
-            Pricing
-          </a>
-          <Link href="/contact" className="text-sm text-white/40 hover:text-white/70 transition-colors">
-            Contact
-          </Link>
+        <nav className="nav__links">
+          <a className="nav__link" href="#demo">Demo</a>
+          <a className="nav__link" href="#screenwatch">Desktop app</a>
+          <a className="nav__link" href="#why">Why</a>
+          <a className="nav__link" href="#pricing">Pricing</a>
+          <Link className="nav__link" href="/contact">Contact</Link>
         </nav>
-
-        <div className="flex items-center gap-2">
-          <Link
-            href="/sign-in"
-            className="px-4 py-2 text-sm text-white/50 hover:text-white/75 transition-colors"
-          >
-            Sign in
-          </Link>
-          <Link
-            href="/sign-up"
-            className="glass-md hover:glass-hi px-4 py-2 rounded-xl text-sm text-white/75 hover:text-white/95 transition-all flex items-center gap-1.5"
-          >
-            Get started
-            <MoveRight className="w-3.5 h-3.5" />
-          </Link>
+        <div className="nav__cta-group">
+          {isSignedIn ? (
+            <>
+              <Link href="/home" className="btn btn--primary">Open app {I.arrowS}</Link>
+            </>
+          ) : (
+            <>
+              <Link href="/sign-in" className="btn btn--ghost">Sign in</Link>
+              <Link href="/sign-up" className="btn btn--primary">Start free {I.arrowS}</Link>
+            </>
+          )}
         </div>
       </div>
     </header>
@@ -75,754 +108,383 @@ function Nav() {
 }
 
 // ---------------------------------------------------------------------------
-// Hero
+// CONSTELLATION (3D hero visual)
 // ---------------------------------------------------------------------------
-
-function HeroSection() {
-  const [titleNumber, setTitleNumber] = useState(0);
-  const [scenario, setScenario] = useState<"individual" | "team">("individual");
-
-  const titles = useMemo(
-    () => ["scale beyond you.", "answer for you.", "outlast you.", "compound.", "live on."],
-    []
-  );
-
-  useEffect(() => {
-    const id = setTimeout(() => {
-      setTitleNumber((n) => (n === titles.length - 1 ? 0 : n + 1));
-    }, 2200);
-    return () => clearTimeout(id);
-  }, [titleNumber, titles]);
-
-  return (
-    <section className="relative min-h-screen flex flex-col items-center justify-center px-6 pt-20 pb-10 overflow-hidden">
-      {/* Dotted grid */}
-      <div
-        className="pointer-events-none absolute inset-0"
-        style={{
-          backgroundImage: "radial-gradient(rgba(255,255,255,0.065) 1px, transparent 1px)",
-          backgroundSize: "28px 28px",
-          maskImage: "radial-gradient(ellipse 80% 70% at 50% 40%, black 30%, transparent 100%)",
-          WebkitMaskImage: "radial-gradient(ellipse 80% 70% at 50% 40%, black 30%, transparent 100%)",
-        }}
-      />
-      <div className="pointer-events-none absolute inset-0">
-        <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] rounded-full bg-white/[0.02] blur-[120px]" />
-      </div>
-
-      {/* Badge */}
-      <motion.div
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5 }}
-        className="mb-8"
-      >
-        <div className="glass rounded-full px-4 py-1.5 text-xs text-white/45 flex items-center gap-2">
-          <span className="w-1.5 h-1.5 rounded-full bg-white/40 inline-block" />
-          Knowledge shouldn&apos;t have a lifespan · Private beta
-        </div>
-      </motion.div>
-
-      {/* Headline */}
-      <motion.div
-        initial={{ opacity: 0, y: 16 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.6, delay: 0.1 }}
-        className="text-center"
-      >
-        <h1 className="text-5xl md:text-7xl font-light text-white/85 tracking-tight leading-[1.08] max-w-3xl">
-          What you know should{" "}
-          <span className="relative inline-flex justify-center overflow-y-hidden overflow-x-visible h-[1.15em] align-bottom w-fit min-w-[280px] md:min-w-[440px]">
-            {titles.map((title, index) => (
-              <motion.span
-                key={index}
-                className="absolute font-normal text-white/55"
-                initial={{ opacity: 0, y: "60%" }}
-                transition={{ type: "spring", stiffness: 60, damping: 18 }}
-                animate={
-                  titleNumber === index
-                    ? { y: 0, opacity: 1 }
-                    : { y: titleNumber > index ? "-60%" : "60%", opacity: 0 }
-                }
-              >
-                {title}
-              </motion.span>
-            ))}
-          </span>
-        </h1>
-      </motion.div>
-
-      {/* Subtext */}
-      <motion.p
-        initial={{ opacity: 0, y: 12 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.6, delay: 0.25 }}
-        className="mt-6 text-base md:text-lg text-white/35 max-w-xl text-center leading-relaxed"
-      >
-        Doppel turns your expertise into a permanent, queryable intelligence —
-        for yourself, and for the teams that depend on you.
-      </motion.p>
-
-      {/* Scenario callout — tabbed */}
-      <motion.div
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, delay: 0.35 }}
-        className="mt-8 glass rounded-2xl p-1 max-w-md w-full"
-      >
-        <div className="flex gap-1 p-1 mb-3">
-          {(["individual", "team"] as const).map((s) => (
-            <button
-              key={s}
-              onClick={() => setScenario(s)}
-              className={cn(
-                "flex-1 py-1.5 rounded-lg text-xs transition-all",
-                scenario === s ? "glass-md text-white/75" : "text-white/30 hover:text-white/50"
-              )}
-            >
-              {s === "individual" ? "For individuals" : "For teams"}
-            </button>
-          ))}
-        </div>
-
-        <div className="px-4 pb-4 text-sm leading-relaxed min-h-[80px]">
-          {scenario === "individual" ? (
-            <>
-              <p className="text-white/50">
-                <span className="text-white/70">Colleague on Slack:</span>{" "}
-                <span className="italic">&ldquo;Quick question about that infra pattern you use?&rdquo;</span>
-              </p>
-              <p className="text-white/25 text-xs mt-2">You&apos;re in a meeting. Your clone isn&apos;t.</p>
-              <p className="text-white/50 mt-1.5">
-                <span className="text-white/65">[Your clone]:</span>{" "}
-                &ldquo;I avoid that pattern because of X — here&apos;s how I&apos;d approach it instead.&rdquo;
-              </p>
-            </>
-          ) : (
-            <>
-              <p className="text-white/50">
-                <span className="text-white/70">New engineer, day one:</span>{" "}
-                <span className="italic">&ldquo;Why did we build auth this way?&rdquo;</span>
-              </p>
-              <p className="text-white/25 text-xs mt-2">
-                Sarah left 8 months ago. Her answer is still here.
-              </p>
-              <p className="text-white/50 mt-1.5">
-                <span className="text-white/65">[Sarah&apos;s clone]:</span>{" "}
-                &ldquo;Made that call in April — here&apos;s her reasoning, with sources.&rdquo;
-              </p>
-            </>
-          )}
-        </div>
-      </motion.div>
-
-      {/* CTAs */}
-      <motion.div
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, delay: 0.5 }}
-        className="mt-8 flex flex-col sm:flex-row items-center gap-3"
-      >
-        <Link
-          href="/sign-up"
-          className="glass-hi hover:bg-white/[0.14] px-6 py-3 rounded-xl text-sm font-medium text-white/85 hover:text-white transition-all flex items-center gap-2"
-        >
-          Start free
-          <MoveRight className="w-4 h-4" />
-        </Link>
-        <Link
-          href="/contact"
-          className="glass hover:glass-md px-6 py-3 rounded-xl text-sm text-white/50 hover:text-white/70 transition-all"
-        >
-          Request a team demo →
-        </Link>
-      </motion.div>
-
-      <motion.p
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ duration: 0.5, delay: 0.65 }}
-        className="mt-10 text-[11px] text-white/20 tracking-wide text-center"
-      >
-        Free for individuals · Company Brain on Enterprise plans
-      </motion.p>
-    </section>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// For individuals section
-// ---------------------------------------------------------------------------
-
-function ForIndividualsSection() {
-  const ref = useRef<HTMLDivElement>(null);
-  const isInView = useInView(ref, { once: true, margin: "-80px" });
-
-  const USE_CASES = [
-    {
-      who: "Consultant",
-      problem: "Clients ask the same strategic questions. You answer each one from scratch.",
-      solution: "Your clone answers with your frameworks — you focus on the work that needs you.",
-    },
-    {
-      who: "Engineer",
-      problem: "Junior devs pull you into Slack for context you've explained ten times.",
-      solution: "Your clone surfaces the right answer from your actual decisions and code reviews.",
-    },
-    {
-      who: "Executive",
-      problem: "Your judgment is the bottleneck. You can't be in every room.",
-      solution: "Your reasoning process is queryable. Decisions get made without the meeting.",
-    },
-    {
-      who: "Creator",
-      problem: "Your audience wants you — more than you can produce.",
-      solution: "Your clone engages, answers, and teaches. Trained on everything you've written.",
-    },
-  ];
-
-  return (
-    <section id="for-you" className="relative py-24 px-6 max-w-6xl mx-auto" ref={ref}>
-      <div className="max-w-2xl mb-16">
-        <motion.p
-          initial={{ opacity: 0, y: 8 }}
-          animate={isInView ? { opacity: 1, y: 0 } : {}}
-          transition={{ duration: 0.5 }}
-          className="text-[11px] uppercase tracking-widest text-white/25 mb-3"
-        >
-          For individuals
-        </motion.p>
-        <motion.h2
-          initial={{ opacity: 0, y: 12 }}
-          animate={isInView ? { opacity: 1, y: 0 } : {}}
-          transition={{ duration: 0.5, delay: 0.1 }}
-          className="text-4xl font-light text-white/85 mb-4 leading-tight"
-        >
-          You are the bottleneck.
-          <br />
-          <span className="text-white/40">You don&apos;t have to be.</span>
-        </motion.h2>
-        <motion.p
-          initial={{ opacity: 0, y: 8 }}
-          animate={isInView ? { opacity: 1, y: 0 } : {}}
-          transition={{ duration: 0.5, delay: 0.2 }}
-          className="text-base text-white/35 leading-relaxed"
-        >
-          Your knowledge is more valuable than your availability.
-          Doppel lets you deploy your expertise at scale — without giving up more of your time.
-        </motion.p>
-      </div>
-
-      <div className="grid md:grid-cols-2 gap-4">
-        {USE_CASES.map((uc, i) => (
-          <motion.div
-            key={uc.who}
-            initial={{ opacity: 0, y: 20 }}
-            animate={isInView ? { opacity: 1, y: 0 } : {}}
-            transition={{ duration: 0.5, delay: 0.2 + i * 0.08 }}
-            className="glass rounded-2xl p-6"
-          >
-            <p className="text-xs text-white/30 uppercase tracking-wider mb-3">{uc.who}</p>
-            <p className="text-sm text-white/40 leading-relaxed mb-4 flex items-start gap-2">
-              <span className="w-1 h-1 rounded-full bg-red-400/40 inline-block mt-2 shrink-0" />
-              {uc.problem}
-            </p>
-            <p className="text-sm text-white/60 leading-relaxed flex items-start gap-2">
-              <span className="w-1 h-1 rounded-full bg-emerald-400/60 inline-block mt-2 shrink-0" />
-              {uc.solution}
-            </p>
-          </motion.div>
-        ))}
-      </div>
-
-      <motion.div
-        initial={{ opacity: 0, y: 12 }}
-        animate={isInView ? { opacity: 1, y: 0 } : {}}
-        transition={{ duration: 0.5, delay: 0.55 }}
-        className="mt-8 flex items-center gap-6"
-      >
-        <Link
-          href="/sign-up"
-          className="glass-md hover:glass-hi rounded-xl px-5 py-2.5 text-sm text-white/65 hover:text-white/85 transition-all flex items-center gap-2"
-        >
-          Start free
-          <MoveRight className="w-3.5 h-3.5" />
-        </Link>
-        <p className="text-xs text-white/25">Free forever · No credit card</p>
-      </motion.div>
-    </section>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// For teams section (replaces old problem section)
-// ---------------------------------------------------------------------------
-
-const LOSSES = [
-  {
-    role: "Senior engineer",
-    years: "6 years",
-    what: "Why every architectural decision was made. Which shortcuts will hurt you. Where the bodies are buried in the codebase.",
-  },
-  {
-    role: "Support lead",
-    years: "4 years",
-    what: "Which customers to bend the rules for. How to handle the edge cases that aren't in the policy doc. The instincts from 10,000 tickets.",
-  },
-  {
-    role: "Head of sales",
-    years: "7 years",
-    what: "When to discount, when to hold firm, which objections are real. The pricing intuition that closed $4M last year.",
-  },
-  {
-    role: "Founding PM",
-    years: "5 years",
-    what: "Why the product is the way it is. The decisions that were tried and failed. The customer conversations that shaped every major feature.",
-  },
+const NODES = [
+  { id: "sarah", name: "Sarah", initial: "S", role: "Architecture",  color: "#1A73E8", r: 200, a:   0, size: 64, line: "Why we chose Postgres over Dynamo" },
+  { id: "maya",  name: "Maya",  initial: "M", role: "Design",        color: "#E91E63", r: 200, a:  72, size: 64, line: "When the design is done" },
+  { id: "reza",  name: "Reza",  initial: "R", role: "GTM",           color: "#F57C00", r: 200, a: 144, size: 64, line: "Positioning that holds up" },
+  { id: "jia",   name: "Jia",   initial: "J", role: "CFO",           color: "#34D399", r: 200, a: 216, size: 64, line: "Runway, then strategy" },
+  { id: "amit",  name: "Amit",  initial: "A", role: "Debug",         color: "#7B1FA2", r: 200, a: 288, size: 64, line: "Read the error twice" },
+  { id: "lin",   name: "Lin",   initial: "L", role: "Clinical ops",  color: "#C2185B", r: 100, a:  30, size: 44, line: "Handoff breaks the system" },
+  { id: "tom",   name: "Tom",   initial: "T", role: "Operator",      color: "#A78BFA", r: 100, a: 150, size: 44, line: "After PMF is the hard year" },
+  { id: "eli",   name: "Eli",   initial: "E", role: "Teaching",      color: "#FBBF24", r: 100, a: 270, size: 44, line: "How you ask is half the answer" },
 ];
 
-function ForTeamsSection() {
-  const ref = useRef<HTMLDivElement>(null);
-  const isInView = useInView(ref, { once: true, margin: "-80px" });
+function Constellation() {
+  const stageRef = useRef<HTMLDivElement>(null);
+  const innerRef = useRef<HTMLDivElement>(null);
+  const [active, setActive] = useState<string | null>(null);
+  const [auto, setAuto] = useState(true);
+  const [phase, setPhase] = useState(0);
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
+  // Auto-rotation
+  useEffect(() => {
+    if (!auto) return;
+    let raf: number;
+    const t0 = performance.now();
+    const tick = (t: number) => {
+      const dt = (t - t0) / 1000;
+      const ry = Math.sin(dt * 0.18) * 14;
+      const rx = Math.cos(dt * 0.12) * 7;
+      const el = innerRef.current;
+      if (el) {
+        el.style.setProperty("--ry", `${ry}deg`);
+        el.style.setProperty("--rx", `${rx}deg`);
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [auto]);
+
+  // Phase animation for node orbits
+  useEffect(() => {
+    let raf: number;
+    const t0 = performance.now();
+    const tick = (t: number) => {
+      setPhase(((t - t0) / 1000) * 0.18);
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
+  const onMove = useCallback((e: React.MouseEvent) => {
+    setAuto(false);
+    const rect = stageRef.current!.getBoundingClientRect();
+    const x = (e.clientX - rect.left) / rect.width - 0.5;
+    const y = (e.clientY - rect.top) / rect.height - 0.5;
+    const el = innerRef.current;
+    if (!el) return;
+    el.style.setProperty("--ry", `${x * 32}deg`);
+    el.style.setProperty("--rx", `${-y * 22}deg`);
+  }, []);
+
+  const onLeave = useCallback(() => setAuto(true), []);
+
+  const activeNode = NODES.find((n) => n.id === active);
+
+  if (!mounted) return <div className="stage" />;
 
   return (
-    <section
-      id="for-teams"
-      className="relative py-24 px-6 max-w-5xl mx-auto overflow-hidden"
-      ref={ref}
-    >
-      <div
-        className="pointer-events-none absolute inset-0"
-        style={{
-          backgroundImage: "radial-gradient(rgba(255,255,255,0.055) 1px, transparent 1px)",
-          backgroundSize: "28px 28px",
-          maskImage: "radial-gradient(ellipse 90% 80% at 50% 50%, black 20%, transparent 85%)",
-          WebkitMaskImage: "radial-gradient(ellipse 90% 80% at 50% 50%, black 20%, transparent 85%)",
-        }}
-      />
+    <div className="stage" ref={stageRef} onMouseMove={onMove} onMouseLeave={onLeave}>
+      <div className="stage__inner" ref={innerRef}>
+        <div className="ring ring--1" />
+        <div className="ring ring--2" />
+        <div className="ring ring--3" />
 
-      <div className="relative max-w-2xl mb-20">
-        <motion.p
-          initial={{ opacity: 0, y: 8 }}
-          animate={isInView ? { opacity: 1, y: 0 } : {}}
-          transition={{ duration: 0.5 }}
-          className="text-[11px] uppercase tracking-widest text-white/25 mb-3"
-        >
-          For teams
-        </motion.p>
-        <motion.h2
-          initial={{ opacity: 0, y: 12 }}
-          animate={isInView ? { opacity: 1, y: 0 } : {}}
-          transition={{ duration: 0.5, delay: 0.1 }}
-          className="text-4xl font-light text-white/85 mb-4 leading-tight"
-        >
-          When they leave,
-          <br />
-          <span className="text-white/40">it doesn&apos;t have to go with them.</span>
-        </motion.h2>
-        <motion.p
-          initial={{ opacity: 0, y: 8 }}
-          animate={isInView ? { opacity: 1, y: 0 } : {}}
-          transition={{ duration: 0.5, delay: 0.2 }}
-          className="text-base text-white/35 leading-relaxed"
-        >
-          Not the things in documents — the judgment, the instincts, the reasoning
-          behind the reasoning. Every departure takes it. Until now.
-        </motion.p>
-      </div>
-
-      {/* Timeline */}
-      <div className="relative max-w-3xl mx-auto">
-        <div
-          className="absolute left-1/2 -translate-x-px top-0 bottom-0 w-px hidden md:block"
-          style={{
-            backgroundImage: "repeating-linear-gradient(to bottom, rgba(255,255,255,0.10) 0, rgba(255,255,255,0.10) 6px, transparent 6px, transparent 16px)",
-          }}
-        />
-        <div
-          className="absolute left-4 top-0 bottom-0 w-px md:hidden"
-          style={{
-            backgroundImage: "repeating-linear-gradient(to bottom, rgba(255,255,255,0.10) 0, rgba(255,255,255,0.10) 6px, transparent 6px, transparent 16px)",
-          }}
-        />
-
-        {LOSSES.map((item, i) => {
-          const isLeft = i % 2 === 0;
+        {NODES.map((n) => {
+          const speed = n.r > 150 ? 0.6 : 1.0;
+          const rad = (n.a * Math.PI) / 180 + phase * speed;
+          const x = Math.cos(rad) * n.r;
+          const y = Math.sin(rad) * n.r;
+          const z = Math.sin(rad + 0.5) * 60;
           return (
-            <motion.div
-              key={item.role}
-              initial={{ opacity: 0, x: isLeft ? -24 : 24 }}
-              animate={isInView ? { opacity: 1, x: 0 } : {}}
-              transition={{ duration: 0.5, delay: 0.25 + i * 0.1 }}
-              className="relative mb-8 flex md:block pl-10 md:pl-0"
+            <button
+              key={n.id}
+              className="node"
+              style={{
+                ["--node-size" as string]: `${n.size}px`,
+                ["--node-bg" as string]: n.color,
+                ["--node-shadow" as string]: `${n.color}55`,
+                ["--node-x" as string]: `${x}px`,
+                ["--node-y" as string]: `${y}px`,
+                transform: `translate(${x}px, ${y}px) translateZ(${z}px)`,
+              }}
+              onMouseEnter={() => setActive(n.id)}
+              onMouseLeave={() => setActive(null)}
+              onFocus={() => setActive(n.id)}
+              onBlur={() => setActive(null)}
+              aria-label={`${n.name}, ${n.role}`}
             >
-              <div className={`hidden md:block w-[calc(50%-28px)] glass rounded-2xl p-5 ${isLeft ? "mr-auto" : "ml-auto"}`}>
-                <CardContent item={item} />
-              </div>
-              <div className="md:hidden flex-1 glass rounded-2xl p-5">
-                <CardContent item={item} />
-              </div>
-              <div className="hidden md:block absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full bg-[#080808] border border-white/20 z-10" />
-              <div className="md:hidden absolute left-4 top-6 -translate-x-1/2 w-2 h-2 rounded-full bg-[#080808] border border-white/20 z-10" />
-            </motion.div>
+              <span className="node__pulse" />
+              {n.initial}
+            </button>
           );
         })}
 
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={isInView ? { opacity: 1, y: 0 } : {}}
-          transition={{ duration: 0.55, delay: 0.7 }}
-          className="relative flex justify-center pt-2 pl-10 md:pl-0"
-        >
-          <div className="hidden md:block absolute top-0 left-1/2 -translate-x-1/2 w-3.5 h-3.5 rounded-full bg-white/15 border border-white/35 z-10" />
-          <div className="md:hidden absolute top-1 left-4 -translate-x-1/2 w-3.5 h-3.5 rounded-full bg-white/15 border border-white/35 z-10" />
-          <div className="mt-6 md:w-auto w-full glass-hi border border-white/[0.13] rounded-2xl px-8 py-6 text-center max-w-xs">
-            <p className="text-[10px] uppercase tracking-[0.18em] text-white/30 mb-2">Until now</p>
-            <p className="text-xl font-semibold text-white/80 tracking-tight mb-1">doppel</p>
-            <p className="text-sm text-white/45 font-light leading-snug">
-              The knowledge doesn&apos;t leave<br />when the person does.
-            </p>
-            <div className="mt-3 flex items-center justify-center gap-1.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400/60 inline-block" />
-              <span className="text-[11px] text-emerald-400/60">Knowledge preserved</span>
-            </div>
-          </div>
-        </motion.div>
-      </div>
-    </section>
-  );
-}
-
-function CardContent({ item }: { item: { role: string; years: string; what: string } }) {
-  return (
-    <>
-      <div className="flex items-center gap-2 mb-2.5">
-        <span className="text-sm font-medium text-white/65">{item.role}</span>
-        <span className="text-[10px] text-white/20">·</span>
-        <span className="text-xs text-white/30">{item.years}</span>
-      </div>
-      <p className="text-xs text-white/40 leading-relaxed">{item.what}</p>
-      <p className="text-[11px] text-red-400/40 mt-3 flex items-center gap-1.5">
-        <span className="w-1 h-1 rounded-full bg-red-400/40 inline-block" />
-        Gone on their last day
-      </p>
-    </>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Dashboard mock
-// ---------------------------------------------------------------------------
-
-function DashboardMock() {
-  return (
-    <div className="h-full w-full bg-[#080808] overflow-hidden flex select-none text-[11px]">
-      <div className="w-[160px] shrink-0 border-r border-white/[0.05] flex flex-col p-2.5">
-        <div className="px-2.5 py-2 mb-4">
-          <span className="text-xs font-semibold text-white/65">doppel</span>
-        </div>
-        {[
-          { label: "Overview", active: false },
-          { label: "Train", active: false },
-          { label: "Identity", active: false },
-          { label: "Brain", active: false },
-          { label: "Test", active: true },
-          { label: "Company Brain", active: false },
-          { label: "Skills API", active: false },
-        ].map(({ label, active }) => (
-          <div
-            key={label}
-            className={cn(
-              "px-2.5 py-2 rounded-lg mb-0.5 text-[11px]",
-              active ? "bg-white/[0.07] text-white/80" : "text-white/30"
-            )}
-          >
-            {label}
-          </div>
-        ))}
-      </div>
-
-      <div className="flex-1 flex flex-col min-w-0">
-        <div className="px-5 py-3 border-b border-white/[0.05] flex items-center gap-2.5 shrink-0">
-          <div className="w-7 h-7 rounded-lg bg-white/[0.07] flex items-center justify-center text-[10px] text-white/50 font-medium shrink-0">
-            S
-          </div>
-          <div>
-            <p className="text-[12px] font-medium text-white/80">Sarah Chen · Arch lead</p>
-            <p className="text-[10px] text-white/30">@sarah-chen · departed Jan 2026</p>
-          </div>
-          <div className="ml-auto glass rounded-md px-2 py-0.5 text-[9px] text-emerald-400/60">
-            knowledge preserved
-          </div>
+        <div className="you">
+          you
+          <span className="you__label">your clone</span>
         </div>
 
-        <div className="flex-1 overflow-hidden p-4 flex flex-col gap-3">
-          <div className="flex justify-end">
-            <div className="bg-white/[0.07] border border-white/[0.06] rounded-2xl rounded-tr-sm px-3 py-2 text-white/65 max-w-[70%] leading-relaxed">
-              Why did we choose Postgres over Dynamo for the events table?
-            </div>
-          </div>
-          <div className="flex gap-2.5 items-start">
-            <div className="w-6 h-6 rounded-lg bg-white/[0.05] flex items-center justify-center text-[9px] text-white/40 shrink-0 mt-0.5">S</div>
-            <div className="flex flex-col gap-1.5 max-w-[80%]">
-              <div className="bg-white/[0.03] border border-white/[0.05] rounded-2xl rounded-tl-sm px-3 py-2 text-white/55 leading-relaxed">
-                We evaluated both in Q3 2024. The main constraint was complex join patterns — Dynamo&apos;s single-table model would&apos;ve forced duplicate writes everywhere.
+        {activeNode && (() => {
+          const speed = activeNode.r > 150 ? 0.6 : 1.0;
+          const rad = (activeNode.a * Math.PI) / 180 + phase * speed;
+          const x = Math.cos(rad) * activeNode.r;
+          const y = Math.sin(rad) * activeNode.r;
+          const left = x > 0 ? x + activeNode.size / 2 + 18 : x - activeNode.size / 2 - 18 - 220;
+          return (
+            <div
+              className="bubble bubble--visible"
+              style={{
+                transform: `translate(${left}px, ${y - 30}px) translateZ(80px)`,
+                ["--node-bg" as string]: activeNode.color,
+              }}
+            >
+              <div className="bubble__from" style={{ color: activeNode.color }}>
+                <span className="bubble__from__dot" />
+                {activeNode.name} · {activeNode.role}
               </div>
-              <div className="flex items-center gap-2 px-1">
-                <span className="text-[9px] font-medium border border-emerald-400/25 text-emerald-400/80 rounded px-1.5 py-0.5">92% confident</span>
-                <span className="text-[9px] text-white/20">3 sources · email, Slack, design doc</span>
-              </div>
+              {activeNode.line}
             </div>
-          </div>
-          <div className="flex justify-end">
-            <div className="bg-white/[0.07] border border-white/[0.06] rounded-2xl rounded-tr-sm px-3 py-2 text-white/65 max-w-[70%] leading-relaxed">
-              Were there any trade-offs she worried about?
-            </div>
-          </div>
-          <div className="flex gap-2.5 items-start">
-            <div className="w-6 h-6 rounded-lg bg-white/[0.05] flex items-center justify-center text-[9px] text-white/40 shrink-0 mt-0.5">S</div>
-            <div className="bg-white/[0.03] border border-white/[0.05] rounded-2xl rounded-tl-sm px-3 py-2 text-white/55 max-w-[80%] leading-relaxed">
-              Yes — connection pool exhaustion at scale. That&apos;s why we set up PgBouncer from day one. She left a note about revisiting at 10M events/day.
-            </div>
-          </div>
-        </div>
-
-        <div className="px-4 pb-4 shrink-0">
-          <div className="flex items-center gap-2 bg-white/[0.04] border border-white/[0.07] rounded-xl px-3.5 py-2.5">
-            <span className="flex-1 text-white/20 text-[11px]">Ask Sarah anything…</span>
-            <div className="w-6 h-6 rounded-lg bg-white/[0.07] flex items-center justify-center shrink-0">
-              <ArrowUpRight className="w-3 h-3 text-white/40" />
-            </div>
-          </div>
-        </div>
+          );
+        })()}
+      </div>
+      <div className="stage__hint">
+        <kbd>↔</kbd> move to spin
       </div>
     </div>
   );
 }
 
-function ScrollSection() {
+// ---------------------------------------------------------------------------
+// HERO
+// ---------------------------------------------------------------------------
+function Hero() {
+  const { isSignedIn } = useUser();
   return (
-    <section id="demo" className="relative">
-      <ContainerScroll
-        titleComponent={
-          <div className="space-y-3">
-            <p className="text-[11px] uppercase tracking-widest text-white/25">The product</p>
-            <h2 className="text-4xl md:text-5xl font-light text-white/85 leading-tight">
-              Query the people who built it
-            </h2>
-            <p className="text-base text-white/35 max-w-md mx-auto leading-relaxed">
-              Every clone answers with real sources — emails, decisions, Slack threads.
-              Confidence-scored. Always cited.
-            </p>
+    <section className="hero" id="top">
+      <div className="hero__bg" />
+      <div className="hero__bg__dots" />
+      <div className="hero__inner">
+        <div className="hero__copy">
+          <div className="hero__pill">
+            <span className="hero__pill__badge">
+              <span className="hero__pill__dot" /> Live
+            </span>
+            <span>412 expert clones answering right now</span>
           </div>
-        }
-      >
-        <DashboardMock />
-      </ContainerScroll>
+
+          <h1 className="hero__h1">
+            Knowledge
+            <br />
+            that <span className="accent">outlasts you.</span>
+          </h1>
+
+          <p className="hero__sub">
+            Train an AI clone on your work. Anyone can ask it.
+            You don&apos;t have to be in the room.
+          </p>
+
+          <div className="hero__ctas">
+            <Link href={isSignedIn ? "/home" : "/sign-up"} className="btn btn--primary btn--lg">
+              {isSignedIn ? <>Open app {I.arrow}</> : <>Start free {I.arrow}</>}
+            </Link>
+            <Link href="/contact" className="btn btn--ghost-light btn--lg">
+              Talk to us
+            </Link>
+          </div>
+
+          <div className="hero__trust">
+            <span className="hero__trust__item">
+              <span className="hero__trust__dot" /> Free forever for individuals
+            </span>
+            <span className="hero__trust__item">
+              <span className="hero__trust__dot" /> No credit card
+            </span>
+          </div>
+        </div>
+
+        <Constellation />
+      </div>
     </section>
   );
 }
 
 // ---------------------------------------------------------------------------
-// How it works
+// TICKER
 // ---------------------------------------------------------------------------
+const TICK_ITEMS = [
+  { who: "Sarah", role: "Architecture", color: "#1A73E8", line: "answered \"why Postgres over Dynamo\"", t: "2s" },
+  { who: "Maya",  role: "Design",       color: "#E91E63", line: "reviewed \"checkout v2 critique\"", t: "11s" },
+  { who: "Reza",  role: "GTM",          color: "#F57C00", line: "answered \"positioning rewrite\"", t: "24s" },
+  { who: "Amit",  role: "Debug",        color: "#7B1FA2", line: "explained \"flaky test in CI\"", t: "37s" },
+  { who: "Jia",   role: "CFO",          color: "#34D399", line: "modeled \"runway with new hires\"", t: "52s" },
+  { who: "Lin",   role: "Clinical ops", color: "#C2185B", line: "answered \"weekend triage staffing\"", t: "1m" },
+  { who: "Tom",   role: "Operator",     color: "#A78BFA", line: "advised \"killing a product line\"", t: "1m" },
+  { who: "Eli",   role: "Teaching",     color: "#FBBF24", line: "structured \"week 3 prereqs\"", t: "2m" },
+];
 
-const FEATURES = [
+function Ticker() {
+  const items = [...TICK_ITEMS, ...TICK_ITEMS];
+  return (
+    <div className="ticker">
+      <div className="ticker__track">
+        {items.map((x, i) => (
+          <span key={i} className="ticker__item" style={{ ["--ticker-color" as string]: x.color }}>
+            <span className="ticker__item__dot" />
+            <span><span className="ticker__item__cat">{x.who}</span> · {x.role}</span>
+            <span style={{ color: "var(--fg-dark-3)" }}>{x.line}</span>
+            <span className="ticker__item__time">{x.t} ago</span>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// DEMO SECTION
+// ---------------------------------------------------------------------------
+const DEMO_THREADS = [
   {
-    icon: (
-      <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-        <rect x="2" y="4" width="14" height="10" rx="2" stroke="currentColor" strokeWidth="1.4" />
-        <path d="M2 7h14" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-        <path d="M6 11h2M11 11h1" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-      </svg>
-    ),
-    title: "Capture",
-    desc: "Connect Gmail, Slack, GitHub, Notion, and docs. Every email, decision, and thread becomes memory — not lost in someone's inbox.",
-    tag: "Individual & team",
+    expert: { id: "sarah", name: "Sarah Chen", role: "Architecture · former Stripe", color: "#1A73E8", initial: "S" },
+    seed: "Should we rewrite our payments service or refactor in flight?",
+    response: "Rewrite only if the API surface is fundamentally wrong, the team can't reason about failure modes, or on-call cost exceeds new-feature cost. Otherwise refactor — you keep velocity and tribal knowledge.",
+    confidence: 92,
+    sources: [
+      { kind: "Notion", color: "#7B1FA2", label: "Rewrite RFC, Apr 2021" },
+      { kind: "Slack",  color: "#34D399", label: "#payments-arch, 14 threads" },
+      { kind: "Email",  color: "#1A73E8", label: "Post-mortem, Jun 2021" },
+    ],
   },
   {
-    icon: (
-      <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-        <circle cx="9" cy="9" r="2" stroke="currentColor" strokeWidth="1.4" />
-        <path d="M2 9h3M13 9h3M9 2v3M9 13v3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-      </svg>
-    ),
-    title: "Deploy",
-    desc: "Your clone is queryable via chat link, API, Slack bot, or email. Anyone you give access can ask — you answer once, for everyone.",
-    tag: "Individual",
+    expert: { id: "maya", name: "Maya Lee", role: "Design lead · ex-Figma", color: "#E91E63", initial: "M" },
+    seed: "How do I know my design is done?",
+    response: "When two designers can't agree, neither has met the user. Done is when your strongest critic has run out of fixable things to flag — not when you've stopped iterating.",
+    confidence: 88,
+    sources: [
+      { kind: "Figma",  color: "#E91E63", label: "Review threads, 720 comments" },
+      { kind: "Notion", color: "#7B1FA2", label: "Critique frameworks" },
+    ],
   },
   {
-    icon: (
-      <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-        <path d="M3 15 L9 3 L15 15" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
-        <path d="M5.5 10.5h7" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-      </svg>
-    ),
-    title: "Compound",
-    desc: "Individual clones aggregate into role brains. Team knowledge becomes a queryable layer. Every brain added makes the whole stronger.",
-    tag: "Team",
+    expert: { id: "jia", name: "Jia Park", role: "Fractional CFO", color: "#34D399", initial: "J" },
+    seed: "How do I think about burn vs growth at seed?",
+    response: "Show me your next 18 months first. We'll talk strategy after we agree on the math. At seed, runway is the only constraint that matters — everything else is downstream.",
+    confidence: 95,
+    sources: [
+      { kind: "Sheets", color: "#2E7D32", label: "240 client financial models" },
+      { kind: "Email",  color: "#1A73E8", label: "660 investor threads" },
+    ],
   },
 ];
 
-function FeaturesSection() {
-  const ref = useRef<HTMLDivElement>(null);
-  const isInView = useInView(ref, { once: true, margin: "-100px" });
+function DemoSection() {
+  const [active, setActive] = useState(0);
+  const [stage, setStage] = useState<"ask" | "typing" | "answer">("ask");
+  const [draft, setDraft] = useState("");
+  const thread = DEMO_THREADS[active];
+  const color = thread.expert.color;
+
+  useEffect(() => {
+    setStage("ask");
+    setDraft("");
+    const t1 = setTimeout(() => setStage("typing"), 700);
+    const t2 = setTimeout(() => setStage("answer"), 2300);
+    return () => { clearTimeout(t1); clearTimeout(t2); };
+  }, [active]);
 
   return (
-    <section id="how" className="py-24 px-6 max-w-6xl mx-auto" ref={ref}>
-      <div className="text-center mb-16">
-        <motion.p
-          initial={{ opacity: 0, y: 8 }}
-          animate={isInView ? { opacity: 1, y: 0 } : {}}
-          transition={{ duration: 0.5 }}
-          className="text-[11px] uppercase tracking-widest text-white/25 mb-3"
-        >
-          How it works
-        </motion.p>
-        <motion.h2
-          initial={{ opacity: 0, y: 12 }}
-          animate={isInView ? { opacity: 1, y: 0 } : {}}
-          transition={{ duration: 0.5, delay: 0.1 }}
-          className="text-4xl font-light text-white/85"
-        >
-          <VerticalCutReveal
-            splitBy="words"
-            staggerDuration={0.12}
-            staggerFrom="first"
-            containerClassName="justify-center"
-            transition={{ type: "spring", stiffness: 220, damping: 38, delay: 0.2 }}
-          >
-            Knowledge that compounds
-          </VerticalCutReveal>
-        </motion.h2>
-        <motion.p
-          initial={{ opacity: 0, y: 8 }}
-          animate={isInView ? { opacity: 1, y: 0 } : {}}
-          transition={{ duration: 0.5, delay: 0.25 }}
-          className="text-sm text-white/30 mt-4 max-w-md mx-auto leading-relaxed"
-        >
-          Works at the individual level. Scales to the org.
-        </motion.p>
-      </div>
+    <section className="demo" id="demo" style={{ ["--demo-color" as string]: color }}>
+      <div className="demo__inner">
+        <div>
+          <div className="eyebrow" style={{ ["--eyebrow-c" as string]: color }}>
+            <span className="eyebrow__dot" /> Live demo
+          </div>
+          <h2 className="sec-h2" style={{ ["--accent-c" as string]: color }}>
+            Ask anyone. <br /> Get a <em>cited</em> answer.
+          </h2>
+          <p className="sec-sub">
+            Every clone answers in voice, with real sources and a confidence score. Try one:
+          </p>
 
-      <div className="grid md:grid-cols-3 gap-4">
-        {FEATURES.map((f, i) => (
-          <motion.div
-            key={f.title}
-            initial={{ opacity: 0, y: 20 }}
-            animate={isInView ? { opacity: 1, y: 0 } : {}}
-            transition={{ duration: 0.5, delay: 0.2 + i * 0.1 }}
-          >
-            <div className="glass rounded-2xl p-6 h-full flex flex-col">
-              <div className="w-9 h-9 rounded-xl glass-md flex items-center justify-center text-white/45 mb-5">
-                {f.icon}
-              </div>
-              <div className="flex items-center gap-2 mb-2">
-                <h3 className="text-base font-medium text-white/80">{f.title}</h3>
-                <span className="text-[10px] text-white/25 glass rounded-full px-2 py-px">{f.tag}</span>
-              </div>
-              <p className="text-sm text-white/35 leading-relaxed">{f.desc}</p>
-            </div>
-          </motion.div>
-        ))}
-      </div>
-
-      <motion.div
-        initial={{ opacity: 0, y: 16 }}
-        animate={isInView ? { opacity: 1, y: 0 } : {}}
-        transition={{ duration: 0.5, delay: 0.5 }}
-        className="mt-10 glass rounded-2xl p-8 text-center max-w-2xl mx-auto"
-      >
-        <p className="text-base text-white/55 leading-relaxed italic mb-4">
-          &ldquo;The founding engineer left in November. By January, new hires were asking her Doppel clone
-          architecture questions — and getting cited answers from her actual design docs.&rdquo;
-        </p>
-        <p className="text-sm text-white/30">Engineering team, Series B SaaS · 40 engineers</p>
-      </motion.div>
-    </section>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Company Brain section
-// ---------------------------------------------------------------------------
-
-function CompanyBrainSection() {
-  const ref = useRef<HTMLDivElement>(null);
-  const isInView = useInView(ref, { once: true, margin: "-80px" });
-
-  return (
-    <section className="py-24 px-6 max-w-6xl mx-auto" ref={ref}>
-      <div className="max-w-4xl mx-auto">
-        <div className="glass rounded-3xl p-10 md:p-14">
-          <motion.div
-            initial={{ opacity: 0, y: 12 }}
-            animate={isInView ? { opacity: 1, y: 0 } : {}}
-            transition={{ duration: 0.5 }}
-            className="mb-10"
-          >
-            <p className="text-[11px] uppercase tracking-widest text-white/25 mb-3">
-              For teams · Company Brain
-            </p>
-            <h2 className="text-3xl md:text-4xl font-light text-white/85 leading-tight mb-4">
-              Individual knowledge becomes<br className="hidden md:block" /> company knowledge
-            </h2>
-            <p className="text-base text-white/35 leading-relaxed max-w-xl">
-              Individual clones are the foundation. Doppel aggregates them into role brains —
-              then extracts structured, executable skills your AI agents can use before acting.
-            </p>
-          </motion.div>
-
-          <div className="grid md:grid-cols-3 gap-3">
-            {[
-              {
-                step: "01",
-                title: "Individual brain",
-                desc: "Sarah's 6 years of emails, decisions, and reasoning — preserved and queryable.",
-                color: "text-white/50",
-              },
-              {
-                step: "02",
-                title: "Role brain",
-                desc: "All five support leads aggregated into one. How does your team handle refunds, escalations, edge cases?",
-                color: "text-white/55",
-              },
-              {
-                step: "03",
-                title: "Skills API",
-                desc: "AI agents query your company brain before acting. Correct decisions, at scale, grounded in your actual procedures.",
-                color: "text-white/60",
-              },
-            ].map((item, i) => (
-              <motion.div
-                key={item.step}
-                initial={{ opacity: 0, y: 16 }}
-                animate={isInView ? { opacity: 1, y: 0 } : {}}
-                transition={{ duration: 0.5, delay: 0.15 + i * 0.1 }}
-                className="glass rounded-2xl p-5"
+          <div className="demo__presets" style={{ marginTop: 18 }}>
+            {DEMO_THREADS.map((d, i) => (
+              <button
+                key={d.expert.id}
+                className="demo__preset"
+                onClick={() => setActive(i)}
+                style={{
+                  ["--p-c" as string]: d.expert.color,
+                  background: i === active ? "rgba(255,255,255,0.06)" : "var(--bg-dark-elev-1)",
+                  borderColor: i === active ? d.expert.color : "var(--border-dark)",
+                  color: i === active ? "#fff" : "var(--fg-dark-2)",
+                }}
               >
-                <span className="text-[10px] text-white/20 font-mono mb-3 block">{item.step}</span>
-                <h3 className={`text-sm font-medium mb-2 ${item.color}`}>{item.title}</h3>
-                <p className="text-xs text-white/30 leading-relaxed">{item.desc}</p>
-              </motion.div>
+                <span className="demo__preset__dot" />
+                {d.expert.name} · {d.expert.role.split("·")[0].trim()}
+              </button>
             ))}
           </div>
+        </div>
 
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={isInView ? { opacity: 1 } : {}}
-            transition={{ duration: 0.5, delay: 0.5 }}
-            className="mt-8 glass rounded-xl p-4 font-mono text-[11px]"
-          >
-            <span className="text-white/25">POST </span>
-            <span className="text-white/50">/v1/org/&#123;id&#125;/query</span>
-            <span className="text-white/20 ml-4">// &ldquo;How do we handle a 45-day VIP refund?&rdquo;</span>
-            <br />
-            <span className="text-white/20">→ </span>
-            <span className="text-emerald-400/50">recommendation: </span>
-            <span className="text-white/40">&ldquo;Approve — VIP exception extends window to 90 days&rdquo;</span>
-            <span className="text-white/20 ml-2">confidence: 0.94</span>
-          </motion.div>
+        <div className="demo__visual" key={active}>
+          <div className="demo__head">
+            <div className="demo__head__av">{thread.expert.initial}</div>
+            <div>
+              <div className="demo__head__name">{thread.expert.name}</div>
+              <div className="demo__head__role">{thread.expert.role}</div>
+            </div>
+            <span className="demo__head__live">
+              <span className="demo__head__live__dot" /> Live
+            </span>
+          </div>
+
+          <div className="demo__thread">
+            <div className="demo__msg demo__msg--me">
+              <div className="demo__msg__bubble">{thread.seed}</div>
+            </div>
+
+            {stage === "typing" && (
+              <div className="demo__msg">
+                <div className="demo__typing">
+                  <span className="demo__typing__dot" />
+                  <span className="demo__typing__dot" />
+                  <span className="demo__typing__dot" />
+                </div>
+              </div>
+            )}
+
+            {stage === "answer" && (
+              <div className="demo__msg">
+                <div style={{ flex: 1 }}>
+                  <div className="demo__msg__bubble">{thread.response}</div>
+                  <div className="demo__msg__sources">
+                    {thread.sources.map((s, i) => (
+                      <span key={i} className="demo__msg__src" style={{ ["--src-c" as string]: s.color }}>
+                        <span className="demo__msg__src__dot" /> {s.kind} · {s.label}
+                      </span>
+                    ))}
+                  </div>
+                  <div className="demo__msg__conf">
+                    <span>Confidence</span>
+                    <span className="demo__msg__conf__bar">
+                      <span className="demo__msg__conf__fill" style={{ ["--target-w" as string]: `${thread.confidence}%` }} />
+                    </span>
+                    <span className="demo__msg__conf__val">{thread.confidence}%</span>
+                    <span>· 1.8s</span>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="demo__prompt">
+            <input
+              placeholder={`Ask ${thread.expert.name.split(" ")[0]}…`}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              disabled={stage === "typing"}
+            />
+            <button className="demo__prompt__send" disabled={!draft.trim() || stage === "typing"} aria-label="Send">
+              {I.send}
+            </button>
+          </div>
         </div>
       </div>
     </section>
@@ -830,317 +492,902 @@ function CompanyBrainSection() {
 }
 
 // ---------------------------------------------------------------------------
-// Pricing
+// SCREENWATCH SECTION
 // ---------------------------------------------------------------------------
 
+const SW_CHUNKS = [
+  "Stanford was a big deal",
+  "for me — I wrote about",
+  "reviving the Aikido club",
+  "and my Zelda-style essay",
+  "It felt genuinely honest",
+];
+
+const SW_FEATURES = [
+  {
+    id: "screen",
+    label: "Sees your screen",
+    body: "No copy-paste. The clone reads what you're working on and responds with full context.",
+    icon: (
+      <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+        <path d="M1 8s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5z" stroke="currentColor" strokeWidth="1.35" strokeLinejoin="round"/>
+        <circle cx="8" cy="8" r="2.2" fill="currentColor" opacity="0.8"/>
+      </svg>
+    ),
+  },
+  {
+    id: "voice",
+    label: "Voice activated",
+    body: "Hold the mic, ask your question. Never type, never leave the app you're in.",
+    icon: (
+      <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round">
+        <rect x="5.5" y="1" width="5" height="7.5" rx="2.5" fill="currentColor" stroke="none" opacity="0.65"/>
+        <path d="M2.5 8.5a5.5 5.5 0 0011 0"/>
+        <line x1="8" y1="14" x2="8" y2="15.5"/>
+        <line x1="5.5" y1="15.5" x2="10.5" y2="15.5"/>
+      </svg>
+    ),
+  },
+  {
+    id: "top",
+    label: "Always on top",
+    body: "Floats above every window. One tap brings it up; one tap hides it. Never breaks your flow.",
+    icon: (
+      <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinejoin="round">
+        <path d="M1 6l7-4.5L15 6l-7 4.5L1 6z"/>
+        <path d="M1 10.5l7 4.5 7-4.5" opacity="0.45"/>
+      </svg>
+    ),
+  },
+  {
+    id: "cadence",
+    label: "Reads at your speed",
+    body: "Responses page through 5 words at a time at reading speed — perfect for glancing while working.",
+    icon: (
+      <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round">
+        <line x1="2" y1="4" x2="14" y2="4"/>
+        <line x1="2" y1="8" x2="10" y2="8"/>
+        <line x1="2" y1="12" x2="12" y2="12"/>
+      </svg>
+    ),
+  },
+];
+
+function ScreenwatchSection() {
+  const stageRef   = useRef<HTMLDivElement>(null);
+  const mockRef    = useRef<HTMLDivElement>(null);
+  const [activeId, setActiveId]   = useState<string | null>(null);
+  const [chunkIdx, setChunkIdx]   = useState(0);
+  const [chunkKey, setChunkKey]   = useState(0);
+  const [platform, setPlatform]   = useState<"win" | "mac" | null>(null);
+  const [mounted,  setMounted]    = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+    if (navigator.userAgent.includes("Win")) setPlatform("win");
+    else if (navigator.userAgent.includes("Mac")) setPlatform("mac");
+  }, []);
+
+  // Cycle demo chunks
+  useEffect(() => {
+    const id = setInterval(() => {
+      setChunkIdx(i => (i + 1) % SW_CHUNKS.length);
+      setChunkKey(k => k + 1);
+    }, 1400);
+    return () => clearInterval(id);
+  }, []);
+
+  // Mouse-parallax tilt
+  const onMouseMove = useCallback((e: React.MouseEvent) => {
+    const rect = stageRef.current?.getBoundingClientRect();
+    if (!rect || !mockRef.current) return;
+    const x = (e.clientX - rect.left) / rect.width - 0.5;
+    const y = (e.clientY - rect.top) / rect.height - 0.5;
+    mockRef.current.style.setProperty("--tilt-x", `${-y * 14}deg`);
+    mockRef.current.style.setProperty("--tilt-y", `${x * 20}deg`);
+  }, []);
+
+  const onMouseLeave = useCallback(() => {
+    if (!mockRef.current) return;
+    mockRef.current.style.transition = "transform 600ms cubic-bezier(0.25, 0.46, 0.45, 0.94)";
+    mockRef.current.style.setProperty("--tilt-x", "3deg");
+    mockRef.current.style.setProperty("--tilt-y", "-5deg");
+    setTimeout(() => { if (mockRef.current) mockRef.current.style.transition = ""; }, 650);
+  }, []);
+
+  const ACCENT = "rgba(52,211,153,0.80)"; // emerald-400
+
+  return (
+    <section
+      id="screenwatch"
+      ref={stageRef}
+      onMouseMove={onMouseMove}
+      onMouseLeave={onMouseLeave}
+      style={{
+        padding: "96px 24px",
+        position: "relative",
+        overflow: "hidden",
+      }}
+    >
+      <style>{`
+        @keyframes sw-float {
+          0%, 100% { transform: perspective(1000px) rotateX(var(--tilt-x, 3deg)) rotateY(var(--tilt-y, -5deg)) translateY(0px); }
+          50%       { transform: perspective(1000px) rotateX(var(--tilt-x, 3deg)) rotateY(var(--tilt-y, -5deg)) translateY(-8px); }
+        }
+        @keyframes sw-chunk {
+          from { opacity: 0; transform: translateY(5px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes sw-breathe {
+          0%, 100% { opacity: 0.5; } 50% { opacity: 1; }
+        }
+        @keyframes sw-bar {
+          from { transform: scaleY(0.2); } to { transform: scaleY(1); }
+        }
+        @keyframes sw-glow {
+          0%, 100% { opacity: 0.18; transform: scale(1); }
+          50%      { opacity: 0.28; transform: scale(1.08); }
+        }
+        @keyframes sw-scan {
+          0%   { top: 0%;   opacity: 0; }
+          5%   { opacity: 1; }
+          95%  { opacity: 0.6; }
+          100% { top: 100%; opacity: 0; }
+        }
+        .sw-mock {
+          --tilt-x: 3deg;
+          --tilt-y: -5deg;
+          animation: sw-float 5s ease-in-out infinite;
+          transform-style: preserve-3d;
+          will-change: transform;
+        }
+        .sw-feat:hover .sw-feat__icon { color: rgba(255,255,255,0.90); background: rgba(255,255,255,0.09); }
+      `}</style>
+
+      {/* Ambient glow */}
+      <div style={{
+        position: "absolute", bottom: 80, right: "15%",
+        width: 480, height: 480,
+        borderRadius: "50%",
+        background: "rgba(52,211,153,0.06)",
+        filter: "blur(90px)",
+        pointerEvents: "none",
+        animation: "sw-glow 6s ease-in-out infinite",
+      }} />
+      <div style={{
+        position: "absolute", top: 60, left: "8%",
+        width: 320, height: 320,
+        borderRadius: "50%",
+        background: "rgba(255,255,255,0.02)",
+        filter: "blur(70px)",
+        pointerEvents: "none",
+      }} />
+
+      <div style={{
+        maxWidth: 1152,
+        margin: "0 auto",
+        display: "grid",
+        gridTemplateColumns: "1fr 1fr",
+        gap: 64,
+        alignItems: "center",
+      }}>
+
+        {/* ── Left: copy ── */}
+        <div>
+          <div className="eyebrow" style={{ ["--eyebrow-c" as string]: ACCENT, marginBottom: 16 }}>
+            <span className="eyebrow__dot" /> Desktop app · free download
+          </div>
+
+          <h2 className="sec-h2" style={{ ["--accent-c" as string]: ACCENT, marginBottom: 16 }}>
+            Your clone <em>watches</em><br />with you.
+          </h2>
+
+          <p style={{
+            fontSize: 16, lineHeight: 1.7,
+            color: "var(--fg-dark-3)",
+            maxWidth: 460, marginBottom: 40,
+          }}>
+            A lightweight overlay that floats above every app on your desktop. It reads your screen, hears your voice, and responds in real time — without breaking your focus.
+          </p>
+
+          {/* Feature list */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 44 }}>
+            {SW_FEATURES.map(f => (
+              <div
+                key={f.id}
+                className="sw-feat"
+                onMouseEnter={() => setActiveId(f.id)}
+                onMouseLeave={() => setActiveId(null)}
+                style={{
+                  display: "flex", alignItems: "flex-start", gap: 14,
+                  padding: "14px 16px",
+                  borderRadius: 12,
+                  background: activeId === f.id ? "rgba(255,255,255,0.05)" : "transparent",
+                  border: `1px solid ${activeId === f.id ? "rgba(255,255,255,0.10)" : "transparent"}`,
+                  cursor: "default",
+                  transition: "all 180ms ease",
+                }}
+              >
+                <div
+                  className="sw-feat__icon"
+                  style={{
+                    width: 32, height: 32, borderRadius: 8, flexShrink: 0,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    background: "rgba(255,255,255,0.05)",
+                    border: "1px solid rgba(255,255,255,0.08)",
+                    color: activeId === f.id ? "rgba(255,255,255,0.90)" : "rgba(255,255,255,0.45)",
+                    transition: "all 180ms ease",
+                  }}
+                >
+                  {f.icon}
+                </div>
+                <div>
+                  <p style={{ margin: 0, fontSize: 13, fontWeight: 500, color: activeId === f.id ? "rgba(255,255,255,0.85)" : "rgba(255,255,255,0.60)", transition: "color 180ms" }}>
+                    {f.label}
+                  </p>
+                  <p style={{ margin: "3px 0 0", fontSize: 12, lineHeight: 1.6, color: "rgba(255,255,255,0.35)" }}>
+                    {f.body}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Download CTAs */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ display: "flex", gap: 10 }}>
+              {/* macOS */}
+              <a
+                href="/download?platform=mac"
+                style={{
+                  display: "inline-flex", alignItems: "center", gap: 9,
+                  padding: "11px 20px",
+                  borderRadius: 12,
+                  background: platform === "mac" ? "rgba(255,255,255,0.11)" : "rgba(255,255,255,0.05)",
+                  border: `1px solid ${platform === "mac" ? "rgba(255,255,255,0.22)" : "rgba(255,255,255,0.09)"}`,
+                  color: platform === "mac" ? "rgba(255,255,255,0.90)" : "rgba(255,255,255,0.55)",
+                  fontSize: 13, fontWeight: 500, textDecoration: "none",
+                  transition: "all 200ms ease",
+                  position: "relative",
+                }}
+                onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,255,255,0.09)"; e.currentTarget.style.color = "rgba(255,255,255,0.85)"; }}
+                onMouseLeave={e => { e.currentTarget.style.background = platform === "mac" ? "rgba(255,255,255,0.11)" : "rgba(255,255,255,0.05)"; e.currentTarget.style.color = platform === "mac" ? "rgba(255,255,255,0.90)" : "rgba(255,255,255,0.55)"; }}
+              >
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" opacity="0.75">
+                  <path d="M10.2 0c.07.9-.26 1.8-.77 2.45-.52.66-1.35 1.17-2.18 1.1-.1-.85.3-1.75.78-2.37C8.54.53 9.43.05 10.2 0zM13 9.6c-.34.76-.5 1.1-.94 1.77-.6.91-1.45 2.04-2.5 2.06-.94.01-1.18-.6-2.45-.59-1.27.01-1.53.6-2.48.59-1.04-.02-1.85-1.04-2.46-1.96C.76 9.7.5 7.2 1.35 5.56c.6-1.18 1.68-1.87 2.82-1.87 1.05 0 1.71.61 2.58.61.84 0 1.35-.61 2.56-.61 1.02 0 1.98.56 2.58 1.52-.2.12-2.23 1.3-2 3.79.2 2.06 1.97 2.74 2.11 2.8-.02.03 0 .02 0 0z"/>
+                </svg>
+                Download for macOS
+                {platform === "mac" && (
+                  <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 4, background: "rgba(52,211,153,0.15)", color: "rgba(52,211,153,0.80)", border: "1px solid rgba(52,211,153,0.20)" }}>
+                    Recommended
+                  </span>
+                )}
+              </a>
+
+              {/* Windows */}
+              <a
+                href="/download?platform=windows"
+                style={{
+                  display: "inline-flex", alignItems: "center", gap: 9,
+                  padding: "11px 20px",
+                  borderRadius: 12,
+                  background: platform === "win" ? "rgba(255,255,255,0.11)" : "rgba(255,255,255,0.05)",
+                  border: `1px solid ${platform === "win" ? "rgba(255,255,255,0.22)" : "rgba(255,255,255,0.09)"}`,
+                  color: platform === "win" ? "rgba(255,255,255,0.90)" : "rgba(255,255,255,0.55)",
+                  fontSize: 13, fontWeight: 500, textDecoration: "none",
+                  transition: "all 200ms ease",
+                }}
+                onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,255,255,0.09)"; e.currentTarget.style.color = "rgba(255,255,255,0.85)"; }}
+                onMouseLeave={e => { e.currentTarget.style.background = platform === "win" ? "rgba(255,255,255,0.11)" : "rgba(255,255,255,0.05)"; e.currentTarget.style.color = platform === "win" ? "rgba(255,255,255,0.90)" : "rgba(255,255,255,0.55)"; }}
+              >
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" opacity="0.75">
+                  <path d="M0 2.1L5.7 1.3v5.4H0V2.1zM6.4 1.2L14 0v6.7H6.4V1.2zM0 7.3h5.7V12.7L0 11.9V7.3zM6.4 7.3H14V14l-7.6-1.1V7.3z"/>
+                </svg>
+                Download for Windows
+                {platform === "win" && (
+                  <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 4, background: "rgba(52,211,153,0.15)", color: "rgba(52,211,153,0.80)", border: "1px solid rgba(52,211,153,0.20)" }}>
+                    Recommended
+                  </span>
+                )}
+              </a>
+            </div>
+
+            <p style={{ margin: 0, fontSize: 11, color: "rgba(255,255,255,0.22)" }}>
+              Requires macOS 12+ or Windows 10 · Free download · No account needed to try
+            </p>
+          </div>
+        </div>
+
+        {/* ── Right: 3D mockup ── */}
+        {mounted && (
+          <div style={{ display: "flex", justifyContent: "center", perspective: "1200px" }}>
+            <div
+              ref={mockRef}
+              className="sw-mock"
+              style={{ position: "relative", width: 420, height: 500 }}
+            >
+              {/* ── Simulated screen surface ── */}
+              <div style={{
+                position: "absolute",
+                top: 0, left: 0, right: 0, bottom: 80,
+                borderRadius: 18,
+                background: "rgba(12,12,14,0.96)",
+                border: "1px solid rgba(255,255,255,0.10)",
+                boxShadow: "0 24px 80px rgba(0,0,0,0.80), 0 0 0 0.5px rgba(255,255,255,0.06)",
+                overflow: "hidden",
+                transformStyle: "preserve-3d",
+              }}>
+                {/* Screen chrome bar */}
+                <div style={{
+                  height: 36, borderBottom: "1px solid rgba(255,255,255,0.07)",
+                  display: "flex", alignItems: "center", gap: 7, padding: "0 14px",
+                  background: "rgba(255,255,255,0.025)",
+                }}>
+                  {["rgba(248,113,113,0.6)","rgba(251,191,36,0.5)","rgba(52,211,153,0.5)"].map((c,i) => (
+                    <div key={i} style={{ width: 9, height: 9, borderRadius: "50%", background: c }} />
+                  ))}
+                  {/* Fake URL bar */}
+                  <div style={{
+                    flex: 1, marginLeft: 12, height: 20, borderRadius: 6,
+                    background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.06)",
+                    display: "flex", alignItems: "center", padding: "0 10px", gap: 6,
+                  }}>
+                    <div style={{ width: 6, height: 6, borderRadius: "50%", background: "rgba(52,211,153,0.5)" }} />
+                    <div style={{ height: 3, width: 120, borderRadius: 2, background: "rgba(255,255,255,0.15)" }} />
+                  </div>
+                </div>
+
+                {/* Screen content — abstract blurred layout */}
+                <div style={{ padding: "20px 20px 16px", display: "flex", gap: 14, height: "calc(100% - 36px)" }}>
+                  {/* Left sidebar */}
+                  <div style={{ width: 52, flexShrink: 0, display: "flex", flexDirection: "column", gap: 8, paddingTop: 4 }}>
+                    {[1,1,0.6,0.6,0.5,0.5,0.4].map((o,i) => (
+                      <div key={i} style={{ height: i === 0 ? 28 : 20, borderRadius: 6, background: `rgba(255,255,255,${0.04 + o*0.035})`, border: "1px solid rgba(255,255,255,0.05)" }} />
+                    ))}
+                  </div>
+
+                  {/* Main content */}
+                  <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 10 }}>
+                    {/* "Video player" area */}
+                    <div style={{
+                      borderRadius: 10, overflow: "hidden", flexShrink: 0,
+                      background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)",
+                      height: 160, position: "relative", display: "flex", alignItems: "center", justifyContent: "center",
+                    }}>
+                      {/* Fake video bg */}
+                      <div style={{ position: "absolute", inset: 0, background: "linear-gradient(135deg, rgba(26,115,232,0.08) 0%, rgba(52,211,153,0.06) 100%)" }} />
+                      {/* Play button */}
+                      <div style={{ width: 40, height: 40, borderRadius: "50%", background: "rgba(255,255,255,0.10)", border: "1px solid rgba(255,255,255,0.12)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                        <div style={{ width: 0, height: 0, borderTop: "7px solid transparent", borderBottom: "7px solid transparent", borderLeft: "12px solid rgba(255,255,255,0.65)", marginLeft: 3 }} />
+                      </div>
+                      {/* Scan line */}
+                      <div style={{
+                        position: "absolute", left: 0, right: 0, height: 1,
+                        background: "linear-gradient(90deg, transparent 0%, rgba(52,211,153,0.4) 50%, transparent 100%)",
+                        animation: "sw-scan 3s linear infinite",
+                        pointerEvents: "none",
+                      }} />
+                      {/* Bottom bar */}
+                      <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: 28, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", gap: 8, padding: "0 12px" }}>
+                        <div style={{ width: 6, height: 6, borderRadius: "50%", background: "rgba(248,113,113,0.7)" }} />
+                        <div style={{ flex: 1, height: 2, borderRadius: 1, background: "rgba(255,255,255,0.1)", overflow: "hidden" }}>
+                          <div style={{ width: "38%", height: "100%", background: "rgba(255,255,255,0.4)", borderRadius: 1 }} />
+                        </div>
+                        <span style={{ fontSize: 9, color: "rgba(255,255,255,0.35)", fontFamily: "monospace" }}>12:47</span>
+                      </div>
+                    </div>
+
+                    {/* Text content lines */}
+                    <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+                      {[90,75,82,60,88,55].map((w,i) => (
+                        <div key={i} style={{
+                          height: 8, borderRadius: 4,
+                          background: `rgba(255,255,255,${0.055 - i * 0.005})`,
+                          width: `${w}%`,
+                        }} />
+                      ))}
+                    </div>
+
+                    {/* Tag row */}
+                    <div style={{ display: "flex", gap: 6, marginTop: 2 }}>
+                      {[["rgba(26,115,232,0.25)","rgba(26,115,232,0.4)",52],["rgba(52,211,153,0.20)","rgba(52,211,153,0.35)",64],["rgba(255,255,255,0.08)","rgba(255,255,255,0.15)",44]].map(([bg,bd,w],i) => (
+                        <div key={i} style={{ height: 18, width: w as number, borderRadius: 5, background: bg as string, border: `1px solid ${bd}` }} />
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Highlighted feature overlay */}
+                {activeId === "screen" && (
+                  <div style={{
+                    position: "absolute", inset: 0, borderRadius: 18,
+                    border: "1.5px solid rgba(52,211,153,0.40)",
+                    boxShadow: "inset 0 0 40px rgba(52,211,153,0.06)",
+                    pointerEvents: "none",
+                    animation: "sw-breathe 1.2s ease-in-out infinite",
+                  }} />
+                )}
+              </div>
+
+              {/* ── Response overlay (above pill) ── */}
+              <div style={{
+                position: "absolute",
+                bottom: 130, right: 12,
+                width: 260,
+                background: "rgba(8,8,8,0.94)",
+                border: "1px solid rgba(255,255,255,0.12)",
+                borderRadius: 16,
+                padding: "12px 16px 14px",
+                boxShadow: "0 8px 32px rgba(0,0,0,0.65)",
+                backdropFilter: "blur(20px)",
+                transformStyle: "preserve-3d",
+                transform: "translateZ(24px)",
+              }}>
+                {/* Clone label */}
+                <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 9 }}>
+                  <div style={{ width: 20, height: 20, borderRadius: "50%", background: "#7C3AED", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 600, color: "#fff" }}>B</div>
+                  <span style={{ fontSize: 11, color: "rgba(255,255,255,0.40)", fontWeight: 500 }}>boo</span>
+                  <div style={{ display: "flex", gap: 2, alignItems: "center", height: 9, marginLeft: 2 }}>
+                    {[0,1,2,3].map(i => (
+                      <div key={i} style={{ width: 2, height: "100%", borderRadius: 1, background: "#7C3AED", opacity: 0.55, transformOrigin: "bottom", animation: `sw-bar 0.55s ease-in-out ${i*0.09}s infinite alternate` }} />
+                    ))}
+                  </div>
+                </div>
+                {/* Animated chunk */}
+                <p
+                  key={chunkKey}
+                  style={{
+                    margin: 0,
+                    fontSize: 15, fontWeight: 300, lineHeight: 1.45,
+                    color: "rgba(255,255,255,0.88)",
+                    letterSpacing: "-0.015em",
+                    animation: "sw-chunk 180ms ease-out forwards",
+                  }}
+                >
+                  {SW_CHUNKS[chunkIdx]}
+                </p>
+              </div>
+
+              {/* ── Pill widget ── */}
+              <div style={{
+                position: "absolute",
+                bottom: 60, right: 12,
+                width: 240,
+                height: 60,
+                background: "rgba(10,10,10,0.97)",
+                border: "1px solid rgba(255,255,255,0.13)",
+                borderRadius: 999,
+                boxShadow: "0 12px 40px rgba(0,0,0,0.70), 0 0 0 0.5px rgba(255,255,255,0.05)",
+                display: "flex", alignItems: "center", gap: 9, padding: "0 10px 0 12px",
+                transformStyle: "preserve-3d",
+                transform: "translateZ(40px)",
+              }}>
+                {/* Avatar */}
+                <div style={{ width: 32, height: 32, borderRadius: "50%", background: "#7C3AED", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 500, color: "#fff", flexShrink: 0, boxShadow: "0 0 10px #7C3AED50" }}>
+                  B
+                </div>
+                {/* Name + status */}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{ margin: 0, fontSize: 11, fontWeight: 500, color: "rgba(255,255,255,0.80)" }}>boo</p>
+                  <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 2 }}>
+                    <span style={{ width: 5, height: 5, borderRadius: "50%", background: "rgba(52,211,153,0.70)", display: "inline-block", animation: "sw-breathe 2.5s ease-in-out infinite" }} />
+                    <span style={{ fontSize: 10, color: "rgba(52,211,153,0.60)" }}>watching</span>
+                  </div>
+                </div>
+                {/* Buttons */}
+                <div style={{ display: "flex", gap: 5 }}>
+                  {[
+                    <svg key="mic" width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="rgba(255,255,255,0.65)" strokeWidth="1.3" strokeLinecap="round"><rect x="4.5" y="1" width="5" height="7" rx="2.5" fill="rgba(255,255,255,0.75)" stroke="none" opacity="0.75"/><path d="M2 7a5 5 0 0010 0"/><line x1="7" y1="12" x2="7" y2="14"/><line x1="4.5" y1="14" x2="9.5" y2="14"/></svg>,
+                    <svg key="exp" width="9" height="9" viewBox="0 0 10 10" fill="none"><path d="M1 3h3V1M9 3H6V1M1 7h3v2M9 7H6v2" stroke="rgba(255,255,255,0.35)" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>,
+                    <svg key="x" width="8" height="8" viewBox="0 0 9 9" fill="none"><path d="M1 1l7 7M8 1L1 8" stroke="rgba(255,255,255,0.25)" strokeWidth="1.3" strokeLinecap="round"/></svg>,
+                  ].map((icon, i) => (
+                    <div key={i} style={{
+                      width: i === 0 ? 30 : 24, height: i === 0 ? 30 : 24,
+                      borderRadius: i === 0 ? "50%" : 6,
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      background: "rgba(255,255,255,0.06)",
+                      border: "1px solid rgba(255,255,255,0.09)",
+                    }}>
+                      {icon}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Hint */}
+              <div style={{
+                position: "absolute", bottom: 16, left: "50%", transform: "translateX(-50%)",
+                display: "flex", alignItems: "center", gap: 6,
+                fontSize: 10, color: "rgba(255,255,255,0.20)",
+                whiteSpace: "nowrap",
+              }}>
+                <kbd style={{ padding: "1px 5px", borderRadius: 4, border: "1px solid rgba(255,255,255,0.12)", fontSize: 9, color: "rgba(255,255,255,0.22)", background: "rgba(255,255,255,0.04)" }}>↔</kbd>
+                drag to tilt
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 3D CARD STACK
+// ---------------------------------------------------------------------------
+const CARDS = [
+  {
+    num: "01", title: "Capture",
+    body: "Connect Gmail, Slack, GitHub, Notion. Every email, decision, and thread becomes searchable memory.",
+    meta: "Takes 5 minutes",
+    bg: "linear-gradient(135deg, #1A73E8 0%, #0D47A1 100%)", dot: "#4A90E2",
+  },
+  {
+    num: "02", title: "Train",
+    body: "Doppel learns your voice, your patterns, your shortcuts. Not just facts — the way you think.",
+    meta: "Runs in the background",
+    bg: "linear-gradient(135deg, #7B1FA2 0%, #4A148C 100%)", dot: "#A78BFA",
+  },
+  {
+    num: "03", title: "Deploy",
+    body: "Share a link, an API key, or a Slack bot. Anyone you give access can ask. You answer once, for everyone.",
+    meta: "One click",
+    bg: "linear-gradient(135deg, #E91E63 0%, #880E4F 100%)", dot: "#F06292",
+  },
+  {
+    num: "04", title: "Compound",
+    body: "Individual clones aggregate into role brains. Knowledge that doesn't leave when the person does.",
+    meta: "Free → Enterprise",
+    bg: "linear-gradient(135deg, #00838F 0%, #006064 100%)", dot: "#34D399",
+  },
+];
+
+function CardStack() {
+  const [i, setI] = useState(0);
+  const total = CARDS.length;
+  const next = useCallback(() => setI((x) => (x + 1) % total), [total]);
+  const prev = useCallback(() => setI((x) => (x - 1 + total) % total), [total]);
+  const [paused, setPaused] = useState(false);
+  const [drag, setDrag] = useState(0);
+  const dragStart = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (paused) return;
+    const t = setInterval(next, 5400);
+    return () => clearInterval(t);
+  }, [paused, next]);
+
+  const onDown = (e: React.MouseEvent | React.TouchEvent) => {
+    dragStart.current = "touches" in e ? e.touches[0].clientX : e.clientX;
+    setPaused(true);
+  };
+  const onMove = (e: React.MouseEvent | React.TouchEvent) => {
+    if (dragStart.current == null) return;
+    const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
+    setDrag(clientX - dragStart.current);
+  };
+  const onUp = () => {
+    if (Math.abs(drag) > 50) drag < 0 ? next() : prev();
+    setDrag(0);
+    dragStart.current = null;
+  };
+
+  const STACK_STYLES = [
+    (tx: number) => ({ transform: `translate3d(${tx}px, 0, 0) rotateY(${tx * -0.04}deg)`, opacity: 1, zIndex: 4, filter: "none" }),
+    () => ({ transform: "translate3d(0, 18px, -80px) scale(0.94)", opacity: 0.85, zIndex: 3, filter: "saturate(0.95)" }),
+    () => ({ transform: "translate3d(0, 36px, -160px) scale(0.88)", opacity: 0.55, zIndex: 2, filter: "saturate(0.85)" }),
+    () => ({ transform: "translate3d(0, 54px, -240px) scale(0.82)", opacity: 0.30, zIndex: 1, filter: "saturate(0.7)" }),
+  ];
+
+  return (
+    <section className="cards-section" id="why">
+      <div className="wrap" style={{ textAlign: "center", marginBottom: 18 }}>
+        <div className="eyebrow" style={{ ["--eyebrow-c" as string]: "#A78BFA", justifyContent: "center" }}>
+          <span className="eyebrow__dot" /> Why doppel
+        </div>
+        <h2 className="sec-h2" style={{ margin: "0 auto", ["--accent-c" as string]: "#A78BFA" }}>
+          <em>You</em> are the bottleneck. <br /> Your knowledge doesn&apos;t have to be.
+        </h2>
+      </div>
+
+      <div
+        className="cards-stack"
+        onMouseEnter={() => setPaused(true)}
+        onMouseLeave={() => setPaused(false)}
+        onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp}
+        onTouchStart={onDown} onTouchMove={onMove} onTouchEnd={onUp}
+      >
+        {CARDS.map((c, idx) => {
+          const offset = (idx - i + total) % total;
+          const isFront = offset === 0;
+          const tx = isFront ? drag : 0;
+          const styleFn = STACK_STYLES[Math.min(offset, 3)];
+          return (
+            <div
+              key={c.num}
+              className="card-3d"
+              style={{ ...styleFn(tx), ["--card-bg" as string]: c.bg } as React.CSSProperties}
+              aria-hidden={!isFront}
+            >
+              <div className="card-3d__num">Step {c.num}</div>
+              <div className="card-3d__title">{c.title}</div>
+              <div className="card-3d__body">{c.body}</div>
+              <div className="card-3d__meta">
+                <span className="card-3d__meta__dot" />
+                {c.meta}
+              </div>
+              <svg className="card-3d__art" viewBox="0 0 180 180" fill="none">
+                <circle cx="90" cy="90" r="60" stroke="rgba(255,255,255,0.5)" strokeWidth="0.6" />
+                <circle cx="90" cy="90" r="40" stroke="rgba(255,255,255,0.4)" strokeWidth="0.6" />
+                <circle cx="90" cy="90" r="20" stroke="rgba(255,255,255,0.3)" strokeWidth="0.6" />
+                <circle cx="90" cy="90" r="6" fill="rgba(255,255,255,0.7)" />
+              </svg>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="cards-nav">
+        <button className="cards-nav__btn" onClick={prev} aria-label="Previous">{I.chevL}</button>
+        <div className="cards-nav__dots">
+          {CARDS.map((c, idx) => (
+            <button
+              key={idx}
+              className={`cards-nav__dot ${idx === i ? "cards-nav__dot--active" : ""}`}
+              style={{ ["--dot-color" as string]: c.dot }}
+              onClick={() => setI(idx)}
+              aria-label={`Show card ${idx + 1}`}
+            />
+          ))}
+        </div>
+        <button className="cards-nav__btn" onClick={next} aria-label="Next">{I.chevR}</button>
+      </div>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// STAT TILES
+// ---------------------------------------------------------------------------
+const STATS = [
+  { val: 412, suffix: "+",  lbl: "expert clones live",              c: "#1A73E8", pct: 92 },
+  { val: 84,  suffix: "%",  lbl: "average answer accuracy",         c: "#34D399", pct: 84 },
+  { val: 1.8, suffix: "s",  lbl: "avg response time",               c: "#FBBF24", pct: 68 },
+  { val: 80,  suffix: "%",  lbl: "of every paid query to creator",  c: "#E91E63", pct: 80 },
+];
+
+function StatTile({ val, suffix, lbl, c, pct }: { val: number; suffix: string; lbl: string; c: string; pct: number }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [shown, setShown] = useState(0);
+  const [animated, setAnimated] = useState(false);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const io = new IntersectionObserver((entries) => {
+      entries.forEach((e) => {
+        if (e.isIntersecting && !animated) {
+          setAnimated(true);
+          let raf: number;
+          const t0 = performance.now();
+          const dur = 1100;
+          const tick = (t: number) => {
+            const k = Math.min(1, (t - t0) / dur);
+            const eased = 1 - Math.pow(1 - k, 5);
+            setShown(val * eased);
+            if (k < 1) raf = requestAnimationFrame(tick);
+          };
+          raf = requestAnimationFrame(tick);
+        }
+      });
+    }, { threshold: 0.3 });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [val, animated]);
+
+  return (
+    <div className="stat" ref={ref} style={{ ["--stat-c" as string]: c }}>
+      <div className="stat__val">
+        {Number.isInteger(val) ? Math.round(shown) : shown.toFixed(1)}
+        <span className="stat__val__suffix">{suffix}</span>
+      </div>
+      <div className="stat__lbl">{lbl}</div>
+      <div className="stat__bar">
+        <span className="stat__bar__fill" style={{ width: animated ? `${pct}%` : "0%" }} />
+      </div>
+    </div>
+  );
+}
+
+function StatsSection() {
+  return (
+    <section className="stats">
+      <div className="stats__grid">
+        {STATS.map((s, i) => <StatTile key={i} {...s} />)}
+      </div>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// PRICING
+// ---------------------------------------------------------------------------
 const PLANS = [
   {
-    name: "Free",
-    desc: "Your personal clone, fully functional. No credit card. Keep it forever.",
-    monthly: 0,
-    yearly: 0,
-    cta: "Start free",
-    popular: false,
-    badge: null,
-    queriesLabel: "50 queries / month",
-    features: [
-      "1 personal clone",
-      "Gmail, Slack, GitHub, Notion connectors",
-      "File upload (PDF, DOCX, XLSX…)",
-      "Shareable public link",
-      "Confidence + source citations",
-      "50 queries / month",
-    ],
+    name: "Free", color: "#34D399", monthly: 0, yearly: 0,
+    desc: "Your personal clone. Keep it forever.",
+    feats: ["1 personal clone", "All connectors", "50 queries / month", "Shareable link"],
+    cta: "Start free", featured: false,
   },
   {
-    name: "Personal",
-    desc: "Full individual power. All surfaces, higher limits, your own API access.",
-    monthly: 15,
-    yearly: 150,
-    cta: "Get Personal",
-    popular: false,
-    badge: null,
-    queriesLabel: "250 queries / month",
-    features: [
-      "Everything in Free",
-      "250 queries / month",
-      "Email drafts (inbox triage)",
-      "Meeting bot (Zoom, Meet, Teams)",
-      "Knowledge handoff report",
-      "Developer API access",
-      "Data export (GDPR Art. 20)",
-    ],
+    name: "Personal", color: "#1A73E8", monthly: 15, yearly: 150,
+    desc: "Full individual power.",
+    feats: ["Everything in Free", "250 queries / month", "Meeting bot", "API access", "Data export"],
+    cta: "Get Personal", featured: false,
   },
   {
-    name: "Enterprise Pro",
-    desc: "Company Brain for your team. Role knowledge, cross-clone search, org controls.",
-    monthly: 59,
-    yearly: 590,
+    name: "Pro", color: "#A78BFA", monthly: 59, yearly: 590, featured: true, perSeat: true,
+    desc: "Company Brain for your team.",
+    feats: ["Everything in Personal · per seat", "Company Brain + Role Brains", "Skills API", "SSO · SCIM", "Audit log"],
     cta: "Get Pro",
-    popular: true,
-    badge: "Most popular",
-    perSeat: true,
-    queriesLabel: "1,250 queries / seat / month",
-    features: [
-      "Everything in Personal × whole team",
-      "Company Brain + Role Brains",
-      "Team Knowledge directory",
-      "Skills API for AI agents",
-      "Org workspace + cross-clone search",
-      "SSO / SAML · SCIM provisioning",
-      "Audit log + webhooks",
-    ],
   },
   {
-    name: "Enterprise Max",
-    desc: "The full intelligence layer. Org feed, drift detection, spec generation.",
-    monthly: 179,
-    yearly: 1790,
-    cta: "Talk to us",
-    popular: false,
-    badge: null,
-    perSeat: true,
-    queriesLabel: "5,000 queries / seat / month",
-    features: [
-      "Everything in Enterprise Pro",
-      "Org Intelligence Feed",
-      "Goals & drift detection",
-      "AI spec generator",
-      "Decision log",
-      "SOC 2 Type II · Custom SLAs",
-      "Dedicated CSM · Volume discounts",
-    ],
+    name: "Max", color: "#E91E63", monthly: 179, yearly: 1790, perSeat: true,
+    desc: "The full intelligence layer.",
+    feats: ["Everything in Pro", "Org intelligence feed", "Drift detection", "SOC 2 Type II", "Dedicated CSM"],
+    cta: "Talk to us", featured: false,
   },
 ];
 
 function PricingSection() {
-  const [isYearly, setIsYearly] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  const isInView = useInView(ref, { once: true, margin: "-80px" });
+  const [yearly, setYearly] = useState(false);
+  const pillRef = useRef<HTMLSpanElement>(null);
+
+  useEffect(() => {
+    const row = pillRef.current?.parentElement;
+    if (!row) return;
+    const btn = row.querySelector<HTMLButtonElement>('button[data-active="true"]');
+    if (!btn || !pillRef.current) return;
+    pillRef.current.style.left = `${btn.offsetLeft}px`;
+    pillRef.current.style.width = `${btn.offsetWidth}px`;
+  }, [yearly]);
 
   return (
-    <section id="pricing" className="py-24 px-6 max-w-6xl mx-auto" ref={ref}>
-      <div className="text-center mb-12">
-        <motion.p
-          initial={{ opacity: 0, y: 8 }}
-          animate={isInView ? { opacity: 1, y: 0 } : {}}
-          transition={{ duration: 0.5 }}
-          className="text-[11px] uppercase tracking-widest text-white/25 mb-3"
-        >
-          Pricing
-        </motion.p>
-        <motion.h2
-          initial={{ opacity: 0, y: 12 }}
-          animate={isInView ? { opacity: 1, y: 0 } : {}}
-          transition={{ duration: 0.5, delay: 0.1 }}
-          className="text-4xl font-light text-white/85 mb-2"
-        >
-          <VerticalCutReveal
-            splitBy="words"
-            staggerDuration={0.12}
-            staggerFrom="first"
-            containerClassName="justify-center"
-            transition={{ type: "spring", stiffness: 220, damping: 38, delay: 0.15 }}
-          >
-            Start free. Scale when it matters.
-          </VerticalCutReveal>
-        </motion.h2>
-        <motion.p
-          initial={{ opacity: 0 }}
-          animate={isInView ? { opacity: 1 } : {}}
-          transition={{ duration: 0.5, delay: 0.3 }}
-          className="text-sm text-white/35"
-        >
-          Free forever for individuals · Company Brain unlocks at Enterprise
-        </motion.p>
-
-        <motion.div
-          initial={{ opacity: 0, y: 8 }}
-          animate={isInView ? { opacity: 1, y: 0 } : {}}
-          transition={{ duration: 0.4, delay: 0.35 }}
-          className="flex justify-center mt-8"
-        >
-          <div className="glass rounded-full p-1 flex gap-1">
-            <button
-              onClick={() => setIsYearly(false)}
-              className={cn(
-                "relative px-5 py-1.5 rounded-full text-sm transition-all",
-                !isYearly ? "text-white/85" : "text-white/35 hover:text-white/55"
-              )}
-            >
-              {!isYearly && (
-                <motion.span
-                  layoutId="pricing-pill"
-                  className="absolute inset-0 glass-md rounded-full"
-                  transition={{ type: "spring", stiffness: 500, damping: 35 }}
-                />
-              )}
-              <span className="relative">Monthly</span>
-            </button>
-            <button
-              onClick={() => setIsYearly(true)}
-              className={cn(
-                "relative px-5 py-1.5 rounded-full text-sm transition-all",
-                isYearly ? "text-white/85" : "text-white/35 hover:text-white/55"
-              )}
-            >
-              {isYearly && (
-                <motion.span
-                  layoutId="pricing-pill"
-                  className="absolute inset-0 glass-md rounded-full"
-                  transition={{ type: "spring", stiffness: 500, damping: 35 }}
-                />
-              )}
-              <span className="relative flex items-center gap-1.5">
-                Yearly
-                <span className="text-[10px] text-white/30">2 months free</span>
-              </span>
-            </button>
-          </div>
-        </motion.div>
-      </div>
-
-      <div className="grid md:grid-cols-2 gap-4 max-w-4xl mx-auto">
-        {PLANS.map((plan, i) => (
-          <motion.div
-            key={plan.name}
-            initial={{ opacity: 0, y: 24 }}
-            animate={isInView ? { opacity: 1, y: 0 } : {}}
-            transition={{ duration: 0.5, delay: 0.4 + i * 0.08 }}
-          >
-            <div
-              className={cn(
-                "rounded-2xl p-6 border h-full flex flex-col",
-                plan.popular ? "glass-hi border-white/[0.14]" : "glass border-white/[0.08]"
-              )}
-            >
-              <div className="mb-5">
-                <div className="flex items-start justify-between gap-2 mb-1">
-                  <h3 className="text-lg font-medium text-white/85">{plan.name}</h3>
-                  {plan.badge && (
-                    <span className="text-[10px] uppercase tracking-widest text-white/40 glass rounded-full px-2.5 py-0.5 shrink-0">
-                      {plan.badge}
-                    </span>
-                  )}
-                </div>
-                <p className="text-xs text-white/35 leading-relaxed">{plan.desc}</p>
-              </div>
-
-              <div className="mb-5">
-                <div className="flex items-baseline gap-1">
-                  <span className="text-3xl font-light text-white/85">
-                    {plan.monthly === 0 ? (
-                      "Free"
-                    ) : (
-                      <>
-                        $
-                        <NumberFlow
-                          value={isYearly ? Math.round(plan.yearly / 12) : plan.monthly}
-                          className="inline"
-                        />
-                      </>
-                    )}
-                  </span>
-                  {plan.monthly > 0 && (
-                    <span className="text-sm text-white/30">
-                      /seat/mo{isYearly && <span className="text-[11px] text-white/20">, billed annually</span>}
-                    </span>
-                  )}
-                </div>
-                <p className="text-[11px] text-white/25 mt-1">
-                  {"perSeat" in plan && plan.perSeat ? "5-seat minimum · " : ""}{plan.queriesLabel}
-                </p>
-              </div>
-
-              <Link
-                href={plan.name === "Enterprise Max" ? "/contact" : "/sign-up"}
-                className={cn(
-                  "flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm transition-all mb-5",
-                  plan.popular
-                    ? "glass-hi text-white/85 hover:bg-white/[0.14]"
-                    : "glass text-white/55 hover:glass-md hover:text-white/75"
-                )}
-              >
-                {plan.cta}
-                <MoveRight className="w-3.5 h-3.5" />
-              </Link>
-
-              <ul className="space-y-2 mt-auto">
-                {plan.features.map((feat) => (
-                  <li key={feat} className="flex items-start gap-2.5 text-sm text-white/40">
-                    <Check className="w-3.5 h-3.5 text-white/25 shrink-0 mt-0.5" />
-                    {feat}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </motion.div>
-        ))}
-      </div>
-
-      <motion.div
-        initial={{ opacity: 0, y: 12 }}
-        animate={isInView ? { opacity: 1, y: 0 } : {}}
-        transition={{ duration: 0.5, delay: 0.75 }}
-        className="mt-6 max-w-4xl mx-auto glass rounded-2xl px-6 py-4 flex flex-col sm:flex-row items-center gap-4 text-center sm:text-left"
-      >
-        <div className="flex-1">
-          <p className="text-sm text-white/55 font-medium">Company Brain is Enterprise-only</p>
-          <p className="text-xs text-white/30 mt-0.5 leading-relaxed">
-            Role brains, Skills API, org intelligence feed, and agent-ready org knowledge require Enterprise Pro or Max.
-            Free and Personal plans get the full individual clone.
-          </p>
+    <section className="pricing" id="pricing">
+      <div className="pricing__head">
+        <div className="eyebrow" style={{ ["--eyebrow-c" as string]: "#1A73E8", justifyContent: "center" }}>
+          <span className="eyebrow__dot" /> Pricing
         </div>
-        <Link
-          href="/contact"
-          className="glass-md hover:glass-hi rounded-xl px-5 py-2 text-sm text-white/60 hover:text-white/80 transition-all whitespace-nowrap shrink-0"
-        >
-          Talk to us →
-        </Link>
-      </motion.div>
+        <h2 className="sec-h2" style={{ margin: "0 auto", ["--accent-c" as string]: "#1A73E8" }}>
+          Start <em>free.</em> Scale when it matters.
+        </h2>
+        <div className="pricing__toggle">
+          <span className="pricing__toggle__pill" ref={pillRef} />
+          <button
+            className={`pricing__toggle__btn ${!yearly ? "pricing__toggle__btn--active" : ""}`}
+            data-active={!yearly}
+            onClick={() => setYearly(false)}
+          >
+            Monthly
+          </button>
+          <button
+            className={`pricing__toggle__btn ${yearly ? "pricing__toggle__btn--active" : ""}`}
+            data-active={yearly}
+            onClick={() => setYearly(true)}
+          >
+            Yearly <span className="pricing__toggle__save">save 17%</span>
+          </button>
+        </div>
+      </div>
+
+      <div className="pricing__grid">
+        {PLANS.map((p) => {
+          const price = yearly ? Math.round(p.yearly / 12) : p.monthly;
+          return (
+            <div key={p.name} className={`plan ${p.featured ? "plan--featured" : ""}`} style={{ ["--plan-c" as string]: p.color }}>
+              <div className="plan__head">
+                <div className="plan__name">
+                  <span className="plan__name__dot" />
+                  {p.name}
+                </div>
+                {p.featured && (
+                  <span className="plan__badge">
+                    <span style={{ display: "inline-flex" }}>{I.sparkle}</span> Most popular
+                  </span>
+                )}
+              </div>
+              {p.monthly === 0 ? (
+                <div className="plan__free">Free forever</div>
+              ) : (
+                <div className="plan__price">
+                  <span className="plan__price__big">${price}</span>
+                  <span className="plan__price__per">
+                    / mo{"perSeat" in p && p.perSeat ? " · per seat" : ""}
+                    {yearly && p.monthly > 0 ? " (billed yearly)" : ""}
+                  </span>
+                </div>
+              )}
+              <p className="plan__desc">{p.desc}</p>
+              <ul className="plan__feats">
+                {p.feats.map((f, i) => <li key={i}>{I.check} {f}</li>)}
+              </ul>
+              <Link
+                href={p.cta === "Talk to us" ? "/contact" : "/sign-up"}
+                className="plan__cta"
+                style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, textDecoration: "none" }}
+              >
+                {p.cta}
+              </Link>
+            </div>
+          );
+        })}
+      </div>
     </section>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Footer
+// FINAL CTA
 // ---------------------------------------------------------------------------
-
-function Footer() {
+function FinalCTA() {
+  const { isSignedIn } = useUser();
   return (
-    <footer className="border-t border-white/[0.06] py-10 px-6">
-      <div className="max-w-6xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
-        <div>
-          <span className="text-sm font-semibold text-white/40 tracking-tight">doppel</span>
-          <p className="text-xs text-white/20 mt-1">Knowledge shouldn&apos;t have a lifespan.</p>
+    <section className="cta">
+      <div className="cta__inner">
+        <h2 className="cta__title">
+          Start with one clone.<br />
+          <em>You.</em>
+        </h2>
+        <p className="cta__sub">Free forever. Two minutes to set up. No credit card.</p>
+        <div className="cta__row">
+          <Link href={isSignedIn ? "/home" : "/sign-up"} className="btn btn--primary btn--lg">
+            {isSignedIn ? <>Open app {I.arrow}</> : <>Start free {I.arrow}</>}
+          </Link>
+          <Link href="/contact" className="btn btn--ghost-light btn--lg">Talk to us</Link>
         </div>
-        <div className="flex items-center gap-6">
-          <Link href="/contact" className="text-xs text-white/25 hover:text-white/50 transition-colors">Contact</Link>
-          <a href="/privacy" className="text-xs text-white/25 hover:text-white/50 transition-colors">Privacy</a>
-          <a href="/terms" className="text-xs text-white/25 hover:text-white/50 transition-colors">Terms</a>
+      </div>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// FOOTER
+// ---------------------------------------------------------------------------
+function Foot() {
+  return (
+    <footer className="foot">
+      <div className="foot__inner">
+        <div className="foot__brand" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <DoppelMark size={18} />
+          doppel
         </div>
-        <p className="text-xs text-white/20">&copy; 2026 Doppel AI, Inc.</p>
+        <span className="foot__legal">&copy; 2026 Doppel AI, Inc.</span>
+        <div className="foot__links">
+          <Link href="/contact">Contact</Link>
+          <a href="/terms">Terms</a>
+          <a href="/privacy">Privacy</a>
+        </div>
       </div>
     </footer>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Page
+// PAGE
 // ---------------------------------------------------------------------------
-
 export default function LandingPage() {
   return (
-    <main className="relative overflow-x-hidden">
+    <div className="doppel-marketing" style={{ fontFamily: "var(--font-sans)" }}>
       <Nav />
-      <HeroSection />
-      <ForIndividualsSection />
-      <ForTeamsSection />
-      <ScrollSection />
-      <FeaturesSection />
-      <CompanyBrainSection />
+      <Hero />
+      <Ticker />
+      <DemoSection />
+      <ScreenwatchSection />
+      <CardStack />
+      <StatsSection />
       <PricingSection />
-      <Footer />
-    </main>
+      <FinalCTA />
+      <Foot />
+    </div>
   );
 }

@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Doppel — Creator dashboard UI kit</title>
+  <link rel="stylesheet" href="../../colors_and_type.css"/>
+  <link rel="stylesheet" href="dashboard.css"/>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+  <script type="text/babel" src="primitives.jsx"></script>
+  <script type="text/babel" src="OverviewScreen.jsx"></script>
+  <script type="text/babel" src="TrainScreen.jsx"></script>
+  <script type="text/babel" src="BrainScreen.jsx"></script>
+  <script type="text/babel" src="TestScreen.jsx"></script>
+  <script type="text/babel" src="ListingScreen.jsx"></script>
+
+  <script type="text/babel">
+    const { useState: useStateA } = React;
+
+    // Placeholder pages for nav items we haven't fully designed
+    function Placeholder({ title, eyebrow, note }) {
+      return (
+        <div data-screen-label={`${title} (placeholder)`} className="db-page">
+          <PageHead eyebrow={eyebrow} title={title} subtitle={note}/>
+          <div className="card" style={{ padding: 48, textAlign: 'center' }}>
+            <div style={{
+              width: 48, height: 48, borderRadius: 14, margin: '0 auto 16px',
+              background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              color: 'rgba(255,255,255,0.3)',
+            }}>{Icon.settings}</div>
+            <p style={{ fontSize: 14, color: 'rgba(255,255,255,0.6)', margin: 0 }}>Surface not in this kit.</p>
+            <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.3)', marginTop: 6 }}>
+              Uses the same primitives — sidebar group color, glass cards, stat tiles, badges.
+            </p>
+          </div>
+        </div>
+      );
+    }
+
+    function App() {
+      const initial = (window.location.hash || '#overview').replace('#', '') || 'overview';
+      const [active, setActive] = useStateA(initial);
+
+      function nav(id) {
+        setActive(id);
+        window.location.hash = id;
+      }
+
+      const screens = {
+        overview: <OverviewScreen/>,
+        train:    <TrainScreen/>,
+        brain:    <BrainScreen/>,
+        test:     <TestScreen/>,
+        listing:  <ListingScreen/>,
+      };
+
+      const placeholderTitles = {
+        identity: ['Identity', 'Voice, persona, public bio'],
+        deploy:   ['Deploy',   'Chat link · API · Slack bot · email'],
+        browse:   ['Browse',   'Marketplace browse (see Marketplace UI kit)'],
+        earnings: ['Earnings', 'Payouts, query revenue, tax forms'],
+        credits:  ['Credits',  'Buy credit packs · usage history'],
+        synthesis:['Synthesis','Query 2–5 clones at once'],
+        bundles:  ['Bundles',  'Package multiple clones into a single product'],
+        email:    ['Email',    'Inbox triage · draft replies'],
+        billing:  ['Billing',  'Subscription tier, invoices'],
+        developer:['Developer','API keys, webhooks, Skills API'],
+        settings: ['Settings', 'Account, privacy, exports'],
+      };
+
+      return (
+        <div className="db-shell">
+          <Sidebar active={active} onNav={nav}/>
+          <main className="db-main">
+            {screens[active] ?? (() => {
+              const [t, n] = placeholderTitles[active] ?? [active, ''];
+              return <Placeholder title={t} eyebrow="Dashboard" note={n}/>;
+            })()}
+          </main>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+  </script>
+</body>
+</html>

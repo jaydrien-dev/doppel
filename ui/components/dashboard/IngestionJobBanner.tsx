@@ -27,45 +27,48 @@ export function IngestionJobBanner({ jobId, onComplete }: IngestionJobBannerProp
   }
 
   return (
-    <div className="glass rounded-xl px-5 py-4">
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-2">
+    <div className="glass" style={{ borderRadius: 12, padding: "14px 18px" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           {isPolling && (
-            <div className="w-1.5 h-1.5 rounded-full bg-white/40 animate-pulse" />
+            <span style={{ width: 6, height: 6, borderRadius: "50%", background: "rgba(255,255,255,0.40)", display: "inline-block" }} />
           )}
-          <span className="text-sm text-white/60">
+          <span style={{ fontSize: 13, color: "rgba(255,255,255,0.60)" }}>
             {isFailed
               ? "Ingestion failed"
               : isDone
               ? "Ingestion complete"
               : isPolling
-              ? "Ingesting…"
+              ? "Ingesting\u2026"
               : "Queued"}
           </span>
         </div>
-        <span className="text-xs text-white/30">
-          {job
-            ? `${job.processed_items} / ${job.total_items}`
-            : "—"}
+        <span style={{ fontSize: 12, color: "rgba(255,255,255,0.30)" }}>
+          {job ? `${job.processed_items} / ${job.total_items}` : "\u2014"}
         </span>
       </div>
 
       {/* Progress bar */}
-      <div className="h-px bg-white/[0.08] rounded-full overflow-hidden">
+      <div style={{ height: 4, borderRadius: 9999, background: "rgba(255,255,255,0.06)", overflow: "hidden" }}>
         <div
-          className="h-full bg-white/30 rounded-full transition-all duration-500"
-          style={{ width: `${isDone ? 100 : pct}%` }}
+          style={{
+            width: `${isDone ? 100 : pct}%`,
+            height: "100%",
+            borderRadius: 9999,
+            background: "rgba(255,255,255,0.25)",
+            transition: "width 0.5s ease",
+          }}
         />
       </div>
 
       {isFailed && job?.error_message && (
-        <p className="text-xs text-white/35 mt-2">{job.error_message}</p>
+        <p style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", marginTop: 8 }}>{job.error_message}</p>
       )}
 
       {isDone && (
-        <p className="text-xs text-white/35 mt-2">
+        <p style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", marginTop: 8 }}>
           {job?.processed_items} memories added
-          {job?.failed_items ? ` · ${job.failed_items} skipped` : ""}
+          {job?.failed_items ? ` \u00b7 ${job.failed_items} skipped` : ""}
         </p>
       )}
     </div>

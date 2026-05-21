@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { useClone } from "@/lib/hooks/useClone";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
-import { cn } from "@/lib/utils";
 
 interface Proposal {
   id: string;
@@ -28,7 +27,6 @@ export default function ProposalsPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editContent, setEditContent] = useState("");
 
-  // Calendar form
   const [calTitle, setCalTitle] = useState("");
   const [calTime, setCalTime] = useState("");
   const [calAttendees, setCalAttendees] = useState("");
@@ -37,15 +35,14 @@ export default function ProposalsPage() {
 
   useEffect(() => {
     if (clone) loadProposals();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clone?.clone_id, tab]);
 
   async function loadProposals() {
     if (!clone) return;
     setFetching(true);
     try {
-      const res = await fetch(
-        `/api/proposals?clone_id=${clone.clone_id}&proposal_type=${tab}&status=pending`
-      );
+      const res = await fetch(`/api/proposals?clone_id=${clone.clone_id}&proposal_type=${tab}&status=pending`);
       const data = await res.json();
       setProposals(data.proposals ?? []);
     } finally {
@@ -62,7 +59,6 @@ export default function ProposalsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ clone_id: clone.clone_id }),
       });
-      // Poll briefly then reload
       await new Promise((r) => setTimeout(r, 3000));
       await loadProposals();
     } finally {
@@ -107,35 +103,47 @@ export default function ProposalsPage() {
   if (isLoading) return <LoadingSpinner />;
   if (!clone) {
     return (
-      <div className="p-8">
-        <p className="text-sm text-white/40">
-          Create your clone first from the{" "}
-          <a href="/dashboard" className="text-white/60 underline underline-offset-2">overview</a>.
+      <div style={{ padding: 32 }}>
+        <p style={{ fontSize: 13, color: "rgba(255,255,255,0.40)" }}>
+          Create your clone first.{" "}
+          <a href="/onboarding" style={{ color: "rgba(255,255,255,0.60)", textDecoration: "underline" }}>Get started →</a>
         </p>
       </div>
     );
   }
 
-  const confColor = (c: number | null) =>
-    c == null ? "text-white/30" : c >= 0.8 ? "text-emerald-400/70" : c >= 0.6 ? "text-amber-400/70" : "text-red-400/60";
+  const confColor = (c: number | null): string => {
+    if (c == null) return "rgba(255,255,255,0.30)";
+    if (c >= 0.8) return "rgba(52,211,153,0.70)";
+    if (c >= 0.6) return "rgba(251,191,36,0.70)";
+    return "rgba(248,113,113,0.60)";
+  };
 
   return (
-    <div className="p-8 max-w-2xl flex flex-col gap-6">
-      <div className="mb-2">
-        <h1 className="text-2xl font-light text-white/85">Proposals</h1>
-        <p className="text-sm text-white/35 mt-1">Clone-generated action proposals awaiting your approval.</p>
+    <div className="db-page" style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <div className="db-page-head">
+        <div>
+          <p className="db-eyebrow">Automation</p>
+          <h1 className="db-h1">Proposals</h1>
+        </div>
       </div>
 
       {/* Tab bar */}
-      <div className="flex gap-1 glass rounded-xl p-1 w-fit">
+      <div style={{
+        display: "inline-flex", gap: 4, padding: 4, borderRadius: 12, alignSelf: "flex-start",
+        background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)",
+      }}>
         {(["code_review", "calendar"] as const).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
-            className={cn(
-              "px-4 py-1.5 rounded-lg text-xs transition-all capitalize",
-              tab === t ? "glass-md text-white/80" : "text-white/35 hover:text-white/55"
-            )}
+            style={{
+              padding: "6px 16px", borderRadius: 9, fontSize: 12, fontWeight: 500,
+              cursor: "pointer", border: "none", fontFamily: "inherit",
+              background: tab === t ? "rgba(255,255,255,0.09)" : "transparent",
+              color: tab === t ? "rgba(255,255,255,0.85)" : "rgba(255,255,255,0.40)",
+              transition: "all 180ms",
+            }}
           >
             {t === "code_review" ? "Code Review" : "Calendar"}
           </button>
@@ -144,115 +152,78 @@ export default function ProposalsPage() {
 
       {/* Code review tab */}
       {tab === "code_review" && (
-        <div className="flex flex-col gap-4">
-          <div className="flex items-center justify-between">
-            <p className="text-xs text-white/35">
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <p style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", margin: 0, lineHeight: 1.5 }}>
               Your clone reviews open PRs in your GitHub repos and proposes a comment.
             </p>
-            <button
-              onClick={generateCodeReviews}
-              disabled={generating}
-              className="glass-md hover:glass-hi rounded-xl px-4 py-2 text-sm text-white/60 hover:text-white/80 transition-all disabled:opacity-40 shrink-0"
-            >
+            <button onClick={generateCodeReviews} disabled={generating} className="btn btn--primary" style={{ flexShrink: 0 }}>
               {generating ? "Scanning repos…" : "Scan open PRs"}
             </button>
           </div>
 
           {fetching ? (
-            <div className="glass rounded-2xl p-6 text-center text-sm text-white/30">Loading…</div>
-          ) : proposals.length === 0 ? (
-            <div className="glass rounded-2xl p-6 text-center text-sm text-white/30">
-              No pending code review proposals.{" "}
-              {!generating && "Click \"Scan open PRs\" to generate some."}
+            <div className="card" style={{ textAlign: "center" }}>
+              <p style={{ fontSize: 13, color: "rgba(255,255,255,0.30)", margin: 0 }}>Loading…</p>
             </div>
-          ) : (
-            proposals.map((p) => (
-              <ProposalCard
-                key={p.id}
-                proposal={p}
-                editingId={editingId}
-                editContent={editContent}
-                confColor={confColor}
-                onStartEdit={() => { setEditingId(p.id); setEditContent(p.content); }}
-                onEditChange={setEditContent}
-                onApprove={() => actOnProposal(p.id, "approved")}
-                onApproveEdited={() => actOnProposal(p.id, "edited", editContent)}
-                onReject={() => actOnProposal(p.id, "rejected")}
-                onCancelEdit={() => { setEditingId(null); setEditContent(""); }}
-              />
-            ))
-          )}
+          ) : proposals.length === 0 ? (
+            <div className="card" style={{ textAlign: "center" }}>
+              <p style={{ fontSize: 13, color: "rgba(255,255,255,0.30)", margin: 0 }}>
+                No pending code review proposals.{!generating && " Click \"Scan open PRs\" to generate some."}
+              </p>
+            </div>
+          ) : proposals.map((p) => (
+            <ProposalCard
+              key={p.id} proposal={p} editingId={editingId} editContent={editContent} confColor={confColor}
+              onStartEdit={() => { setEditingId(p.id); setEditContent(p.content); }}
+              onEditChange={setEditContent}
+              onApprove={() => actOnProposal(p.id, "approved")}
+              onApproveEdited={() => actOnProposal(p.id, "edited", editContent)}
+              onReject={() => actOnProposal(p.id, "rejected")}
+              onCancelEdit={() => { setEditingId(null); setEditContent(""); }}
+            />
+          ))}
         </div>
       )}
 
       {/* Calendar tab */}
       {tab === "calendar" && (
-        <div className="flex flex-col gap-4">
-          {/* Create form */}
-          <div className="glass rounded-2xl p-6">
-            <h3 className="text-sm font-medium text-white/60 mb-1">New meeting proposal</h3>
-            <p className="text-xs text-white/35 mb-4">
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <div className="card">
+            <p className="card-title">New meeting proposal</p>
+            <p style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", marginBottom: 16, lineHeight: 1.5 }}>
               Describe the meeting and your clone will propose whether to accept, decline, or reschedule.
             </p>
-            <form onSubmit={generateCalendarProposal} className="flex flex-col gap-3">
-              <input
-                value={calTitle}
-                onChange={(e) => setCalTitle(e.target.value)}
-                placeholder="Meeting title"
-                className="glass rounded-xl px-4 py-2.5 text-sm text-white/80 placeholder:text-white/25 outline-none"
-              />
-              <input
-                value={calTime}
-                onChange={(e) => setCalTime(e.target.value)}
-                placeholder="When? (e.g. Tomorrow 2pm, Friday morning)"
-                className="glass rounded-xl px-4 py-2.5 text-sm text-white/80 placeholder:text-white/25 outline-none"
-              />
-              <input
-                value={calAttendees}
-                onChange={(e) => setCalAttendees(e.target.value)}
-                placeholder="Attendees (optional)"
-                className="glass rounded-xl px-4 py-2.5 text-sm text-white/80 placeholder:text-white/25 outline-none"
-              />
-              <textarea
-                value={calDesc}
-                onChange={(e) => setCalDesc(e.target.value)}
-                placeholder="Agenda or context (optional)"
-                rows={2}
-                className="glass rounded-xl px-4 py-2.5 text-sm text-white/80 placeholder:text-white/25 outline-none resize-none"
-              />
-              <button
-                type="submit"
-                disabled={calGenerating || !calTitle || !calTime}
-                className="glass-md hover:glass-hi rounded-xl px-4 py-2.5 text-sm text-white/60 hover:text-white/80 transition-all disabled:opacity-40 self-start"
-              >
+            <form onSubmit={generateCalendarProposal} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <input value={calTitle} onChange={(e) => setCalTitle(e.target.value)} placeholder="Meeting title" className="input" />
+              <input value={calTime} onChange={(e) => setCalTime(e.target.value)} placeholder="When? (e.g. Tomorrow 2pm, Friday morning)" className="input" />
+              <input value={calAttendees} onChange={(e) => setCalAttendees(e.target.value)} placeholder="Attendees (optional)" className="input" />
+              <textarea value={calDesc} onChange={(e) => setCalDesc(e.target.value)} placeholder="Agenda or context (optional)" rows={2} className="input" style={{ resize: "none" }} />
+              <button type="submit" disabled={calGenerating || !calTitle || !calTime} className="btn btn--primary" style={{ alignSelf: "flex-start" }}>
                 {calGenerating ? "Generating…" : "Get clone's recommendation"}
               </button>
             </form>
           </div>
 
           {fetching ? (
-            <div className="glass rounded-2xl p-6 text-center text-sm text-white/30">Loading…</div>
-          ) : proposals.length === 0 ? (
-            <div className="glass rounded-2xl p-6 text-center text-sm text-white/30">
-              No pending calendar proposals. Add a meeting above.
+            <div className="card" style={{ textAlign: "center" }}>
+              <p style={{ fontSize: 13, color: "rgba(255,255,255,0.30)", margin: 0 }}>Loading…</p>
             </div>
-          ) : (
-            proposals.map((p) => (
-              <ProposalCard
-                key={p.id}
-                proposal={p}
-                editingId={editingId}
-                editContent={editContent}
-                confColor={confColor}
-                onStartEdit={() => { setEditingId(p.id); setEditContent(p.content); }}
-                onEditChange={setEditContent}
-                onApprove={() => actOnProposal(p.id, "approved")}
-                onApproveEdited={() => actOnProposal(p.id, "edited", editContent)}
-                onReject={() => actOnProposal(p.id, "rejected")}
-                onCancelEdit={() => { setEditingId(null); setEditContent(""); }}
-              />
-            ))
-          )}
+          ) : proposals.length === 0 ? (
+            <div className="card" style={{ textAlign: "center" }}>
+              <p style={{ fontSize: 13, color: "rgba(255,255,255,0.30)", margin: 0 }}>No pending calendar proposals. Add a meeting above.</p>
+            </div>
+          ) : proposals.map((p) => (
+            <ProposalCard
+              key={p.id} proposal={p} editingId={editingId} editContent={editContent} confColor={confColor}
+              onStartEdit={() => { setEditingId(p.id); setEditContent(p.content); }}
+              onEditChange={setEditContent}
+              onApprove={() => actOnProposal(p.id, "approved")}
+              onApproveEdited={() => actOnProposal(p.id, "edited", editContent)}
+              onReject={() => actOnProposal(p.id, "rejected")}
+              onCancelEdit={() => { setEditingId(null); setEditContent(""); }}
+            />
+          ))}
         </div>
       )}
     </div>
@@ -260,16 +231,8 @@ export default function ProposalsPage() {
 }
 
 function ProposalCard({
-  proposal,
-  editingId,
-  editContent,
-  confColor,
-  onStartEdit,
-  onEditChange,
-  onApprove,
-  onApproveEdited,
-  onReject,
-  onCancelEdit,
+  proposal, editingId, editContent, confColor,
+  onStartEdit, onEditChange, onApprove, onApproveEdited, onReject, onCancelEdit,
 }: {
   proposal: Proposal;
   editingId: string | null;
@@ -286,75 +249,46 @@ function ProposalCard({
   const ctx = proposal.context as Record<string, string>;
 
   return (
-    <div className="glass rounded-2xl p-5 flex flex-col gap-3">
-      <div className="flex items-start justify-between gap-3">
+    <div className="card" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
         <div>
-          <p className="text-sm text-white/75 font-medium leading-snug">{proposal.title}</p>
+          <p style={{ fontSize: 13, fontWeight: 500, color: "rgba(255,255,255,0.75)", margin: "0 0 4px", lineHeight: 1.3 }}>
+            {proposal.title}
+          </p>
           {ctx?.url && (
-            <a
-              href={ctx.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-xs text-white/30 hover:text-white/55 transition-colors"
-            >
+            <a href={ctx.url} target="_blank" rel="noopener noreferrer"
+              style={{ fontSize: 12, color: "rgba(255,255,255,0.30)", textDecoration: "none" }}>
               {ctx.repo ?? ""} ↗
             </a>
           )}
         </div>
         {proposal.confidence != null && (
-          <span className={`text-xs shrink-0 ${confColor(proposal.confidence)}`}>
+          <span style={{ fontSize: 12, flexShrink: 0, color: confColor(proposal.confidence) }}>
             {Math.round(proposal.confidence * 100)}% confident
           </span>
         )}
       </div>
 
       {isEditing ? (
-        <textarea
-          value={editContent}
-          onChange={(e) => onEditChange(e.target.value)}
-          rows={6}
-          className="glass rounded-xl px-4 py-3 text-sm text-white/80 outline-none resize-none leading-relaxed w-full"
-        />
+        <textarea value={editContent} onChange={(e) => onEditChange(e.target.value)}
+          rows={6} className="input" style={{ resize: "none", lineHeight: 1.6 }} />
       ) : (
-        <p className="text-sm text-white/55 leading-relaxed whitespace-pre-wrap">{proposal.content}</p>
+        <p style={{ fontSize: 13, color: "rgba(255,255,255,0.55)", lineHeight: 1.65, margin: 0, whiteSpace: "pre-wrap" }}>
+          {proposal.content}
+        </p>
       )}
 
-      <div className="flex items-center gap-2 pt-1">
+      <div style={{ display: "flex", alignItems: "center", gap: 8, paddingTop: 4 }}>
         {isEditing ? (
           <>
-            <button
-              onClick={onApproveEdited}
-              className="glass-md hover:glass-hi rounded-xl px-4 py-2 text-sm text-white/70 hover:text-white/90 transition-all"
-            >
-              Approve edited
-            </button>
-            <button
-              onClick={onCancelEdit}
-              className="glass rounded-xl px-3 py-2 text-sm text-white/40 hover:text-white/60 transition-all"
-            >
-              Cancel
-            </button>
+            <button onClick={onApproveEdited} className="btn btn--primary">Approve edited</button>
+            <button onClick={onCancelEdit} className="btn btn--ghost">Cancel</button>
           </>
         ) : (
           <>
-            <button
-              onClick={onApprove}
-              className="glass-md hover:glass-hi rounded-xl px-4 py-2 text-sm text-white/70 hover:text-white/90 transition-all"
-            >
-              Approve
-            </button>
-            <button
-              onClick={onStartEdit}
-              className="glass rounded-xl px-3 py-2 text-sm text-white/40 hover:text-white/65 transition-all"
-            >
-              Edit
-            </button>
-            <button
-              onClick={onReject}
-              className="glass rounded-xl px-3 py-2 text-sm text-white/25 hover:text-white/50 transition-all ml-auto"
-            >
-              Dismiss
-            </button>
+            <button onClick={onApprove} className="btn btn--primary">Approve</button>
+            <button onClick={onStartEdit} className="btn">Edit</button>
+            <button onClick={onReject} className="btn btn--ghost" style={{ marginLeft: "auto" }}>Dismiss</button>
           </>
         )}
       </div>

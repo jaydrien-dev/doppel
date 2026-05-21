@@ -54,7 +54,14 @@ export const TOURS = {
       target: 'a[href="/dashboard/brain"]',
       title: "Inspect your clone's memory",
       description:
-        "Browse, pin, or exclude individual memory chunks. Use this to verify what your clone knows and remove anything inaccurate.",
+        "Browse, pin, or exclude individual memory chunks. Verify what your clone knows and remove anything inaccurate.",
+      position: "right",
+    },
+    {
+      target: 'a[href="/dashboard/test"]',
+      title: "Test before you share",
+      description:
+        "Chat with your clone directly to verify its responses before making it public. Confidence indicators show how certain each answer is.",
       position: "right",
     },
     {
@@ -65,10 +72,10 @@ export const TOURS = {
       position: "right",
     },
     {
-      target: 'a[href="/dashboard/tasks"]',
-      title: "Run tasks on your computer",
+      target: 'a[href="/marketplace"]',
+      title: "Browse the marketplace",
       description:
-        "Your clone can control the keyboard and mouse to complete complex work tasks — and draws on its knowledge base to make informed decisions.",
+        "Discover expert clones from other users. Pay per question — no subscriptions. Query anyone's knowledge directly.",
       position: "right",
     },
     {

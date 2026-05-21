@@ -203,6 +203,13 @@ class DoppelBrain:
         )
 
         path = route(perceived)
+        # Override with user-specified mode
+        mode = brain_input.response_mode
+        if mode == "fast":
+            path = "fast"
+        elif mode in ("pro", "extended"):
+            path = "slow"
+
         yield f"data: {json.dumps({'event': 'start', 'path': path})}\n\n"
 
         kwargs = dict(
@@ -213,7 +220,10 @@ class DoppelBrain:
             identity=identity,
             mem_system=self._mem_system,
         )
-        gen = fast_path.run_stream(**kwargs) if path == "fast" else slow_path.run_stream(**kwargs)
+        if path == "fast":
+            gen = fast_path.run_stream(**kwargs)
+        else:
+            gen = slow_path.run_stream(**kwargs, extended_thinking=(mode == "extended"))
 
         full_text = ""
         trace = None

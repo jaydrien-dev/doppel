@@ -28,20 +28,26 @@ function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) 
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
       }}
-      className="shrink-0 px-2.5 py-1 rounded-lg text-[11px] text-white/40 glass hover:glass-md transition-all"
+      className="btn btn--sm btn--ghost"
+      style={{ flexShrink: 0 }}
     >
       {copied ? "Copied" : label}
     </button>
   );
 }
 
-function CodeBlock({ code, lang = "" }: { code: string; lang?: string }) {
+function CodeBlock({ code }: { code: string }) {
   return (
-    <div className="relative group">
-      <pre className={`text-[11px] text-white/50 font-mono leading-relaxed overflow-x-auto bg-white/[0.03] border border-white/[0.06] rounded-xl p-4 language-${lang}`}>
+    <div style={{ position: "relative" }}>
+      <pre style={{
+        fontSize: 11, color: "rgba(255,255,255,0.50)", fontFamily: "ui-monospace, Menlo, monospace",
+        lineHeight: 1.6, overflowX: "auto",
+        background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)",
+        borderRadius: 10, padding: "12px 14px", margin: 0,
+      }}>
         {code}
       </pre>
-      <div className="absolute top-2.5 right-2.5 opacity-0 group-hover:opacity-100 transition-opacity">
+      <div style={{ position: "absolute", top: 8, right: 8 }}>
         <CopyButton text={code} />
       </div>
     </div>
@@ -54,18 +60,25 @@ function CodeBlock({ code, lang = "" }: { code: string; lang?: string }) {
 
 function NewKeyRow({ rawKey, name, onDone }: { rawKey: string; name: string; onDone: () => void }) {
   return (
-    <div className="glass rounded-2xl p-5 border border-emerald-400/20">
-      <div className="flex items-center gap-2 mb-3">
-        <div className="w-1.5 h-1.5 rounded-full bg-emerald-400/70" />
-        <p className="text-sm font-medium text-white/80">{name}</p>
-        <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-400/[0.08] border border-emerald-400/15 text-emerald-300/70">just created</span>
+    <div style={{
+      background: "rgba(52,211,153,0.05)", border: "1px solid rgba(52,211,153,0.18)",
+      borderRadius: 16, padding: 20,
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+        <div style={{ width: 6, height: 6, borderRadius: "50%", background: "rgba(52,211,153,0.70)" }} />
+        <p style={{ fontSize: 13, fontWeight: 500, color: "rgba(255,255,255,0.80)", margin: 0 }}>{name}</p>
+        <span className="badge badge--pos">just created</span>
       </div>
-      <p className="text-[11px] text-amber-300/70 mb-3">Copy this key now — it won&apos;t be shown again.</p>
-      <div className="flex items-center gap-2">
-        <code className="flex-1 bg-white/[0.04] border border-white/[0.08] rounded-xl px-3 py-2 text-xs text-white/70 font-mono truncate">{rawKey}</code>
+      <p style={{ fontSize: 11, color: "rgba(251,191,36,0.70)", marginBottom: 12 }}>
+        Copy this key now — it won&apos;t be shown again.
+      </p>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <code className="input" style={{ flex: 1, fontFamily: "ui-monospace, Menlo, monospace", fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {rawKey}
+        </code>
         <CopyButton text={rawKey} label="Copy key" />
       </div>
-      <button onClick={onDone} className="mt-3 text-[11px] text-white/30 hover:text-white/50 transition-colors">
+      <button onClick={onDone} className="btn btn--ghost btn--sm" style={{ marginTop: 10 }}>
         I&apos;ve saved it →
       </button>
     </div>
@@ -83,31 +96,31 @@ function KeyRow({ k, onRevoke }: { k: DevKey; onRevoke: (id: string) => void }) 
   }
 
   return (
-    <div className="glass rounded-2xl p-4 flex items-center gap-4">
-      <div className="flex-1 min-w-0">
-        <p className="text-sm text-white/75">{k.name}</p>
-        <p className="text-xs text-white/30 font-mono mt-0.5">{k.key_preview}</p>
-      </div>
-      <div className="text-right shrink-0">
+    <div className="act-row">
+      <span className="act-row__dot" style={{ background: "rgba(255,255,255,0.25)" }} />
+      <span className="act-row__text" style={{ fontFamily: "ui-monospace, Menlo, monospace" }}>
+        <span style={{ color: "rgba(255,255,255,0.75)" }}>{k.name}</span>
+        <span style={{ marginLeft: 8, color: "rgba(255,255,255,0.30)", fontSize: 11 }}>{k.key_preview}</span>
+      </span>
+      <span className="act-row__meta">
         {k.last_used_at ? (
-          <p className="text-[11px] text-white/30">last used {new Date(k.last_used_at).toLocaleDateString()}</p>
+          <span style={{ color: "rgba(255,255,255,0.30)" }}>used {new Date(k.last_used_at).toLocaleDateString()}</span>
         ) : (
-          <p className="text-[11px] text-white/20">never used</p>
+          <span style={{ color: "rgba(255,255,255,0.20)" }}>never used</span>
         )}
-        <p className="text-[11px] text-white/20">created {k.created_at ? new Date(k.created_at).toLocaleDateString() : "—"}</p>
-      </div>
-      <div className="shrink-0">
+        <span style={{ color: "rgba(255,255,255,0.20)" }}>created {k.created_at ? new Date(k.created_at).toLocaleDateString() : "—"}</span>
         {confirming ? (
-          <div className="flex items-center gap-2">
-            <button onClick={revoke} disabled={revoking} className="text-xs text-red-400/70 hover:text-red-400 transition-colors disabled:opacity-40">
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+            <button onClick={revoke} disabled={revoking} className="btn btn--sm"
+              style={{ color: "rgba(248,113,113,0.70)", borderColor: "rgba(248,113,113,0.15)" }}>
               {revoking ? "…" : "Confirm revoke"}
             </button>
-            <button onClick={() => setConfirming(false)} className="text-xs text-white/25 hover:text-white/50 transition-colors">Cancel</button>
-          </div>
+            <button onClick={() => setConfirming(false)} className="btn btn--ghost btn--sm">Cancel</button>
+          </span>
         ) : (
-          <button onClick={() => setConfirming(true)} className="text-xs text-white/25 hover:text-white/50 transition-colors">Revoke</button>
+          <button onClick={() => setConfirming(true)} className="btn btn--ghost btn--sm">Revoke</button>
         )}
-      </div>
+      </span>
     </div>
   );
 }
@@ -147,21 +160,23 @@ function KeysTab() {
   }
 
   return (
-    <div className="space-y-5">
-      <div className="glass rounded-2xl p-5">
-        <p className="text-xs text-white/50 font-medium mb-3">New key</p>
-        <div className="flex gap-2">
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div className="card">
+        <p className="card-title">New key</p>
+        <div style={{ display: "flex", gap: 8 }}>
           <input
             ref={nameRef}
             type="text"
             placeholder="Key name (e.g. my-app, zapier)"
             onKeyDown={(e) => e.key === "Enter" && createKey()}
-            className="flex-1 bg-white/[0.05] border border-white/[0.08] rounded-xl px-3 py-2 text-sm text-white/70 placeholder:text-white/25 outline-none focus:border-white/20 transition-colors"
+            className="input"
+            style={{ flex: 1 }}
           />
           <button
             onClick={createKey}
             disabled={creating}
-            className="shrink-0 px-4 py-2 rounded-xl text-xs text-white/60 glass hover:glass-md transition-all disabled:opacity-40"
+            className="btn btn--primary"
+            style={{ flexShrink: 0 }}
           >
             {creating ? "Generating…" : "Generate"}
           </button>
@@ -172,26 +187,26 @@ function KeysTab() {
         <NewKeyRow rawKey={newKey.raw} name={newKey.name} onDone={() => setNewKey(null)} />
       )}
 
-      <p className="text-[11px] uppercase tracking-widest text-white/25 px-1">Active keys ({keys.length})</p>
+      <p className="db-eyebrow" style={{ paddingLeft: 4 }}>Active keys ({keys.length})</p>
 
       {loading ? (
-        <div className="flex items-center gap-2 py-4">
-          <div className="w-1.5 h-1.5 rounded-full bg-white/20 animate-pulse" />
-          <span className="text-sm text-white/30">Loading…</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "16px 4px" }}>
+          <div style={{ width: 6, height: 6, borderRadius: "50%", background: "rgba(255,255,255,0.20)" }} />
+          <span style={{ fontSize: 13, color: "rgba(255,255,255,0.30)" }}>Loading…</span>
         </div>
       ) : keys.length === 0 ? (
-        <div className="glass rounded-2xl p-6 text-center">
-          <p className="text-sm text-white/30">No keys yet — generate one above.</p>
+        <div className="card" style={{ textAlign: "center" }}>
+          <p style={{ fontSize: 13, color: "rgba(255,255,255,0.30)", margin: 0 }}>No keys yet — generate one above.</p>
         </div>
       ) : (
-        <div className="space-y-2">
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           {keys.map((k) => (
             <KeyRow key={k.id} k={k} onRevoke={(id) => setKeys((prev) => prev.filter((x) => x.id !== id))} />
           ))}
         </div>
       )}
 
-      <p className="text-[11px] text-white/20 leading-relaxed px-1">
+      <p style={{ fontSize: 11, color: "rgba(255,255,255,0.20)", lineHeight: 1.6, paddingLeft: 4 }}>
         Keys have full access to your clone. Keep them secret. Revoke immediately if compromised.
       </p>
     </div>
@@ -208,6 +223,7 @@ function TestTab({ handle }: { handle: string }) {
   const [result, setResult] = useState<object | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
   async function runTest() {
     if (!apiKey.trim() || !message.trim() || !handle) return;
     setLoading(true);
@@ -236,58 +252,72 @@ function TestTab({ handle }: { handle: string }) {
   }
 
   return (
-    <div className="space-y-4 max-w-2xl">
-      <div className="glass rounded-2xl p-5 space-y-3">
+    <div style={{ display: "flex", flexDirection: "column", gap: 14, maxWidth: 640 }}>
+      <div className="card" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         <div>
-          <label className="text-[11px] text-white/30 block mb-1">API key</label>
+          <label style={{ display: "block", fontSize: 11, fontWeight: 500, color: "rgba(255,255,255,0.40)", marginBottom: 6 }}>
+            API key
+          </label>
           <input
             type="password"
             value={apiKey}
             onChange={(e) => setApiKey(e.target.value)}
             placeholder="dak_..."
-            className="w-full bg-white/[0.05] border border-white/[0.08] rounded-xl px-3 py-2 text-sm text-white/70 placeholder:text-white/25 outline-none focus:border-white/20 font-mono"
+            className="input"
+            style={{ fontFamily: "ui-monospace, Menlo, monospace" }}
           />
         </div>
         <div>
-          <label className="text-[11px] text-white/30 block mb-1">
-            Message → <code className="text-white/25 font-mono">POST /v1/clones/{handle || "{handle}"}/chat</code>
+          <label style={{ display: "block", fontSize: 11, fontWeight: 500, color: "rgba(255,255,255,0.40)", marginBottom: 6 }}>
+            Message → <code style={{ fontFamily: "ui-monospace, Menlo, monospace", color: "rgba(255,255,255,0.30)", fontSize: 11 }}>POST /v1/clones/{handle || "{handle}"}/chat</code>
           </label>
           <textarea
             value={message}
             onChange={(e) => setMessage(e.target.value)}
             rows={2}
-            className="w-full bg-white/[0.05] border border-white/[0.08] rounded-xl px-3 py-2 text-sm text-white/70 outline-none focus:border-white/20 resize-none"
+            className="input"
+            style={{ resize: "none" }}
           />
         </div>
-        <button
-          onClick={runTest}
-          disabled={loading || !apiKey.trim() || !handle}
-          className="glass-md hover:glass-hi rounded-xl px-5 py-2.5 text-sm text-white/60 hover:text-white/80 transition-all disabled:opacity-40"
-        >
-          {loading ? "Sending…" : "Send request"}
-        </button>
-        {!handle && (
-          <p className="text-[11px] text-amber-400/50">Set a handle in Identity settings first.</p>
-        )}
+        <div>
+          <button
+            onClick={runTest}
+            disabled={loading || !apiKey.trim() || !handle}
+            className="btn btn--primary"
+          >
+            {loading ? "Sending…" : "Send request"}
+          </button>
+          {!handle && (
+            <p style={{ fontSize: 11, color: "rgba(251,191,36,0.50)", marginTop: 8 }}>
+              Set a handle in Identity settings first.
+            </p>
+          )}
+        </div>
       </div>
 
       {error && (
-        <div className="glass rounded-xl px-4 py-3 border border-red-400/15">
-          <p className="text-xs text-red-400/60">{error}</p>
+        <div style={{ borderRadius: 12, padding: "10px 14px", border: "1px solid rgba(248,113,113,0.15)", background: "rgba(248,113,113,0.05)" }}>
+          <p style={{ fontSize: 12, color: "rgba(248,113,113,0.60)", margin: 0 }}>{error}</p>
         </div>
       )}
 
       {result && (
-        <div className="glass rounded-2xl p-5 space-y-3">
+        <div className="card" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {(result as Record<string, unknown>).response != null && (
             <div>
-              <p className="text-[11px] text-white/25 mb-1">Response</p>
-              <p className="text-sm text-white/75 leading-relaxed">{String((result as Record<string, unknown>).response)}</p>
+              <p style={{ fontSize: 11, color: "rgba(255,255,255,0.25)", marginBottom: 6 }}>Response</p>
+              <p style={{ fontSize: 13, color: "rgba(255,255,255,0.75)", lineHeight: 1.6, margin: 0 }}>
+                {String((result as Record<string, unknown>).response)}
+              </p>
             </div>
           )}
           <div>
-            <p className="text-[11px] text-white/25 mb-1">Full JSON</p>
-            <pre className="text-[10px] text-white/40 font-mono bg-white/[0.03] rounded-xl p-3 overflow-x-auto whitespace-pre-wrap">
+            <p style={{ fontSize: 11, color: "rgba(255,255,255,0.25)", marginBottom: 6 }}>Full JSON</p>
+            <pre style={{
+              fontSize: 10, color: "rgba(255,255,255,0.40)", fontFamily: "ui-monospace, Menlo, monospace",
+              background: "rgba(255,255,255,0.03)", borderRadius: 10, padding: 12, overflowX: "auto",
+              whiteSpace: "pre-wrap", margin: 0,
+            }}>
               {JSON.stringify(result, null, 2)}
             </pre>
           </div>
@@ -303,7 +333,7 @@ function TestTab({ handle }: { handle: string }) {
 
 function DocsTab({ handle }: { handle: string }) {
   const h = handle || "your-handle";
-  const BASE = process.env.NEXT_PUBLIC_APP_URL ?? (typeof window !== "undefined" ? window.location.origin : "https://doppel-pi.vercel.app");
+  const BASE = process.env.NEXT_PUBLIC_APP_URL ?? "https://doppel-pi.vercel.app";
 
   const curlChat = `curl -X POST ${BASE}/v1/clones/${h}/chat \\
   -H "Authorization: Bearer dak_YOUR_KEY_HERE" \\
@@ -368,9 +398,6 @@ async function askClone(message: string) {
     body: JSON.stringify({ message }),
   });
   const data = await res.json();
-  // data.response  — the clone's reply
-  // data.confidence — 0.0–1.0
-  // data.needs_escalation — true if clone is unsure
   return data;
 }
 
@@ -378,33 +405,28 @@ const reply = await askClone("What would you prioritize this week?");
 console.log(reply.response);`;
 
   return (
-    <div className="space-y-8 max-w-3xl">
+    <div style={{ display: "flex", flexDirection: "column", gap: 28, maxWidth: 780 }}>
 
       {/* Quick start */}
-      <div className="glass rounded-2xl p-6 space-y-4">
-        <div>
-          <p className="text-[11px] uppercase tracking-widest text-white/25 mb-1">Quick start</p>
-          <p className="text-sm text-white/50 leading-relaxed">
-            Three steps: generate a key → get your handle → make a request.
-          </p>
-        </div>
-        <div className="space-y-3">
-          <div className="flex gap-3">
-            <span className="text-[11px] text-white/20 w-5 shrink-0 pt-0.5">1.</span>
-            <div className="flex-1">
-              <p className="text-xs text-white/50 mb-1.5">Generate an API key in the <a href="#" onClick={() => {}} className="text-white/60 underline underline-offset-2">Keys tab</a>. Copy it — shown only once.</p>
+      <div className="card">
+        <p className="card-title">Quick start</p>
+        <p style={{ fontSize: 13, color: "rgba(255,255,255,0.45)", marginBottom: 16, lineHeight: 1.5 }}>
+          Three steps: generate a key → get your handle → make a request.
+        </p>
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {[
+            { n: "1", text: "Generate an API key in the Keys tab. Copy it — shown only once." },
+            { n: "2", text: `Your clone handle is ${h} — used in every endpoint URL.` },
+          ].map(({ n, text }) => (
+            <div key={n} style={{ display: "flex", gap: 12 }}>
+              <span style={{ fontSize: 11, color: "rgba(255,255,255,0.20)", width: 16, flexShrink: 0, paddingTop: 2 }}>{n}.</span>
+              <p style={{ fontSize: 12, color: "rgba(255,255,255,0.50)", margin: 0, lineHeight: 1.5 }}>{text}</p>
             </div>
-          </div>
-          <div className="flex gap-3">
-            <span className="text-[11px] text-white/20 w-5 shrink-0 pt-0.5">2.</span>
-            <div className="flex-1">
-              <p className="text-xs text-white/50 mb-1.5">Your clone handle is <code className="text-white/70 bg-white/[0.06] px-1.5 py-0.5 rounded-md font-mono text-[11px]">{h}</code> — used in every endpoint URL.</p>
-            </div>
-          </div>
-          <div className="flex gap-3">
-            <span className="text-[11px] text-white/20 w-5 shrink-0 pt-0.5">3.</span>
-            <div className="flex-1">
-              <p className="text-xs text-white/50 mb-1.5">Make a request:</p>
+          ))}
+          <div style={{ display: "flex", gap: 12 }}>
+            <span style={{ fontSize: 11, color: "rgba(255,255,255,0.20)", width: 16, flexShrink: 0, paddingTop: 2 }}>3.</span>
+            <div style={{ flex: 1 }}>
+              <p style={{ fontSize: 12, color: "rgba(255,255,255,0.50)", margin: "0 0 8px", lineHeight: 1.5 }}>Make a request:</p>
               <CodeBlock code={curlChat} />
             </div>
           </div>
@@ -413,20 +435,21 @@ console.log(reply.response);`;
 
       {/* Auth */}
       <div>
-        <p className="text-[11px] uppercase tracking-widest text-white/25 mb-3">Authentication</p>
-        <div className="glass rounded-2xl p-5 space-y-3">
-          <p className="text-xs text-white/45 leading-relaxed">
-            Every request must include your API key as a Bearer token. Keys are prefixed with <code className="text-white/60 font-mono">dak_</code>.
+        <p className="db-eyebrow" style={{ marginBottom: 12 }}>Authentication</p>
+        <div className="card" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <p style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", lineHeight: 1.6, margin: 0 }}>
+            Every request must include your API key as a Bearer token. Keys are prefixed with{" "}
+            <code style={{ fontFamily: "ui-monospace, Menlo, monospace", color: "rgba(255,255,255,0.60)", fontSize: 11 }}>dak_</code>.
           </p>
           <CodeBlock code={`Authorization: Bearer dak_YOUR_KEY_HERE`} />
-          <div className="pt-1 space-y-1.5">
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, paddingTop: 4 }}>
             {[
               ["Base URL", BASE],
               ["Your handle", h],
             ].map(([label, val]) => (
-              <div key={label} className="flex items-center gap-3">
-                <span className="text-[11px] text-white/25 w-24 shrink-0">{label}</span>
-                <code className="text-[11px] text-white/55 font-mono">{val}</code>
+              <div key={label} style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <span style={{ fontSize: 11, color: "rgba(255,255,255,0.25)", width: 80, flexShrink: 0 }}>{label}</span>
+                <code style={{ fontSize: 11, color: "rgba(255,255,255,0.55)", fontFamily: "ui-monospace, Menlo, monospace" }}>{val}</code>
               </div>
             ))}
           </div>
@@ -435,79 +458,91 @@ console.log(reply.response);`;
 
       {/* Endpoints */}
       <div>
-        <p className="text-[11px] uppercase tracking-widest text-white/25 mb-3">Endpoints</p>
-        <div className="space-y-4">
+        <p className="db-eyebrow" style={{ marginBottom: 12 }}>Endpoints</p>
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
 
           {/* Chat */}
-          <div className="glass rounded-2xl p-5 space-y-4">
-            <div className="flex items-center gap-3">
-              <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-blue-400/10 text-blue-300/70">POST</span>
-              <code className="text-xs text-white/70 font-mono">/v1/clones/{h}/chat</code>
+          <div className="card" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <span style={{
+                fontSize: 10, fontFamily: "ui-monospace, Menlo, monospace", fontWeight: 600,
+                padding: "2px 8px", borderRadius: 6,
+                background: "rgba(96,165,250,0.10)", color: "rgba(147,197,253,0.70)",
+              }}>POST</span>
+              <code style={{ fontSize: 12, color: "rgba(255,255,255,0.70)", fontFamily: "ui-monospace, Menlo, monospace" }}>
+                /v1/clones/{h}/chat
+              </code>
             </div>
-            <p className="text-xs text-white/40">
-              Ask the clone a question or give it a task. Returns a response grounded in its memory — emails, decisions, domain knowledge.
-              Use <code className="text-white/55 font-mono">session_id</code> to maintain conversation context across calls.
+            <p style={{ fontSize: 12, color: "rgba(255,255,255,0.40)", margin: 0, lineHeight: 1.6 }}>
+              Ask the clone a question or give it a task. Returns a response grounded in its memory.
+              Use <code style={{ fontFamily: "ui-monospace, Menlo, monospace", fontSize: 11 }}>session_id</code> to maintain conversation context.
             </p>
-            <div className="grid grid-cols-2 gap-3">
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
               <div>
-                <p className="text-[10px] text-white/25 mb-1.5">Request</p>
-                <CodeBlock code={`{
-  "message": "string (required)",
-  "session_id": "uuid (optional)",
-  "context_type": "chat"
-}`} />
+                <p style={{ fontSize: 10, color: "rgba(255,255,255,0.25)", marginBottom: 8 }}>Request</p>
+                <CodeBlock code={`{\n  "message": "string (required)",\n  "session_id": "uuid (optional)",\n  "context_type": "chat"\n}`} />
               </div>
               <div>
-                <p className="text-[10px] text-white/25 mb-1.5">Response</p>
+                <p style={{ fontSize: 10, color: "rgba(255,255,255,0.25)", marginBottom: 8 }}>Response</p>
                 <CodeBlock code={chatResponse} />
               </div>
             </div>
             <div>
-              <p className="text-[10px] text-white/25 mb-1.5">Example</p>
+              <p style={{ fontSize: 10, color: "rgba(255,255,255,0.25)", marginBottom: 8 }}>Example</p>
               <CodeBlock code={curlChat} />
             </div>
           </div>
 
           {/* Draft */}
-          <div className="glass rounded-2xl p-5 space-y-4">
-            <div className="flex items-center gap-3">
-              <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-blue-400/10 text-blue-300/70">POST</span>
-              <code className="text-xs text-white/70 font-mono">/v1/clones/{h}/draft</code>
+          <div className="card" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <span style={{
+                fontSize: 10, fontFamily: "ui-monospace, Menlo, monospace", fontWeight: 600,
+                padding: "2px 8px", borderRadius: 6,
+                background: "rgba(96,165,250,0.10)", color: "rgba(147,197,253,0.70)",
+              }}>POST</span>
+              <code style={{ fontSize: 12, color: "rgba(255,255,255,0.70)", fontFamily: "ui-monospace, Menlo, monospace" }}>
+                /v1/clones/{h}/draft
+              </code>
             </div>
-            <p className="text-xs text-white/40">
-              Generate any text output in the clone's voice — emails, docs, replies, summaries.
-              Provide <code className="text-white/55 font-mono">context</code> for better grounding.
+            <p style={{ fontSize: 12, color: "rgba(255,255,255,0.40)", margin: 0, lineHeight: 1.6 }}>
+              Generate any text output in the clone&apos;s voice — emails, docs, replies, summaries.
             </p>
             <div>
-              <p className="text-[10px] text-white/25 mb-1.5">Example</p>
+              <p style={{ fontSize: 10, color: "rgba(255,255,255,0.25)", marginBottom: 8 }}>Example</p>
               <CodeBlock code={curlDraft} />
             </div>
           </div>
 
           {/* Eval */}
-          <div className="glass rounded-2xl p-5 space-y-3">
-            <div className="flex items-center gap-3">
-              <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-emerald-400/10 text-emerald-300/70">GET</span>
-              <code className="text-xs text-white/70 font-mono">/v1/clones/{h}/eval</code>
+          <div className="card" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <span style={{
+                fontSize: 10, fontFamily: "ui-monospace, Menlo, monospace", fontWeight: 600,
+                padding: "2px 8px", borderRadius: 6,
+                background: "rgba(52,211,153,0.10)", color: "rgba(52,211,153,0.70)",
+              }}>GET</span>
+              <code style={{ fontSize: 12, color: "rgba(255,255,255,0.70)", fontFamily: "ui-monospace, Menlo, monospace" }}>
+                /v1/clones/{h}/eval
+              </code>
             </div>
-            <p className="text-xs text-white/40">
+            <p style={{ fontSize: 12, color: "rgba(255,255,255,0.40)", margin: 0, lineHeight: 1.6 }}>
               Returns quality metrics: memory size, response approval rate, avg confidence, quality grade.
             </p>
           </div>
-
         </div>
       </div>
 
-      {/* SDK examples */}
+      {/* Code examples */}
       <div>
-        <p className="text-[11px] uppercase tracking-widest text-white/25 mb-3">Code examples</p>
-        <div className="space-y-4">
+        <p className="db-eyebrow" style={{ marginBottom: 12 }}>Code examples</p>
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
           <div>
-            <p className="text-[10px] text-white/25 mb-2">Python (httpx)</p>
+            <p style={{ fontSize: 10, color: "rgba(255,255,255,0.25)", marginBottom: 8 }}>Python (httpx)</p>
             <CodeBlock code={pythonSnippet} />
           </div>
           <div>
-            <p className="text-[10px] text-white/25 mb-2">TypeScript / JavaScript</p>
+            <p style={{ fontSize: 10, color: "rgba(255,255,255,0.25)", marginBottom: 8 }}>TypeScript / JavaScript</p>
             <CodeBlock code={tsSnippet} />
           </div>
         </div>
@@ -515,8 +550,8 @@ console.log(reply.response);`;
 
       {/* Response fields */}
       <div>
-        <p className="text-[11px] uppercase tracking-widest text-white/25 mb-3">Response fields</p>
-        <div className="glass rounded-2xl overflow-hidden">
+        <p className="db-eyebrow" style={{ marginBottom: 12 }}>Response fields</p>
+        <div style={{ borderRadius: 16, overflow: "hidden", border: "1px solid rgba(255,255,255,0.06)" }}>
           {[
             ["response", "string", "The clone's reply"],
             ["confidence", "float 0–1", "How confident the clone is. Below 0.6 = consider escalating"],
@@ -526,34 +561,38 @@ console.log(reply.response);`;
             ["trace_id", "uuid", "Use this for feedback — approve/reject to improve the clone"],
             ["latency_ms", "int", "Total response time in milliseconds"],
           ].map(([field, type, desc], i) => (
-            <div key={field} className={`flex gap-4 px-4 py-3 ${i % 2 === 0 ? "" : "bg-white/[0.02]"}`}>
-              <code className="text-[11px] text-white/60 font-mono w-36 shrink-0">{field}</code>
-              <span className="text-[11px] text-white/25 w-24 shrink-0">{type}</span>
-              <span className="text-[11px] text-white/40">{desc}</span>
+            <div key={field} style={{
+              display: "flex", gap: 16, padding: "10px 16px",
+              background: i % 2 === 0 ? "transparent" : "rgba(255,255,255,0.02)",
+            }}>
+              <code style={{ fontSize: 11, color: "rgba(255,255,255,0.60)", fontFamily: "ui-monospace, Menlo, monospace", width: 140, flexShrink: 0 }}>{field}</code>
+              <span style={{ fontSize: 11, color: "rgba(255,255,255,0.25)", width: 90, flexShrink: 0 }}>{type}</span>
+              <span style={{ fontSize: 11, color: "rgba(255,255,255,0.40)" }}>{desc}</span>
             </div>
           ))}
         </div>
       </div>
 
       {/* Rate limits */}
-      <div className="glass rounded-2xl p-5">
-        <p className="text-xs text-white/50 font-medium mb-3">Rate limits</p>
-        <div className="space-y-2">
+      <div className="card">
+        <p className="card-title">Rate limits</p>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {[
             ["Free", "100 req/day"],
             ["Pro", "1,000 req/day"],
             ["Creator", "5,000 req/day"],
             ["Enterprise", "Unlimited"],
           ].map(([tier, limit]) => (
-            <div key={tier} className="flex items-center justify-between">
-              <span className="text-xs text-white/40">{tier}</span>
-              <span className="text-xs text-white/30 font-mono">{limit}</span>
+            <div key={tier} style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <span style={{ fontSize: 12, color: "rgba(255,255,255,0.40)" }}>{tier}</span>
+              <span style={{ fontSize: 12, color: "rgba(255,255,255,0.30)", fontFamily: "ui-monospace, Menlo, monospace" }}>{limit}</span>
             </div>
           ))}
         </div>
-        <p className="text-[11px] text-white/20 mt-3">Rate limit exceeded → HTTP 429. Upgrade in Settings.</p>
+        <p style={{ fontSize: 11, color: "rgba(255,255,255,0.20)", marginTop: 12 }}>
+          Rate limit exceeded → HTTP 429. Upgrade in Billing.
+        </p>
       </div>
-
     </div>
   );
 }
@@ -567,23 +606,31 @@ export default function DeveloperApiPage() {
   const [tab, setTab] = useState<"keys" | "test" | "docs">("keys");
 
   return (
-    <div className="p-8 max-w-4xl">
-      <div className="mb-8">
-        <h1 className="text-2xl font-light text-white/85">Developer API</h1>
-        <p className="text-sm text-white/35 mt-1">
-          Programmatic access to your clone from any app, script, or workflow.
-        </p>
+    <div className="db-page">
+      <div className="db-page-head">
+        <div>
+          <p className="db-eyebrow">Integration</p>
+          <h1 className="db-h1">Developer API</h1>
+        </div>
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 mb-6 bg-white/[0.03] rounded-xl p-1 w-fit">
+      <div style={{
+        display: "inline-flex", gap: 4, marginBottom: 24,
+        padding: 4, borderRadius: 12,
+        background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)",
+      }}>
         {(["keys", "test", "docs"] as const).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
-            className={`px-4 py-1.5 rounded-lg text-xs transition-all capitalize ${
-              tab === t ? "glass-md text-white/75" : "text-white/35 hover:text-white/55"
-            }`}
+            style={{
+              padding: "6px 16px", borderRadius: 9, fontSize: 12, fontWeight: 500,
+              cursor: "pointer", border: "none", fontFamily: "inherit",
+              background: tab === t ? "rgba(255,255,255,0.09)" : "transparent",
+              color: tab === t ? "rgba(255,255,255,0.85)" : "rgba(255,255,255,0.40)",
+              transition: "all 180ms",
+            }}
           >
             {t === "keys" ? "API Keys" : t === "test" ? "Test" : "Documentation"}
           </button>

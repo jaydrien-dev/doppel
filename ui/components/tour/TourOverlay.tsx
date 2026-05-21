@@ -5,11 +5,11 @@ import type { TourStep } from "./TourProvider";
 
 interface Rect { x: number; y: number; w: number; h: number }
 
-const TOOLTIP_W = 288;
-const TOOLTIP_H_APPROX = 170;
-const SPOT_PAD = 8;   // padding around target in spotlight
-const GAP = 16;       // gap between spotlight edge and tooltip
-const SCREEN_PAD = 16; // minimum distance from viewport edge
+const TOOLTIP_W = 280;
+const TOOLTIP_H_APPROX = 160;
+const SPOT_PAD = 8;
+const GAP = 16;
+const SCREEN_PAD = 16;
 
 function clamp(val: number, min: number, max: number) {
   return Math.max(min, Math.min(val, max));
@@ -56,7 +56,6 @@ function computeTooltipPos(
       break;
   }
 
-  // If preferred position overflows, flip
   if (position === "right" && x + TOOLTIP_W > vw - SCREEN_PAD) {
     x = spotLeft - GAP - TOOLTIP_W;
     arrowSide = "right";
@@ -72,23 +71,27 @@ function computeTooltipPos(
   return { x, y, arrowSide };
 }
 
-// ---------------------------------------------------------------------------
-// Arrow pointing toward the highlighted element
-// ---------------------------------------------------------------------------
+const ARROW_SIZE = 8;
+
 function Arrow({ side }: { side: "left" | "right" | "top" | "bottom" }) {
-  const base = "absolute w-2 h-2 border-white/[0.12]";
-  const styles: Record<typeof side, string> = {
-    left:   `${base} -left-[5px] top-1/2 -translate-y-1/2 border-l border-b rotate-45 bg-[rgba(255,255,255,0.07)]`,
-    right:  `${base} -right-[5px] top-1/2 -translate-y-1/2 border-r border-t rotate-45 bg-[rgba(255,255,255,0.07)]`,
-    top:    `${base} left-1/2 -translate-x-1/2 -top-[5px] border-l border-t rotate-45 bg-[rgba(255,255,255,0.07)]`,
-    bottom: `${base} left-1/2 -translate-x-1/2 -bottom-[5px] border-r border-b rotate-45 bg-[rgba(255,255,255,0.07)]`,
+  const base: React.CSSProperties = {
+    position: "absolute",
+    width: ARROW_SIZE,
+    height: ARROW_SIZE,
+    background: "rgba(255,255,255,0.11)",
+    border: "1px solid rgba(255,255,255,0.14)",
+    backdropFilter: "blur(20px)",
   };
-  return <span className={styles[side]} />;
+
+  const styles: Record<typeof side, React.CSSProperties> = {
+    left:   { ...base, left: -ARROW_SIZE / 2 - 1, top: "50%", transform: "translateY(-50%) rotate(45deg)", borderRight: "none", borderTop: "none" },
+    right:  { ...base, right: -ARROW_SIZE / 2 - 1, top: "50%", transform: "translateY(-50%) rotate(45deg)", borderLeft: "none", borderBottom: "none" },
+    top:    { ...base, left: "50%", top: -ARROW_SIZE / 2 - 1, transform: "translateX(-50%) rotate(45deg)", borderRight: "none", borderBottom: "none" },
+    bottom: { ...base, left: "50%", bottom: -ARROW_SIZE / 2 - 1, transform: "translateX(-50%) rotate(45deg)", borderLeft: "none", borderTop: "none" },
+  };
+  return <span style={styles[side]} />;
 }
 
-// ---------------------------------------------------------------------------
-// Main overlay
-// ---------------------------------------------------------------------------
 interface Props {
   step: TourStep;
   stepIndex: number;
@@ -101,7 +104,6 @@ interface Props {
 export function TourOverlay({ step, stepIndex, totalSteps, onNext, onPrev, onSkip }: Props) {
   const [targetRect, setTargetRect] = useState<Rect | null>(null);
   const [mounted, setMounted] = useState(false);
-  const rafRef = useRef<number | null>(null);
 
   const measure = useCallback(() => {
     const el = document.querySelector(step.target);
@@ -111,10 +113,8 @@ export function TourOverlay({ step, stepIndex, totalSteps, onNext, onPrev, onSki
     setTargetRect({ x: r.left, y: r.top, w: r.width, h: r.height });
   }, [step.target]);
 
-  // Re-measure on step change and on resize
   useEffect(() => {
     setMounted(false);
-    // Small delay so scroll settles before measuring
     const t = setTimeout(() => {
       measure();
       setMounted(true);
@@ -123,9 +123,8 @@ export function TourOverlay({ step, stepIndex, totalSteps, onNext, onPrev, onSki
   }, [measure]);
 
   useEffect(() => {
-    function onResize() { measure(); }
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
   }, [measure]);
 
   if (!targetRect) return null;
@@ -140,48 +139,32 @@ export function TourOverlay({ step, stepIndex, totalSteps, onNext, onPrev, onSki
 
   const { x: tx, y: ty, arrowSide } = computeTooltipPos(targetRect, step.position ?? "right");
   const progress = (stepIndex + 1) / totalSteps;
+  const isLast = stepIndex === totalSteps - 1;
 
   return (
     <div
-      className={`transition-opacity duration-200 ${mounted ? "opacity-100" : "opacity-0"}`}
-      style={{ position: "fixed", inset: 0, zIndex: 9999, pointerEvents: "none" }}
+      style={{
+        position: "fixed", inset: 0, zIndex: 9999, pointerEvents: "none",
+        opacity: mounted ? 1 : 0, transition: "opacity 200ms ease",
+      }}
     >
-      {/* SVG backdrop with spotlight cutout */}
-      <svg
-        width={vw}
-        height={vh}
-        style={{ position: "absolute", inset: 0 }}
-      >
+      {/* Backdrop with spotlight */}
+      <svg width={vw} height={vh} style={{ position: "absolute", inset: 0 }}>
         <defs>
           <mask id="tour-spotlight">
             <rect width={vw} height={vh} fill="white" />
             <rect x={sx} y={sy} width={sw} height={sh} rx={10} fill="black" />
           </mask>
         </defs>
-        {/* Dark overlay */}
-        <rect
-          width={vw}
-          height={vh}
-          fill="rgba(8,8,8,0.78)"
-          mask="url(#tour-spotlight)"
-        />
-        {/* Highlight ring */}
+        <rect width={vw} height={vh} fill="rgba(0,0,0,0.62)" mask="url(#tour-spotlight)" />
         <rect
           x={sx - 1} y={sy - 1} width={sw + 2} height={sh + 2}
-          rx={11}
-          fill="none"
-          stroke="rgba(255,255,255,0.18)"
-          strokeWidth={1.5}
-        />
-        {/* Subtle inner glow */}
-        <rect
-          x={sx} y={sy} width={sw} height={sh}
-          rx={10}
-          fill="rgba(255,255,255,0.02)"
+          rx={11} fill="none"
+          stroke="rgba(255,255,255,0.18)" strokeWidth={1.5}
         />
       </svg>
 
-      {/* Tooltip card */}
+      {/* Tooltip */}
       <div
         style={{
           position: "fixed",
@@ -189,56 +172,72 @@ export function TourOverlay({ step, stepIndex, totalSteps, onNext, onPrev, onSki
           top: ty,
           width: TOOLTIP_W,
           pointerEvents: "all",
+          background: "rgba(255,255,255,0.09)",
+          backdropFilter: "blur(24px) saturate(160%)",
+          WebkitBackdropFilter: "blur(24px) saturate(160%)",
+          border: "1px solid rgba(255,255,255,0.13)",
+          borderRadius: 18,
+          padding: "18px 20px",
+          boxShadow: "0 16px 48px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.04) inset",
         }}
-        className="backdrop-blur-xl bg-white/[0.07] border border-white/[0.12] rounded-2xl p-5 shadow-2xl"
       >
         <Arrow side={arrowSide} />
 
-        {/* Step counter */}
-        <div className="flex items-center justify-between mb-3">
-          <span className="text-[10px] text-white/30 uppercase tracking-widest">
+        {/* Step counter + skip */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+          <span style={{ fontSize: 10, fontWeight: 500, letterSpacing: "0.14em", textTransform: "uppercase", color: "rgba(255,255,255,0.30)" }}>
             {stepIndex + 1} of {totalSteps}
           </span>
           <button
             onClick={onSkip}
-            className="text-[11px] text-white/20 hover:text-white/50 transition-colors"
+            style={{ background: "none", border: "none", fontSize: 11, color: "rgba(255,255,255,0.30)", cursor: "pointer", padding: 0, fontFamily: "inherit" }}
+            onMouseEnter={(e) => (e.currentTarget.style.color = "rgba(255,255,255,0.60)")}
+            onMouseLeave={(e) => (e.currentTarget.style.color = "rgba(255,255,255,0.30)")}
           >
-            Skip tour
+            Skip
           </button>
         </div>
 
         {/* Progress bar */}
-        <div className="h-px bg-white/[0.07] rounded-full mb-4 overflow-hidden">
-          <div
-            className="h-full bg-white/25 rounded-full transition-all duration-300"
-            style={{ width: `${progress * 100}%` }}
-          />
+        <div style={{ height: 2, background: "rgba(255,255,255,0.08)", borderRadius: 999, marginBottom: 16, overflow: "hidden" }}>
+          <div style={{ height: "100%", borderRadius: 999, background: "rgba(255,255,255,0.55)", width: `${progress * 100}%`, transition: "width 300ms ease" }} />
         </div>
 
         {/* Content */}
-        <p className="text-sm font-medium text-white/85 mb-1.5 leading-snug">{step.title}</p>
-        <p className="text-xs text-white/45 leading-relaxed">{step.description}</p>
+        <p style={{ fontSize: 13, fontWeight: 500, color: "rgba(255,255,255,0.85)", margin: "0 0 6px", lineHeight: 1.4 }}>{step.title}</p>
+        <p style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", lineHeight: 1.6, margin: 0 }}>{step.description}</p>
 
         {/* Navigation */}
-        <div className="flex items-center justify-between mt-4">
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 18 }}>
           <button
             onClick={onPrev}
             disabled={stepIndex === 0}
-            className="text-xs text-white/30 hover:text-white/60 disabled:opacity-0 transition-all"
+            style={{
+              background: "none", border: "none", fontSize: 12, cursor: "pointer",
+              color: stepIndex === 0 ? "transparent" : "rgba(255,255,255,0.35)",
+              fontFamily: "inherit", padding: 0, transition: "color 180ms",
+            }}
+            onMouseEnter={(e) => { if (stepIndex > 0) e.currentTarget.style.color = "rgba(255,255,255,0.65)"; }}
+            onMouseLeave={(e) => { if (stepIndex > 0) e.currentTarget.style.color = "rgba(255,255,255,0.35)"; }}
           >
             ← Back
           </button>
-
           <button
             onClick={onNext}
-            className="glass-md hover:glass-hi rounded-xl px-4 py-1.5 text-xs text-white/70 hover:text-white/90 transition-all"
+            style={{
+              padding: "7px 18px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.18)",
+              background: isLast ? "rgba(255,255,255,0.14)" : "rgba(255,255,255,0.10)",
+              color: "rgba(255,255,255,0.85)", fontSize: 12, fontWeight: 500,
+              fontFamily: "inherit", cursor: "pointer", transition: "background 180ms, border-color 180ms",
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.18)"; e.currentTarget.style.borderColor = "rgba(255,255,255,0.28)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = isLast ? "rgba(255,255,255,0.14)" : "rgba(255,255,255,0.10)"; e.currentTarget.style.borderColor = "rgba(255,255,255,0.18)"; }}
           >
-            {stepIndex === totalSteps - 1 ? "Done" : "Next →"}
+            {isLast ? "Done" : "Next →"}
           </button>
         </div>
 
-        {/* Keyboard hint */}
-        <p className="text-[10px] text-white/15 mt-3 text-center">
+        <p style={{ fontSize: 10, color: "rgba(255,255,255,0.18)", textAlign: "center", marginTop: 12, marginBottom: 0 }}>
           ← → arrow keys · Esc to exit
         </p>
       </div>

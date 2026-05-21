@@ -64,45 +64,50 @@ export function SeedQAPanel({ cloneId }: SeedQAPanelProps) {
   const answerCount = Object.values(answers).filter((v) => v.trim()).length;
 
   return (
-    <div className="glass rounded-2xl p-6">
-      <div className="flex items-center justify-between mb-2">
-        <h3 className="text-sm font-medium text-white/60">Seed Q&A</h3>
+    <div className="card">
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+        <p className="card-title" style={{ margin: 0 }}>Seed Q&amp;A</p>
         {answerCount > 0 && (
-          <span className="text-xs text-white/30">{answerCount} answered</span>
+          <span style={{ fontSize: 12, color: "rgba(255,255,255,0.30)" }}>{answerCount} answered</span>
         )}
       </div>
-      <p className="text-xs text-white/35 mb-5 leading-relaxed">
+      <p style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", marginBottom: 18, lineHeight: 1.6 }}>
         Answer these questions to give your clone a baseline understanding of how you think.
-        These are pinned — they always influence responses.
+        These are pinned &mdash; they always influence responses.
       </p>
 
-      <div className="flex flex-col gap-4 max-h-[500px] overflow-y-auto pr-1">
+      <div style={{ display: "flex", flexDirection: "column", gap: 16, maxHeight: 500, overflowY: "auto", paddingRight: 4 }}>
         {SEED_QUESTIONS.map((q, i) => (
           <div key={i}>
-            <label className="text-xs text-white/50 mb-1.5 block leading-relaxed">{q}</label>
+            <label style={{ display: "block", fontSize: 12, color: "rgba(255,255,255,0.50)", marginBottom: 6, lineHeight: 1.5 }}>
+              {q}
+            </label>
             <textarea
               value={answers[i] ?? ""}
               onChange={(e) => setAnswers((prev) => ({ ...prev, [i]: e.target.value }))}
-              placeholder="Your answer…"
+              placeholder="Your answer\u2026"
               rows={2}
-              className="w-full glass rounded-xl px-4 py-2.5 text-sm text-white/80 placeholder:text-white/20 outline-none resize-none leading-relaxed"
+              className="input"
+              style={{ resize: "none", lineHeight: 1.6 }}
             />
           </div>
         ))}
       </div>
 
-      {error && <p className="text-xs text-white/40 mt-3">{error}</p>}
+      {error && (
+        <p style={{ fontSize: 12, color: "rgba(248,113,113,0.70)", marginTop: 12 }}>{error}</p>
+      )}
 
-      <div className="flex items-center gap-3 mt-5">
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 18 }}>
         <button
           onClick={handleSave}
           disabled={saving || answerCount === 0}
-          className="glass-md hover:glass-hi rounded-xl px-5 py-2.5 text-sm text-white/70 hover:text-white/90 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+          className="btn btn--primary btn--sm"
         >
-          {saving ? "Saving…" : saved ? "Saved ✓" : "Save answers"}
+          {saving ? "Saving\u2026" : saved ? "Saved" : "Save answers"}
         </button>
         {saved && (
-          <span className="text-xs text-white/30">
+          <span style={{ fontSize: 12, color: "rgba(255,255,255,0.30)" }}>
             Pinned to brain
           </span>
         )}

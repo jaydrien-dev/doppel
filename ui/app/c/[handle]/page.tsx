@@ -31,16 +31,16 @@ export default async function PublicClonePage({
 
   if (fullClone.access_mode === "private") {
     return (
-      <div className="min-h-dvh flex flex-col items-center justify-center px-4">
-        <div className="glass rounded-2xl p-10 text-center max-w-sm w-full">
-          <div className="w-12 h-12 rounded-2xl glass-md flex items-center justify-center mx-auto mb-5">
+      <div style={{ minHeight: "100dvh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "0 16px" }}>
+        <div className="glass" style={{ borderRadius: 20, padding: 40, textAlign: "center", maxWidth: 360, width: "100%" }}>
+          <div className="glass-md" style={{ width: 48, height: 48, borderRadius: 14, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 20px" }}>
             <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
               <rect x="4" y="9" width="12" height="9" rx="2" stroke="white" strokeOpacity="0.4" strokeWidth="1.5"/>
               <path d="M7 9V6a3 3 0 016 0v3" stroke="white" strokeOpacity="0.4" strokeWidth="1.5" strokeLinecap="round"/>
             </svg>
           </div>
-          <h1 className="text-lg font-medium text-white/80 mb-2">{fullClone.display_name}</h1>
-          <p className="text-sm text-white/35">This clone is private.</p>
+          <h1 style={{ fontSize: 17, fontWeight: 500, color: "rgba(255,255,255,0.80)", marginBottom: 8 }}>{fullClone.display_name}</h1>
+          <p style={{ fontSize: 13, color: "rgba(255,255,255,0.35)", margin: 0 }}>This clone is private.</p>
         </div>
         <DoppelFooter />
       </div>
@@ -63,18 +63,18 @@ export default async function PublicClonePage({
 
     if (!isAllowed) {
       return (
-        <div className="min-h-dvh flex flex-col items-center justify-center px-4">
-          <div className="glass rounded-2xl p-10 text-center max-w-sm w-full">
-            <div className="w-12 h-12 rounded-2xl glass-md flex items-center justify-center mx-auto mb-5">
+        <div style={{ minHeight: "100dvh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "0 16px" }}>
+          <div className="glass" style={{ borderRadius: 20, padding: 40, textAlign: "center", maxWidth: 360, width: "100%" }}>
+            <div className="glass-md" style={{ width: 48, height: 48, borderRadius: 14, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 20px" }}>
               <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
                 <circle cx="10" cy="10" r="7" stroke="white" strokeOpacity="0.4" strokeWidth="1.5"/>
                 <path d="M7 10h6M10 7v6" stroke="white" strokeOpacity="0.4" strokeWidth="1.5" strokeLinecap="round" transform="rotate(45 10 10)"/>
               </svg>
             </div>
-            <h1 className="text-lg font-medium text-white/80 mb-2">{fullClone.display_name}</h1>
-            <p className="text-sm text-white/35">You don&apos;t have access to this clone.</p>
+            <h1 style={{ fontSize: 17, fontWeight: 500, color: "rgba(255,255,255,0.80)", marginBottom: 8 }}>{fullClone.display_name}</h1>
+            <p style={{ fontSize: 13, color: "rgba(255,255,255,0.35)", margin: 0 }}>You don&apos;t have access to this clone.</p>
             {userEmail && (
-              <p className="text-xs text-white/20 mt-2">{userEmail}</p>
+              <p style={{ fontSize: 12, color: "rgba(255,255,255,0.20)", marginTop: 8 }}>{userEmail}</p>
             )}
           </div>
           <DoppelFooter />
@@ -92,41 +92,20 @@ export default async function PublicClonePage({
   };
 
   return (
-    <div className="min-h-dvh flex flex-col">
-      {/* Header */}
-      <div className="px-5 py-4 glass border-b border-white/[0.06] flex items-center gap-3">
-        <div className="w-8 h-8 rounded-xl glass-md flex items-center justify-center">
-          <span className="text-xs font-medium text-white/50">{clone.display_name[0]}</span>
-        </div>
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium text-white/80">{clone.display_name}</p>
-          <p className="text-[11px] text-white/30">@{clone.handle}</p>
-        </div>
-        {fullClone.is_onboarding_resource && (
-          <span className="text-[10px] text-white/35 bg-white/[0.05] border border-white/[0.08] rounded-full px-2.5 py-0.5 shrink-0">
-            Knowledge clone
-          </span>
-        )}
-      </div>
-
-      {/* Chat */}
-      <div className="flex-1 overflow-hidden">
-        <PublicChatClient clone={clone} isOnboardingResource={fullClone.is_onboarding_resource} />
-      </div>
-
-      <DoppelFooter inline />
+    <div style={{ height: "100dvh", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+      <PublicChatClient clone={clone} isOnboardingResource={fullClone.is_onboarding_resource} />
     </div>
   );
 }
 
 function DoppelFooter({ inline }: { inline?: boolean }) {
   return (
-    <div className={`${inline ? "py-2" : "mt-8"} text-center`}>
-      <p className="text-[10px] text-white/20">
+    <div style={{ padding: inline ? "8px 0" : "32px 0 0", textAlign: "center" }}>
+      <p style={{ fontSize: 10, color: "rgba(255,255,255,0.20)", margin: 0 }}>
         Powered by{" "}
-        <span className="text-white/35 font-medium">Doppel</span>
+        <span style={{ color: "rgba(255,255,255,0.35)", fontWeight: 500 }}>Doppel</span>
         {" · "}
-        <a href="/sign-up" className="text-white/35 hover:text-white/55 transition-colors">
+        <a href="/sign-up" style={{ color: "rgba(255,255,255,0.35)" }}>
           Create yours →
         </a>
       </p>

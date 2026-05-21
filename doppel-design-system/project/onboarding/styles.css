@@ -1,0 +1,167 @@
+/* ============================================================================
+   Doppel onboarding — shell, motion, top chrome
+   ========================================================================== */
+
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; padding: 0;
+  font-family: var(--font-sans);
+  background: var(--bg-dark);
+  color: var(--fg-dark-1);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+button, input, select, textarea { font-family: inherit; }
+a { color: inherit; text-decoration: none; }
+
+/* ============ MOTION ===================================================== */
+@keyframes fade-up      { from { opacity:0; transform: translateY(14px); } to { opacity:1; transform: translateY(0); } }
+@keyframes fade-in      { from { opacity:0; } to { opacity:1; } }
+@keyframes scale-in     { from { opacity:0; transform: scale(0.92); } to { opacity:1; transform: scale(1); } }
+@keyframes pulse-glow   { 0%,100% { opacity: 0.45; } 50% { opacity: 1; } }
+@keyframes float-y      { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
+@keyframes shimmer      { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
+@keyframes spin-slow    { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+@keyframes dot-bounce   { 0%,80%,100% { transform: translateY(0); opacity: 0.4; } 40% { transform: translateY(-4px); opacity: 1; } }
+@keyframes flash        { 0% { background-color: rgba(255,255,255,0.16); } 100% { background-color: transparent; } }
+@keyframes confetti-fall { from { transform: translateY(-20px) rotate(0deg); opacity: 1; } to { transform: translateY(100vh) rotate(720deg); opacity: 0; } }
+@keyframes orbit        { from { transform: rotate(0deg) translateX(28px) rotate(0deg); } to { transform: rotate(360deg) translateX(28px) rotate(-360deg); } }
+
+.anim-fade-up    { animation: fade-up var(--dur-slow) var(--ease-ios) both; }
+.anim-fade-in    { animation: fade-in var(--dur-slow) var(--ease-ios) both; }
+.anim-scale-in   { animation: scale-in var(--dur-base) var(--ease-ios) both; }
+
+/* ============ AMBIENT BG ================================================= */
+.bg {
+  position: fixed; inset: 0; z-index: 0;
+  background:
+    radial-gradient(circle at 20% 20%, rgba(26,115,232,0.18) 0%, transparent 40%),
+    radial-gradient(circle at 78% 24%, rgba(167,139,250,0.16) 0%, transparent 42%),
+    radial-gradient(circle at 50% 92%, rgba(233,30,99,0.12) 0%, transparent 44%);
+  transition: background var(--dur-slow) var(--ease-ios);
+  pointer-events: none;
+}
+.bg__dots {
+  position: fixed; inset: 0; z-index: 0;
+  background-image: radial-gradient(rgba(255,255,255,0.05) 1px, transparent 1px);
+  background-size: 32px 32px;
+  mask-image: radial-gradient(ellipse 80% 60% at 50% 40%, #000 30%, transparent 80%);
+  -webkit-mask-image: radial-gradient(ellipse 80% 60% at 50% 40%, #000 30%, transparent 80%);
+  pointer-events: none;
+}
+
+/* ============ TOP BAR ==================================================== */
+.top {
+  position: relative; z-index: 10;
+  padding: 18px 24px;
+  display: flex; align-items: center; gap: 16px;
+  max-width: 1100px; margin: 0 auto;
+}
+.top__brand {
+  font-size: 16px; font-weight: 600;
+  letter-spacing: -0.025em; color: var(--fg-dark-1);
+  display: inline-flex; align-items: center; gap: 8px;
+}
+.top__brand__mark {
+  width: 22px; height: 22px; border-radius: 7px;
+  background: linear-gradient(135deg, #1A73E8 0%, #7B1FA2 100%);
+  position: relative; overflow: hidden;
+}
+.top__brand__mark::after { content: ""; position: absolute; inset: 3px; background: var(--bg-dark); border-radius: 4px; }
+.top__brand__mark::before { content: ""; position: absolute; inset: 7px; background: linear-gradient(135deg, #34D399, #FBBF24); border-radius: 2px; z-index: 1; }
+
+.top__skip {
+  margin-left: auto;
+  background: transparent; border: none;
+  font-size: 12px; color: var(--fg-dark-3); cursor: pointer;
+  padding: 6px 12px; border-radius: 8px;
+  transition: background var(--dur-fast) var(--ease-ios), color var(--dur-fast) var(--ease-ios);
+}
+.top__skip:hover { background: var(--bg-dark-elev-1); color: var(--fg-dark-1); }
+
+/* ============ STEP RAIL (3-dot progress with sliding pill) =============== */
+.steps {
+  display: flex; align-items: center; gap: 8px;
+  padding: 4px 6px; border-radius: 999px;
+  background: var(--bg-dark-elev-1);
+  border: 1px solid var(--border-dark);
+}
+.steps__dot {
+  width: 26px; height: 4px; border-radius: 999px;
+  background: var(--fg-dark-4);
+  transition: width var(--dur-base) var(--ease-ios), background var(--dur-base) var(--ease-ios);
+}
+.steps__dot--done { background: var(--accent, var(--doppel-blue)); width: 26px; }
+.steps__dot--current { background: var(--accent, var(--doppel-blue)); width: 64px; box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent, var(--doppel-blue)) 22%, transparent); }
+
+/* ============ STAGE ====================================================== */
+.stage-wrap {
+  position: relative; z-index: 1;
+  max-width: 920px; margin: 0 auto;
+  padding: 8px 24px 80px;
+}
+
+.eyebrow {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: 11px; font-weight: 500;
+  letter-spacing: 0.18em; text-transform: uppercase;
+  color: var(--fg-dark-3);
+  margin-bottom: 14px;
+}
+.eyebrow__dot {
+  width: 6px; height: 6px; border-radius: 999px;
+  background: var(--accent, var(--doppel-blue));
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent, var(--doppel-blue)) 22%, transparent);
+  animation: pulse-glow 2.4s ease-in-out infinite;
+}
+.h-title {
+  font-size: clamp(32px, 4.4vw, 48px);
+  font-weight: 300; line-height: 1.05;
+  letter-spacing: -0.025em;
+  color: var(--fg-dark-1);
+  margin: 0 0 12px;
+}
+.h-title em {
+  font-style: normal; font-weight: 500;
+  background: linear-gradient(120deg, var(--accent, #4A90E2) 0%, color-mix(in srgb, var(--accent, #4A90E2) 60%, #FBBF24) 100%);
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.h-sub {
+  font-size: 16px; line-height: 1.55;
+  color: var(--fg-dark-2);
+  margin: 0;
+  max-width: 560px;
+}
+
+/* ============ BUTTON STYLES ============================================== */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 10px 18px; border-radius: 12px;
+  font-size: 13px; font-weight: 500;
+  border: none; cursor: pointer; white-space: nowrap;
+  transition: background var(--dur-fast) var(--ease-ios),
+              color var(--dur-fast) var(--ease-ios),
+              transform var(--dur-fast) var(--ease-ios),
+              box-shadow var(--dur-fast) var(--ease-ios);
+}
+.btn:active { transform: scale(0.97); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn--primary {
+  background: linear-gradient(135deg, var(--accent, #1A73E8) 0%, color-mix(in srgb, var(--accent, #1A73E8) 70%, #fff) 100%);
+  color: #fff;
+  box-shadow: 0 6px 22px color-mix(in srgb, var(--accent, #1A73E8) 40%, transparent),
+              inset 0 1px 0 rgba(255,255,255,0.18);
+}
+.btn--primary:hover { transform: translateY(-1px); box-shadow: 0 8px 28px color-mix(in srgb, var(--accent, #1A73E8) 50%, transparent), inset 0 1px 0 rgba(255,255,255,0.22); }
+.btn--ghost { background: transparent; color: var(--fg-dark-2); }
+.btn--ghost:hover { background: var(--bg-dark-elev-1); color: var(--fg-dark-1); }
+.btn--secondary {
+  background: var(--bg-dark-elev-1);
+  color: var(--fg-dark-1);
+  border: 1px solid var(--border-dark);
+}
+.btn--secondary:hover { background: var(--bg-dark-elev-2); border-color: var(--border-dark-hover); }
+.btn--lg { padding: 12px 22px; font-size: 14px; }

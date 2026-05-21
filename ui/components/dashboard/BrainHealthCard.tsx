@@ -41,57 +41,62 @@ export function BrainHealthCard({
   const sources = data?.sources ?? [];
 
   return (
-    <div className="glass rounded-2xl p-6">
-      <div className="flex items-center justify-between mb-5">
-        <div className="flex items-center gap-2">
-          <div
-            className={`w-2 h-2 rounded-full transition-colors ${
-              total > 0 ? "bg-white/50" : "bg-white/15"
-            }`}
-          />
-          <h2 className="text-sm font-medium text-white/60">Brain health</h2>
+    <div className="card">
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {total > 0 ? (
+            <span style={{ width: 6, height: 6, borderRadius: "50%", background: "rgba(52,211,153,0.70)", display: "inline-block" }} />
+          ) : (
+            <span style={{ width: 6, height: 6, borderRadius: "50%", background: "rgba(255,255,255,0.15)", display: "inline-block" }} />
+          )}
+          <p className="card-title" style={{ margin: 0 }}>Brain health</p>
         </div>
         {lastUpdated && (
-          <span className="text-[11px] text-white/20">{formatRelative(lastUpdated)}</span>
+          <span style={{ fontSize: 11, color: "rgba(255,255,255,0.20)" }}>{formatRelative(lastUpdated)}</span>
         )}
       </div>
 
-      <div className="grid grid-cols-3 gap-4 mb-5">
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 14, marginBottom: 18 }}>
+        {/* Memories */}
         <div>
-          <p className="text-2xl font-light text-white/85 mb-1 tabular-nums">
-            {isLoading ? "—" : total.toLocaleString()}
+          <p style={{ fontSize: 24, fontWeight: 300, color: "rgba(255,255,255,0.85)", marginBottom: 4, fontVariantNumeric: "tabular-nums" }}>
+            {isLoading ? "\u2014" : total.toLocaleString()}
           </p>
-          <p className="text-xs font-medium text-white/40">Memories</p>
-          <p className="text-[11px] text-white/25 mt-0.5">knowledge chunks</p>
+          <p style={{ fontSize: 12, fontWeight: 500, color: "rgba(255,255,255,0.40)" }}>Memories</p>
+          <p style={{ fontSize: 11, color: "rgba(255,255,255,0.25)", marginTop: 2 }}>knowledge chunks</p>
         </div>
+
+        {/* Sources */}
         <div>
-          <p className="text-2xl font-light text-white/85 mb-1">
-            {isLoading ? "—" : sources.length}
+          <p style={{ fontSize: 24, fontWeight: 300, color: "rgba(255,255,255,0.85)", marginBottom: 4 }}>
+            {isLoading ? "\u2014" : sources.length}
           </p>
-          <p className="text-xs font-medium text-white/40">Sources</p>
-          <p className="text-[11px] text-white/25 mt-0.5 truncate">
+          <p style={{ fontSize: 12, fontWeight: 500, color: "rgba(255,255,255,0.40)" }}>Sources</p>
+          <p style={{ fontSize: 11, color: "rgba(255,255,255,0.25)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {sources.length > 0
               ? sources.map((s) => SOURCE_LABELS[s] ?? s).join(", ")
               : "none connected"}
           </p>
         </div>
+
+        {/* Episodic */}
         <div>
-          <p className="text-2xl font-light text-white/85 mb-1">
-            {isLoading ? "—" : data ? `${data.episodic.toLocaleString()}` : "—"}
+          <p style={{ fontSize: 24, fontWeight: 300, color: "rgba(255,255,255,0.85)", marginBottom: 4 }}>
+            {isLoading ? "\u2014" : data ? data.episodic.toLocaleString() : "\u2014"}
           </p>
-          <p className="text-xs font-medium text-white/40">Episodic</p>
-          <p className="text-[11px] text-white/25 mt-0.5">
+          <p style={{ fontSize: 12, fontWeight: 500, color: "rgba(255,255,255,0.40)" }}>Episodic</p>
+          <p style={{ fontSize: 11, color: "rgba(255,255,255,0.25)", marginTop: 2 }}>
             {data ? `+${data.semantic} facts` : ""}
           </p>
         </div>
       </div>
 
       {!isLoading && total === 0 && (
-        <div className="glass rounded-xl px-4 py-3 text-sm text-white/40">
+        <div className="glass" style={{ borderRadius: 12, padding: "12px 16px", fontSize: 13, color: "rgba(255,255,255,0.40)" }}>
           No memories yet. Go to{" "}
           <Link
             href="/dashboard/train"
-            className="text-white/60 hover:text-white/80 underline underline-offset-2"
+            style={{ color: "rgba(255,255,255,0.60)", textDecoration: "underline", textUnderlineOffset: 3 }}
           >
             Train
           </Link>{" "}

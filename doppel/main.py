@@ -38,7 +38,7 @@ from uuid import UUID, uuid4
 _log = logging.getLogger(__name__)
 
 import httpx
-from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile, WebSocket, WebSocketDisconnect
 from sqlalchemy import text as sql_text
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse, StreamingResponse
@@ -59,6 +59,9 @@ from doppel.brain.memory import episodic as episodic_store
 from doppel.brain.models.types import BrainInput, BrainOutput, FeedbackSignal
 from doppel.brain.orchestrator import DoppelBrain
 from doppel.config import settings
+
+# Credit multipliers per response mode (based on actual token usage ratio)
+CREDITS_MULTIPLIER: dict[str, int] = {"fast": 1, "pro": 3, "extended": 8}
 from doppel.ingestion.connectors.gmail import (
     GmailConnector,
     get_auth_url,
@@ -121,14 +124,22 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-_cors_origins: list[str] = (
-    ["*"]
-    if settings.app_env == "development"
-    else [o.strip() for o in settings.allowed_origins.split(",") if o.strip()]
-)
+_ALWAYS_ALLOWED = [
+    "http://localhost:3000",   # Next.js dev
+    "http://localhost:5173",   # Vite dev (Electron renderer)
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:5173",
+]
+if settings.app_env == "development":
+    _cors_origins = _ALWAYS_ALLOWED
+else:
+    _explicit = [o.strip() for o in settings.allowed_origins.split(",") if o.strip()]
+    _cors_origins = list(dict.fromkeys(_ALWAYS_ALLOWED + _explicit))  # dedup, keep order
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
+    allow_origin_regex=r"https://.*\.doppel\.ai",   # catch all prod subdomains
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -361,7 +372,10 @@ async def get_my_clone(
             SELECT clone_id, display_name, handle, access_mode,
                    style_fingerprint, value_system, allowed_emails,
                    rate_limit_per_day, subscription_tier, stripe_customer_id,
-                   created_at, updated_at
+                   created_at, updated_at,
+                   avatar_url, listing_banner_url, listing_title,
+                   COALESCE(is_verified, FALSE) AS is_verified,
+                   is_listed, price_per_query, category, listing_description
             FROM clone_identity
             WHERE user_id = :user_id
             LIMIT 1
@@ -385,7 +399,79 @@ async def get_my_clone(
         "stripe_customer_id": record["stripe_customer_id"],
         "created_at": record["created_at"].isoformat() if record["created_at"] else None,
         "updated_at": record["updated_at"].isoformat() if record["updated_at"] else None,
+        "avatar_url": record["avatar_url"],
+        "listing_banner_url": record["listing_banner_url"],
+        "listing_title": record["listing_title"],
+        "is_verified": bool(record["is_verified"]),
+        "is_listed": bool(record["is_listed"]) if record["is_listed"] is not None else False,
+        "price_per_query": float(record["price_per_query"] or 0),
+        "category": record["category"],
+        "listing_description": record["listing_description"],
     }
+
+
+CLONE_LIMITS: dict[str, int] = {
+    "free": 2,
+    "personal": 5,
+    "enterprise_pro": 10,
+    "enterprise_max": 20,
+}
+
+
+@app.get("/clones/mine")
+async def list_my_clones(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Return all clones owned by the authenticated user."""
+    caller_user_id = request.headers.get("X-User-Id")
+    if not caller_user_id:
+        raise HTTPException(status_code=401, detail="Login required")
+
+    rows = await session.execute(
+        sql_text("""
+            SELECT clone_id, display_name, handle, access_mode, is_listed,
+                   subscription_tier, created_at, updated_at,
+                   is_verified, listing_title, price_per_query,
+                   avatar_url, listing_banner_url,
+                   allowed_emails, rate_limit_per_day,
+                   category, listing_description
+            FROM clone_identity
+            WHERE user_id = :uid
+            ORDER BY created_at DESC
+        """),
+        {"uid": caller_user_id},
+    )
+    clones = [
+        {
+            "clone_id": str(r["clone_id"]),
+            "display_name": r["display_name"],
+            "handle": r["handle"],
+            "access_mode": r["access_mode"],
+            "is_listed": bool(r["is_listed"]),
+            "subscription_tier": r["subscription_tier"] or "free",
+            "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+            "updated_at": r["updated_at"].isoformat() if r["updated_at"] else None,
+            "is_verified": bool(r["is_verified"]) if r["is_verified"] is not None else False,
+            "listing_title": r["listing_title"],
+            "price_per_query": float(r["price_per_query"] or 0),
+            "avatar_url": r["avatar_url"],
+            "listing_banner_url": r["listing_banner_url"],
+            "allowed_emails": list(r["allowed_emails"] or []),
+            "rate_limit_per_day": int(r["rate_limit_per_day"] or 0),
+            "category": r["category"],
+            "listing_description": r["listing_description"],
+        }
+        for r in rows.mappings().all()
+    ]
+
+    # Determine plan limit from highest-tier clone (or free default)
+    tiers = [c["subscription_tier"] for c in clones]
+    tier_order = ["free", "personal", "enterprise_pro", "enterprise_max"]
+    highest = max((t for t in tiers), key=lambda t: tier_order.index(t) if t in tier_order else 0, default="free")
+    limit = CLONE_LIMITS.get(highest, 2)
+
+    return {"clones": clones, "count": len(clones), "limit": limit, "tier": highest}
 
 
 @app.get("/clones/{handle}")
@@ -397,7 +483,9 @@ async def get_clone_by_handle(
 
     row = await session.execute(
         sql_text("""
-            SELECT clone_id, display_name, handle, access_mode, allowed_emails
+            SELECT clone_id, display_name, handle, access_mode, allowed_emails,
+                   avatar_url, listing_banner_url, is_listed, listing_title,
+                   price_per_query, category, listing_description, is_verified
             FROM clone_identity
             WHERE handle = :handle
         """),
@@ -408,11 +496,19 @@ async def get_clone_by_handle(
         raise HTTPException(status_code=404, detail="Clone not found")
 
     return {
-        "clone_id": str(record["clone_id"]),
-        "display_name": record["display_name"],
-        "handle": record["handle"],
-        "access_mode": record["access_mode"],
-        "allowed_emails": record["allowed_emails"] or [],
+        "clone_id":            str(record["clone_id"]),
+        "display_name":        record["display_name"],
+        "handle":              record["handle"],
+        "access_mode":         record["access_mode"],
+        "allowed_emails":      record["allowed_emails"] or [],
+        "is_listed":           bool(record["is_listed"]),
+        "listing_title":       record["listing_title"],
+        "listing_description": record["listing_description"],
+        "price_per_query":     float(record["price_per_query"] or 0),
+        "category":            record["category"],
+        "is_verified":         bool(record["is_verified"]),
+        "avatar_url":          record["avatar_url"],
+        "listing_banner_url":  record["listing_banner_url"],
     }
 
 
@@ -424,7 +520,12 @@ async def update_clone(
 ) -> dict:
     """Update clone fields (access_mode, display_name). Caller must be owner (enforced by Next.js proxy)."""
 
-    allowed = {"access_mode", "display_name", "allowed_emails", "is_onboarding_resource", "expertise_tags"}
+    allowed = {
+        "access_mode", "display_name", "allowed_emails",
+        "is_onboarding_resource", "expertise_tags",
+        # Marketplace fields
+        "is_listed", "listing_title", "price_per_query", "category", "listing_description", "listing_banner_url", "avatar_url",
+    }
     updates = {k: v for k, v in body.items() if k in allowed}
     if not updates:
         raise HTTPException(status_code=422, detail="No valid fields to update")
@@ -454,7 +555,1257 @@ async def update_clone(
         updates_exec,
     )
     await session.commit()
-    return {"status": "updated"}
+
+    # Return the updated record so callers don't need a second fetch
+    updated_row = await session.execute(
+        sql_text("""
+            SELECT clone_id, display_name, handle, access_mode, allowed_emails,
+                   avatar_url, listing_banner_url, is_listed, listing_title,
+                   price_per_query, category, listing_description, is_verified
+            FROM clone_identity WHERE handle = :handle
+        """),
+        {"handle": handle},
+    )
+    rec = updated_row.mappings().first()
+    if not rec:
+        return {"status": "updated"}
+    return {
+        "clone_id":            str(rec["clone_id"]),
+        "display_name":        rec["display_name"],
+        "handle":              rec["handle"],
+        "access_mode":         rec["access_mode"],
+        "allowed_emails":      rec["allowed_emails"] or [],
+        "is_listed":           bool(rec["is_listed"]),
+        "listing_title":       rec["listing_title"],
+        "listing_description": rec["listing_description"],
+        "price_per_query":     float(rec["price_per_query"] or 0),
+        "category":            rec["category"],
+        "is_verified":         bool(rec["is_verified"]),
+        "avatar_url":          rec["avatar_url"],
+        "listing_banner_url":  rec["listing_banner_url"],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Consumer Brain — personal knowledge store for consumers
+# ---------------------------------------------------------------------------
+
+@app.post("/consumer/brain")
+async def consumer_brain_ingest(
+    body: dict,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Store a memory in the consumer's personal brain."""
+    consumer_user_id = request.headers.get("X-User-Id")
+    if not consumer_user_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    content = body.get("content", "").strip()
+    if not content:
+        raise HTTPException(status_code=422, detail="content required")
+    category = body.get("category", "background")
+
+    from doppel.brain.db.vector import embed_batch
+    embeddings = await embed_batch([content])
+    vec_literal = "[" + ",".join(str(v) for v in embeddings[0]) + "]"
+
+    result = await session.execute(
+        sql_text("""
+            INSERT INTO consumer_memory (consumer_user_id, content, embedding, category)
+            VALUES (:uid, :content, :emb::vector, :category)
+            RETURNING id, created_at
+        """),
+        {"uid": consumer_user_id, "content": content, "emb": vec_literal, "category": category},
+    )
+    row = result.mappings().first()
+    await session.commit()
+    return {"id": str(row["id"]), "created_at": row["created_at"].isoformat()}
+
+
+@app.get("/consumer/brain")
+async def consumer_brain_list(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """List all memories in the consumer's personal brain."""
+    consumer_user_id = request.headers.get("X-User-Id")
+    if not consumer_user_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    rows = await session.execute(
+        sql_text("""
+            SELECT id, content, category, source, created_at
+            FROM consumer_memory
+            WHERE consumer_user_id = :uid
+            ORDER BY created_at DESC
+        """),
+        {"uid": consumer_user_id},
+    )
+    memories = [
+        {
+            "id": str(r["id"]),
+            "content": r["content"],
+            "category": r["category"],
+            "source": r["source"],
+            "created_at": r["created_at"].isoformat(),
+        }
+        for r in rows.mappings()
+    ]
+    return {"memories": memories}
+
+
+@app.delete("/consumer/brain/{memory_id}")
+async def consumer_brain_delete(
+    memory_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Delete a memory from the consumer's brain."""
+    consumer_user_id = request.headers.get("X-User-Id")
+    if not consumer_user_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    await session.execute(
+        sql_text("DELETE FROM consumer_memory WHERE id = :mid AND consumer_user_id = :uid"),
+        {"mid": memory_id, "uid": consumer_user_id},
+    )
+    await session.commit()
+    return {"ok": True}
+
+
+@app.post("/consumer/brain/upload")
+async def consumer_brain_upload(
+    request: Request,
+    file: UploadFile = File(...),
+    category: str = Form(default="background"),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Upload a document (PDF/DOCX/PPTX/TXT/CSV/MD) and chunk it into consumer memories."""
+    consumer_user_id = request.headers.get("X-User-Id")
+    if not consumer_user_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    raw = await file.read()
+    fname = (file.filename or "").lower()
+
+    # ---- text extraction by file type ----
+    if fname.endswith(".pdf"):
+        import io as _io
+        from pypdf import PdfReader
+        reader = PdfReader(_io.BytesIO(raw))
+        text = "\n".join(page.extract_text() or "" for page in reader.pages)
+    elif fname.endswith(".docx"):
+        import io as _io
+        from docx import Document
+        doc = Document(_io.BytesIO(raw))
+        text = "\n".join(p.text for p in doc.paragraphs)
+    elif fname.endswith(".pptx"):
+        import io as _io
+        from pptx import Presentation
+        prs = Presentation(_io.BytesIO(raw))
+        parts = []
+        for slide in prs.slides:
+            for shape in slide.shapes:
+                if hasattr(shape, "text") and shape.text.strip():
+                    parts.append(shape.text.strip())
+        text = "\n".join(parts)
+    elif fname.endswith(".csv"):
+        import io as _io
+        text = raw.decode("utf-8", errors="replace")
+    else:
+        # .txt, .md, and any other text-based formats
+        text = raw.decode("utf-8", errors="replace")
+
+    text = text.strip()
+    if not text:
+        raise HTTPException(status_code=422, detail="Could not extract any text from this file")
+
+    # ---- chunk into ~400-char segments with 80-char overlap ----
+    chunk_size = 400
+    overlap = 80
+    chunks: list[str] = []
+    start = 0
+    while start < len(text):
+        end = start + chunk_size
+        chunk = text[start:end].strip()
+        if chunk:
+            chunks.append(chunk)
+        start = end - overlap
+    if not chunks:
+        raise HTTPException(status_code=422, detail="No content to store")
+
+    # ---- embed + insert all chunks ----
+    from doppel.brain.db.vector import embed_batch
+    embeddings = await embed_batch(chunks)
+    source_tag = f"document:{file.filename or 'upload'}"
+
+    count = 0
+    for chunk_text, emb in zip(chunks, embeddings):
+        vec_literal = "[" + ",".join(str(v) for v in emb) + "]"
+        await session.execute(
+            sql_text("""
+                INSERT INTO consumer_memory (consumer_user_id, content, embedding, category, source)
+                VALUES (:uid, :content, :emb::vector, :category, :source)
+            """),
+            {"uid": consumer_user_id, "content": chunk_text, "emb": vec_literal,
+             "category": category, "source": source_tag},
+        )
+        count += 1
+
+    await session.commit()
+    return {"chunks_stored": count, "filename": file.filename}
+
+
+@app.post("/consumer/voice/synthesize")
+async def consumer_voice_synthesize(body: dict, request: Request) -> StreamingResponse:
+    """Stream ElevenLabs TTS audio for a clone's response text."""
+    text = body.get("text", "").strip()
+    clone_id = body.get("clone_id", "")
+    if not text:
+        raise HTTPException(status_code=422, detail="text required")
+
+    from doppel.brain.context import get_elevenlabs_key
+    api_key = get_elevenlabs_key()
+    if not api_key:
+        raise HTTPException(status_code=503, detail="Voice synthesis not configured")
+
+    # Per-clone voice_id if set, else a neutral default
+    voice_id = "21m00Tcm4TlvDq8ikWAM"  # ElevenLabs "Rachel" — neutral, clear
+    if clone_id:
+        async with AsyncSessionLocal() as _s:
+            rec = await _s.execute(
+                sql_text("SELECT elevenlabs_voice_id FROM clone_identity WHERE clone_id = :cid"),
+                {"cid": str(clone_id)},
+            )
+            row = rec.mappings().first()
+            if row and row.get("elevenlabs_voice_id"):
+                voice_id = row["elevenlabs_voice_id"]
+
+    async def _stream():
+        async with httpx.AsyncClient(timeout=60) as client:
+            async with client.stream(
+                "POST",
+                f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}/stream",
+                headers={"xi-api-key": api_key, "Content-Type": "application/json"},
+                json={
+                    "text": text,
+                    "model_id": "eleven_multilingual_v2",
+                    "voice_settings": {"stability": 0.5, "similarity_boost": 0.75},
+                },
+            ) as resp:
+                if resp.status_code != 200:
+                    return
+                async for chunk in resp.aiter_bytes(chunk_size=4096):
+                    yield chunk
+
+    return StreamingResponse(_stream(), media_type="audio/mpeg")
+
+
+@app.post("/consumer/interview/questions")
+async def consumer_interview_questions(
+    body: dict,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Generate interview questions the clone will ask to onboard this consumer."""
+    clone_id = body.get("clone_id", "").strip()
+    if not clone_id:
+        raise HTTPException(status_code=422, detail="clone_id required")
+
+    rec = await session.execute(
+        sql_text("""
+            SELECT display_name, category, listing_description
+            FROM clone_identity WHERE clone_id = :cid
+        """),
+        {"cid": clone_id},
+    )
+    clone = rec.mappings().first()
+    if not clone:
+        raise HTTPException(status_code=404, detail="Clone not found")
+
+    await load_clone_keys(session, clone_id)
+    import anthropic as _anth
+    from doppel.brain.context import get_anthropic_key
+    client = _anth.AsyncAnthropic(api_key=get_anthropic_key())
+
+    domain_hint = " ".join(filter(None, [clone.get("category"), clone.get("listing_description")]))
+    if not domain_hint:
+        domain_hint = "their area of expertise"
+
+    prompt = f"""You are {clone['display_name']}, a specialist known for: {domain_hint}
+
+Before answering questions, you interview the person to calibrate every future answer to them specifically.
+
+Generate exactly 5 interview questions. Each question should reveal something that would fundamentally change how you answer: their level, their context, their specific situation, what they've tried, and what they actually want.
+
+Return ONLY valid JSON — a list of 5 objects:
+[
+  {{"question": "...", "category": "background"}},
+  {{"question": "...", "category": "goal"}},
+  {{"question": "...", "category": "experience"}},
+  {{"question": "...", "category": "preference"}},
+  {{"question": "...", "category": "expertise"}}
+]
+
+Categories must be one of: background, goal, experience, preference, expertise
+Questions must be specific to your domain — not generic. No preamble, no explanation, JSON only."""
+
+    resp = await client.messages.create(
+        model=settings.classification_model,
+        max_tokens=700,
+        messages=[{"role": "user", "content": prompt}],
+    )
+
+    import json as _json
+    text = resp.content[0].text.strip()
+    start, end = text.find("["), text.rfind("]") + 1
+    questions = _json.loads(text[start:end])
+
+    return {"questions": questions, "clone_name": clone["display_name"]}
+
+
+@app.post("/consumer/interview/save")
+async def consumer_interview_save(
+    body: dict,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Store interview answers as consumer brain memories."""
+    consumer_user_id = request.headers.get("X-User-Id")
+    if not consumer_user_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    answers = body.get("answers", [])  # [{question, answer, category}]
+    if not answers:
+        raise HTTPException(status_code=422, detail="answers required")
+
+    from doppel.brain.db.vector import embed_batch
+
+    valid = [(a["answer"].strip(), a.get("category", "background"))
+             for a in answers if a.get("answer", "").strip()]
+    if not valid:
+        return {"saved": 0}
+
+    texts = [v[0] for v in valid]
+    embeddings = await embed_batch(texts)
+
+    for (content, category), emb in zip(valid, embeddings):
+        vec = "[" + ",".join(str(v) for v in emb) + "]"
+        await session.execute(
+            sql_text("""
+                INSERT INTO consumer_memory (consumer_user_id, content, embedding, category, source)
+                VALUES (:uid, :content, :emb::vector, :cat, 'interview')
+            """),
+            {"uid": consumer_user_id, "content": content, "emb": vec, "cat": category},
+        )
+
+    await session.commit()
+    return {"saved": len(valid)}
+
+
+@app.post("/consumer/teaching/plan")
+async def consumer_teaching_plan(
+    body: dict,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Generate a personalised 5-lesson curriculum for this consumer from this clone."""
+    consumer_user_id = request.headers.get("X-User-Id")
+    clone_id = body.get("clone_id", "").strip()
+    if not clone_id:
+        raise HTTPException(status_code=422, detail="clone_id required")
+
+    rec = await session.execute(
+        sql_text("SELECT display_name, category, listing_description FROM clone_identity WHERE clone_id = :cid"),
+        {"cid": clone_id},
+    )
+    clone = rec.mappings().first()
+    if not clone:
+        raise HTTPException(status_code=404, detail="Clone not found")
+
+    # Pull clone's actual semantic knowledge to ground the curriculum
+    clone_knowledge: list[str] = []
+    rows_sm = await session.execute(
+        sql_text("""
+            SELECT fact, domain, confidence FROM semantic_memory
+            WHERE clone_id = :cid
+            ORDER BY confidence DESC, created_at DESC
+            LIMIT 30
+        """),
+        {"cid": clone_id},
+    )
+    clone_knowledge = [
+        f"[{r['domain'] or 'general'}] {r['fact']}"
+        for r in rows_sm.mappings()
+    ]
+
+    # Read consumer brain for calibration
+    consumer_mems: list[str] = []
+    if consumer_user_id:
+        rows = await session.execute(
+            sql_text("SELECT content, category FROM consumer_memory WHERE consumer_user_id = :uid ORDER BY created_at DESC LIMIT 20"),
+            {"uid": consumer_user_id},
+        )
+        consumer_mems = [f"[{r['category']}] {r['content']}" for r in rows.mappings()]
+
+    consumer_profile = "\n".join(consumer_mems) if consumer_mems else "No background known yet."
+
+    await load_clone_keys(session, clone_id)
+    import anthropic as _anth
+    from doppel.brain.context import get_anthropic_key
+    client = _anth.AsyncAnthropic(api_key=get_anthropic_key())
+
+    domain = " — ".join(filter(None, [clone.get("category"), clone.get("listing_description")])) or "their expertise"
+    knowledge_section = "\n".join(clone_knowledge) if clone_knowledge else f"Specialist in: {domain}"
+
+    prompt = f"""You are {clone['display_name']}. This is what you know deeply — your actual knowledge and expertise:
+
+{knowledge_section}
+
+About the student you are teaching:
+{consumer_profile}
+
+Design a 5-lesson curriculum drawn specifically from YOUR knowledge above.
+Each lesson should teach something concrete you actually know. Build progressively.
+Calibrate difficulty to where the student is — start simple if no background is known.
+
+Return ONLY valid JSON — a list of exactly 5 objects:
+[
+  {{"title": "...", "description": "One-sentence: what they will learn and be able to do", "difficulty": "beginner|intermediate|advanced"}},
+  ...
+]
+No preamble. JSON only."""
+
+    resp = await client.messages.create(
+        model=settings.classification_model,
+        max_tokens=800,
+        messages=[{"role": "user", "content": prompt}],
+    )
+
+    import json as _json
+    text = resp.content[0].text.strip()
+    start, end = text.find("["), text.rfind("]") + 1
+    lessons = _json.loads(text[start:end])
+    return {"lessons": lessons, "clone_name": clone["display_name"]}
+
+
+@app.post("/marketplace/match")
+async def marketplace_match(
+    body: dict,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Find the best-matched public clones for a specific question."""
+    question = body.get("question", "").strip()
+    if not question:
+        raise HTTPException(status_code=422, detail="question required")
+
+    from doppel.brain.db.vector import embed_batch
+    embeddings = await embed_batch([question])
+    vec = "[" + ",".join(str(v) for v in embeddings[0]) + "]"
+
+    rows = await session.execute(
+        sql_text("""
+            SELECT
+                ci.clone_id,
+                ci.display_name,
+                ci.handle,
+                ci.category,
+                ci.listing_description,
+                MAX(1 - (em.embedding <=> :emb::vector)) AS score,
+                (SELECT em2.content FROM episodic_memory em2
+                 WHERE em2.clone_id = ci.clone_id
+                 ORDER BY em2.embedding <=> :emb::vector
+                 LIMIT 1) AS top_snippet
+            FROM episodic_memory em
+            JOIN clone_identity ci ON em.clone_id = ci.clone_id
+            WHERE ci.access_mode = 'public'
+              AND ci.handle IS NOT NULL
+            GROUP BY ci.clone_id, ci.display_name, ci.handle, ci.category, ci.listing_description
+            ORDER BY score DESC
+            LIMIT 6
+        """),
+        {"emb": vec},
+    )
+    results = [
+        {
+            "clone_id": str(r["clone_id"]),
+            "name": r["display_name"],
+            "handle": r["handle"],
+            "category": r["category"] or "",
+            "description": (r["listing_description"] or "")[:180],
+            "score": round(float(r["score"]), 3),
+            "snippet": (r["top_snippet"] or "")[:140],
+        }
+        for r in rows.mappings()
+        if r["score"] and float(r["score"]) > 0.25
+    ]
+    return {"matches": results}
+
+
+@app.get("/consumer/conversations")
+async def get_consumer_conversations(
+    caller_user_id: str = Query(...),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Return clones in the user's home messages.
+
+    UNION of:
+      A) Clones explicitly added via consumer_clones (with last message info if any)
+      B) Clones chatted with but not yet in consumer_clones (legacy / fallback)
+
+    Sorted: most-recently-messaged first, then most-recently-added.
+    """
+    rows = await session.execute(
+        sql_text("""
+            WITH chat_history AS (
+                SELECT DISTINCT ON (rt.clone_id)
+                    rt.clone_id,
+                    rt.session_id,
+                    rt.created_at            AS last_message_at,
+                    rt.brain_input->>'message' AS last_user_message
+                FROM reasoning_traces rt
+                WHERE rt.brain_input->>'sender_id' = :uid
+                ORDER BY rt.clone_id, rt.created_at DESC
+            ),
+            added AS (
+                SELECT cc.clone_id, cc.added_at
+                FROM consumer_clones cc
+                WHERE cc.consumer_user_id = :uid
+            ),
+            combined AS (
+                -- Added clones (with optional chat history)
+                SELECT
+                    ci.clone_id,
+                    COALESCE(ch.session_id, uuid_generate_v4()) AS session_id,
+                    ch.last_message_at,
+                    ch.last_user_message,
+                    ci.display_name, ci.handle, ci.avatar_url, ci.category,
+                    COALESCE(ci.price_per_query, 0) AS price_per_query,
+                    COALESCE(ch.last_message_at, a.added_at) AS sort_key
+                FROM added a
+                JOIN clone_identity ci ON ci.clone_id = a.clone_id
+                LEFT JOIN chat_history ch ON ch.clone_id = a.clone_id
+
+                UNION
+
+                -- Chats with clones not explicitly added (legacy)
+                SELECT
+                    ci.clone_id,
+                    ch.session_id,
+                    ch.last_message_at,
+                    ch.last_user_message,
+                    ci.display_name, ci.handle, ci.avatar_url, ci.category,
+                    COALESCE(ci.price_per_query, 0) AS price_per_query,
+                    ch.last_message_at AS sort_key
+                FROM chat_history ch
+                JOIN clone_identity ci ON ci.clone_id = ch.clone_id
+                WHERE ch.clone_id NOT IN (SELECT clone_id FROM added)
+            )
+            SELECT DISTINCT ON (clone_id)
+                clone_id, session_id, last_message_at, last_user_message,
+                display_name, handle, avatar_url, category, price_per_query, sort_key
+            FROM combined
+            ORDER BY clone_id, sort_key DESC NULLS LAST
+        """),
+        {"uid": caller_user_id},
+    )
+    # Second sort: overall by sort_key desc
+    convs = []
+    for r in rows.mappings():
+        convs.append({
+            "clone_id":          str(r["clone_id"]),
+            "session_id":        str(r["session_id"]),
+            "last_message_at":   r["last_message_at"].isoformat() if r["last_message_at"] else None,
+            "last_user_message": r["last_user_message"],
+            "display_name":      r["display_name"],
+            "handle":            r["handle"],
+            "avatar_url":        r["avatar_url"],
+            "category":          r["category"],
+            "price_per_query":   float(r["price_per_query"] or 0),
+        })
+    convs.sort(key=lambda c: c["last_message_at"] or "", reverse=True)
+    return {"conversations": convs}
+
+
+@app.post("/clones/{handle}/add", status_code=200)
+async def add_clone_to_messages(
+    handle: str,
+    caller_user_id: str = Query(...),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Add a clone to the caller's home messages list."""
+    row = await session.execute(
+        sql_text("SELECT clone_id, display_name, access_mode, allowed_emails FROM clone_identity WHERE handle = :h"),
+        {"h": handle},
+    )
+    record = row.mappings().first()
+    if not record:
+        raise HTTPException(status_code=404, detail="Clone not found")
+
+    # Respect access restrictions
+    if record["access_mode"] == "private":
+        raise HTTPException(status_code=403, detail="This clone is private")
+    if record["access_mode"] == "allowlist":
+        # caller_user_id is a Clerk user ID — can't check email here without extra lookup
+        # Allowlist enforcement happens at chat time; allow add for now
+        pass
+
+    await session.execute(
+        sql_text("""
+            INSERT INTO consumer_clones (clone_id, consumer_user_id)
+            VALUES (:cid, :uid)
+            ON CONFLICT (clone_id, consumer_user_id) DO NOTHING
+        """),
+        {"cid": record["clone_id"], "uid": caller_user_id},
+    )
+    await session.commit()
+    return {"ok": True, "clone_id": str(record["clone_id"]), "display_name": record["display_name"]}
+
+
+@app.delete("/clones/{handle}/add", status_code=200)
+async def remove_clone_from_messages(
+    handle: str,
+    caller_user_id: str = Query(...),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Remove a clone from the caller's home messages list."""
+    row = await session.execute(
+        sql_text("SELECT clone_id FROM clone_identity WHERE handle = :h"),
+        {"h": handle},
+    )
+    record = row.mappings().first()
+    if not record:
+        raise HTTPException(status_code=404, detail="Clone not found")
+
+    await session.execute(
+        sql_text("DELETE FROM consumer_clones WHERE clone_id = :cid AND consumer_user_id = :uid"),
+        {"cid": record["clone_id"], "uid": caller_user_id},
+    )
+    await session.commit()
+    return {"ok": True}
+
+
+@app.get("/clones/{handle}/my-profile")
+async def get_consumer_profile(
+    handle: str,
+    caller_user_id: str = Query(...),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Return what this clone knows about the calling consumer."""
+    cid_row = await session.execute(
+        sql_text("SELECT clone_id FROM clone_identity WHERE handle = :h"), {"h": handle}
+    )
+    cid_rec = cid_row.mappings().first()
+    if not cid_rec:
+        raise HTTPException(status_code=404, detail="Clone not found")
+
+    row = await session.execute(
+        sql_text("""
+            SELECT summary, total_sessions, total_messages, first_session_at, last_session_at
+            FROM consumer_profiles WHERE clone_id = :cid AND consumer_user_id = :uid
+        """),
+        {"cid": str(cid_rec["clone_id"]), "uid": caller_user_id},
+    )
+    rec = row.mappings().first()
+    if not rec:
+        return {"exists": False}
+    result = dict(rec)
+    for k in ("first_session_at", "last_session_at"):
+        if result.get(k):
+            result[k] = result[k].isoformat()
+    result["exists"] = True
+    return result
+
+
+@app.delete("/clones/{handle}/my-profile")
+async def delete_consumer_profile(
+    handle: str,
+    caller_user_id: str = Query(...),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Delete the consumer's profile for this clone (GDPR erasure)."""
+    cid_row = await session.execute(
+        sql_text("SELECT clone_id FROM clone_identity WHERE handle = :h"), {"h": handle}
+    )
+    cid_rec = cid_row.mappings().first()
+    if not cid_rec:
+        raise HTTPException(status_code=404, detail="Clone not found")
+
+    await session.execute(
+        sql_text("DELETE FROM consumer_profiles WHERE clone_id = :cid AND consumer_user_id = :uid"),
+        {"cid": str(cid_rec["clone_id"]), "uid": caller_user_id},
+    )
+    await session.commit()
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Marketplace
+# ---------------------------------------------------------------------------
+
+_MARKETPLACE_CATEGORIES = {
+    "business", "engineering", "design", "marketing", "finance",
+    "legal", "healthcare", "education", "science", "other",
+}
+
+
+@app.get("/marketplace")
+async def list_marketplace(
+    category: str | None = Query(default=None),
+    limit: int = Query(default=24, le=100),
+    offset: int = Query(default=0, ge=0),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Return listed clones available in the marketplace."""
+    cat_filter = "AND ci.category = :category" if category else ""
+    params: dict = {"limit": limit, "offset": offset}
+    if category:
+        params["category"] = category
+
+    rows = await session.execute(
+        sql_text(f"""
+            SELECT
+                ci.clone_id, ci.display_name,
+                COALESCE(ci.listing_title, ci.display_name) AS listing_title,
+                ci.handle, ci.category,
+                ci.listing_description, ci.price_per_query, ci.total_queries,
+                ci.total_earnings_usd,
+                COALESCE(ci.is_verified, FALSE) AS is_verified,
+                ci.avatar_url, ci.listing_banner_url,
+                COALESCE(AVG(cr.rating), 0)::FLOAT AS avg_rating,
+                COUNT(cr.id)::INT                   AS rating_count,
+                (SELECT COUNT(*) FROM episodic_memory em WHERE em.clone_id = ci.clone_id) AS memory_chunks
+            FROM clone_identity ci
+            LEFT JOIN clone_ratings cr ON cr.clone_id = ci.clone_id
+            WHERE ci.is_listed = TRUE AND ci.access_mode = 'public'
+            {cat_filter}
+            GROUP BY ci.clone_id
+            ORDER BY ci.total_queries DESC, avg_rating DESC
+            LIMIT :limit OFFSET :offset
+        """),
+        params,
+    )
+    clones = []
+    for row in rows.mappings():
+        r = dict(row)
+        r["clone_id"] = str(r["clone_id"])
+        r["price_per_query"] = float(r["price_per_query"])
+        r["total_earnings_usd"] = float(r["total_earnings_usd"])
+        clones.append(r)
+    return {"clones": clones, "offset": offset, "limit": limit}
+
+
+@app.get("/marketplace/bundles")
+async def list_marketplace_bundles(
+    clone_id: str | None = Query(None),
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Consumer: list published knowledge bundles."""
+    where = "WHERE kb.is_published = TRUE"
+    params: dict = {"limit": limit, "offset": offset}
+    if clone_id:
+        where += " AND kb.clone_id = :clone_id"
+        params["clone_id"] = clone_id
+
+    rows = await session.execute(
+        sql_text(f"""
+            SELECT kb.id, kb.title, kb.description, kb.price_usd, kb.queries_included, kb.created_at,
+                   ci.display_name AS creator_name, ci.handle AS creator_handle,
+                   COUNT(DISTINCT bcm.clone_id) AS clone_count
+            FROM knowledge_bundles kb
+            JOIN clone_identity ci ON ci.clone_id = kb.clone_id
+            LEFT JOIN bundle_clone_members bcm ON bcm.bundle_id = kb.id
+            {where}
+            GROUP BY kb.id, ci.display_name, ci.handle
+            ORDER BY kb.created_at DESC
+            LIMIT :limit OFFSET :offset
+        """),
+        params,
+    )
+    bundles = [dict(r) for r in rows.mappings().all()]
+    for b in bundles:
+        b["price_usd"] = float(b["price_usd"])
+    return {"bundles": bundles}
+
+
+@app.get("/marketplace/bundles/{bundle_id}")
+async def get_marketplace_bundle(
+    bundle_id: str,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Consumer: get bundle detail including member clones."""
+    row = await session.execute(
+        sql_text("""
+            SELECT kb.id, kb.title, kb.description, kb.price_usd, kb.queries_included,
+                   kb.is_published, ci.display_name AS creator_name, ci.handle AS creator_handle
+            FROM knowledge_bundles kb
+            JOIN clone_identity ci ON ci.clone_id = kb.clone_id
+            WHERE kb.id = :bid AND kb.is_published = TRUE
+        """),
+        {"bid": bundle_id},
+    )
+    rec = row.mappings().first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Bundle not found")
+
+    clones_row = await session.execute(
+        sql_text("""
+            SELECT ci.clone_id, ci.display_name, ci.handle, ci.category,
+                   ci.total_queries, ci.is_verified,
+                   COALESCE(AVG(cr.rating), 0) AS avg_rating,
+                   COUNT(cr.id) AS rating_count
+            FROM bundle_clone_members bcm
+            JOIN clone_identity ci ON ci.clone_id = bcm.clone_id
+            LEFT JOIN clone_ratings cr ON cr.clone_id = ci.clone_id
+            WHERE bcm.bundle_id = :bid
+            GROUP BY ci.clone_id, bcm.position
+            ORDER BY bcm.position
+        """),
+        {"bid": bundle_id},
+    )
+    clones = [dict(r) for r in clones_row.mappings().all()]
+    for c in clones:
+        c["avg_rating"] = float(c["avg_rating"])
+        c["total_queries"] = int(c["total_queries"])
+
+    result = dict(rec)
+    result["price_usd"] = float(result["price_usd"])
+    result["clones"] = clones
+    return result
+
+
+@app.get("/marketplace/consumer-bundles")
+async def list_marketplace_consumer_bundles(
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """List public consumer bundles for the marketplace."""
+    rows = await session.execute(
+        sql_text("""
+            SELECT cb.id, cb.user_id, cb.title, cb.description, cb.price_usd, cb.created_at,
+                   COUNT(cbi.id) AS item_count,
+                   COUNT(cbp.id) AS purchase_count
+            FROM consumer_bundles cb
+            LEFT JOIN consumer_bundle_items cbi ON cbi.bundle_id = cb.id AND cbi.status = 'ready'
+            LEFT JOIN consumer_bundle_purchases cbp ON cbp.bundle_id = cb.id AND cbp.amount_paid IS NOT NULL
+            WHERE cb.is_public = TRUE
+            GROUP BY cb.id
+            ORDER BY cb.created_at DESC
+            LIMIT :limit OFFSET :offset
+        """),
+        {"limit": limit, "offset": offset},
+    )
+    bundles = [dict(r) for r in rows.mappings().all()]
+    for b in bundles:
+        b["price_usd"] = float(b["price_usd"])
+    return {"bundles": bundles}
+
+
+@app.get("/marketplace/{handle}")
+async def get_marketplace_clone(
+    handle: str,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Return detailed profile for a marketplace clone."""
+    row = await session.execute(
+        sql_text("""
+            SELECT
+                ci.clone_id, ci.display_name,
+                COALESCE(ci.listing_title, ci.display_name) AS listing_title,
+                ci.handle, ci.category,
+                ci.listing_description, ci.price_per_query, ci.total_queries,
+                ci.total_earnings_usd, ci.created_at,
+                ci.avatar_url, ci.listing_banner_url,
+                COALESCE(ci.is_verified, FALSE) AS is_verified,
+                ci.verified_at,
+                COALESCE(AVG(cr.rating), 0)::FLOAT AS avg_rating,
+                COUNT(cr.id)::INT                   AS rating_count
+            FROM clone_identity ci
+            LEFT JOIN clone_ratings cr ON cr.clone_id = ci.clone_id
+            WHERE ci.handle = :handle AND ci.is_listed = TRUE AND ci.access_mode = 'public'
+            GROUP BY ci.clone_id
+        """),
+        {"handle": handle},
+    )
+    record = row.mappings().first()
+    if not record:
+        raise HTTPException(status_code=404, detail="Clone not found in marketplace")
+
+    clone_id = record["clone_id"]
+
+    # Memory stats
+    mem_row = await session.execute(
+        sql_text("""
+            SELECT
+                (SELECT COUNT(*) FROM episodic_memory  WHERE clone_id = :cid) AS episodic,
+                (SELECT COUNT(*) FROM semantic_memory   WHERE clone_id = :cid) AS semantic,
+                (SELECT COUNT(*) FROM procedural_memory WHERE clone_id = :cid) AS procedural
+        """),
+        {"cid": str(clone_id)},
+    )
+    mem = dict(mem_row.mappings().first() or {})
+
+    # Recent ratings
+    ratings_rows = await session.execute(
+        sql_text("""
+            SELECT rating, review_text, created_at
+            FROM clone_ratings
+            WHERE clone_id = :cid
+            ORDER BY created_at DESC LIMIT 10
+        """),
+        {"cid": str(clone_id)},
+    )
+    ratings = []
+    for r in ratings_rows.mappings():
+        rr = dict(r)
+        if rr.get("created_at"):
+            rr["created_at"] = rr["created_at"].isoformat()
+        ratings.append(rr)
+
+    result = dict(record)
+    result["clone_id"] = str(result["clone_id"])
+    result["price_per_query"] = float(result["price_per_query"])
+    result["total_earnings_usd"] = float(result["total_earnings_usd"])
+    if result.get("created_at"):
+        result["created_at"] = result["created_at"].isoformat()
+    result["memory_stats"] = mem
+    result["recent_ratings"] = ratings
+    if result.get("verified_at"):
+        result["verified_at"] = result["verified_at"].isoformat()
+    return result
+
+
+@app.post("/marketplace/{handle}/rate")
+async def rate_clone(
+    handle: str,
+    body: dict,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Submit or update a rating for a marketplace clone."""
+    caller = request.headers.get("X-User-Id")
+    if not caller:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    rating = body.get("rating")
+    if not isinstance(rating, int) or not (1 <= rating <= 5):
+        raise HTTPException(status_code=422, detail="rating must be 1–5")
+
+    row = await session.execute(
+        sql_text("SELECT clone_id FROM clone_identity WHERE handle = :h AND is_listed = TRUE"),
+        {"h": handle},
+    )
+    record = row.mappings().first()
+    if not record:
+        raise HTTPException(status_code=404, detail="Clone not found")
+
+    await session.execute(
+        sql_text("""
+            INSERT INTO clone_ratings (clone_id, rater_user_id, rating, review_text)
+            VALUES (:cid, :uid, :rating, :review)
+            ON CONFLICT (clone_id, rater_user_id)
+            DO UPDATE SET rating = EXCLUDED.rating, review_text = EXCLUDED.review_text
+        """),
+        {
+            "cid": str(record["clone_id"]),
+            "uid": caller,
+            "rating": rating,
+            "review": body.get("review_text", ""),
+        },
+    )
+    await session.commit()
+    return {"status": "rated"}
+
+
+# ---------------------------------------------------------------------------
+# Credits (pay-to-query)
+# ---------------------------------------------------------------------------
+
+_CREDIT_PACKS = [
+    {"id": "pack_100",  "credits": 100,  "price_usd": 5.00,  "label": "Starter",  "price_id_attr": "stripe_credits_starter_price_id"},
+    {"id": "pack_500",  "credits": 500,  "price_usd": 20.00, "label": "Standard", "price_id_attr": "stripe_credits_standard_price_id"},
+    {"id": "pack_1000", "credits": 1000, "price_usd": 35.00, "label": "Pro",      "price_id_attr": "stripe_credits_pro_price_id"},
+]
+
+
+@app.get("/credits/balance")
+async def get_credits_balance(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    user_id = request.headers.get("X-User-Id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    row = await session.execute(
+        sql_text("SELECT credits_remaining FROM query_credits WHERE user_id = :uid"),
+        {"uid": user_id},
+    )
+    record = row.mappings().first()
+    return {"credits_remaining": record["credits_remaining"] if record else 0}
+
+
+@app.get("/credits/packs")
+async def list_credit_packs() -> dict:
+    return {"packs": _CREDIT_PACKS}
+
+
+@app.post("/credits/payout")
+async def request_payout(
+    body: dict,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """
+    Creator requests a payout of their earned credits.
+    Minimum 500 credits ($25). Records a payout_requests row; ops team processes it.
+    """
+    user_id = request.headers.get("X-User-Id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    clone_id = body.get("clone_id")
+    credits = int(body.get("credits", 0))
+    min_credits = 500
+
+    if credits < min_credits:
+        raise HTTPException(status_code=400, detail=f"Minimum payout is {min_credits} credits")
+
+    # Verify the user owns this clone and has earned enough
+    row = await session.execute(
+        sql_text("SELECT user_id, total_earnings_usd FROM clone_identity WHERE clone_id = :cid"),
+        {"cid": str(clone_id)},
+    )
+    rec = row.mappings().first()
+    if not rec or rec["user_id"] != user_id:
+        raise HTTPException(status_code=403, detail="Not your clone")
+
+    usd_requested = round(credits * 0.05, 2)
+    if usd_requested > float(rec["total_earnings_usd"]):
+        raise HTTPException(status_code=400, detail="Requested amount exceeds earned balance")
+
+    await session.execute(
+        sql_text("""
+            INSERT INTO payout_requests (user_id, clone_id, credits_requested, usd_amount, status, created_at)
+            VALUES (:uid, :cid, :cr, :usd, 'pending', NOW())
+        """),
+        {"uid": user_id, "cid": str(clone_id), "cr": credits, "usd": usd_requested},
+    )
+    await session.commit()
+    return {"status": "pending", "credits": credits, "usd_amount": usd_requested}
+
+
+@app.post("/credits/checkout")
+async def create_credits_checkout(
+    body: dict,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Create a Stripe checkout session to purchase a credit pack."""
+    import stripe as stripe_lib
+
+    user_id = request.headers.get("X-User-Id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    pack_id = body.get("pack_id")
+    pack = next((p for p in _CREDIT_PACKS if p["id"] == pack_id), None)
+    if not pack:
+        raise HTTPException(status_code=422, detail="Invalid pack_id")
+
+    if not settings.stripe_secret_key:
+        raise HTTPException(status_code=503, detail="Payments not configured")
+
+    stripe_lib.api_key = settings.stripe_secret_key
+
+    # Use pre-created Stripe price ID if configured, otherwise build inline price_data
+    stripe_price_id: str = getattr(settings, pack.get("price_id_attr", ""), "")
+    if stripe_price_id:
+        line_item = {"price": stripe_price_id, "quantity": 1}
+    else:
+        price_cents = int(pack["price_usd"] * 100)
+        line_item = {
+            "price_data": {
+                "currency": "usd",
+                "unit_amount": price_cents,
+                "product_data": {
+                    "name": f"Doppel Credits — {pack['label']} ({pack['credits']} queries)",
+                },
+            },
+            "quantity": 1,
+        }
+
+    session_obj = stripe_lib.checkout.Session.create(
+        payment_method_types=["card"],
+        mode="payment",
+        line_items=[line_item],
+        metadata={"user_id": user_id, "credits": str(pack["credits"]), "pack_id": pack_id},
+        success_url=f"{settings.app_url}/dashboard/credits?success=1",
+        cancel_url=f"{settings.app_url}/dashboard/credits?cancelled=1",
+    )
+
+    # Record pending session
+    await session.execute(
+        sql_text("""
+            INSERT INTO stripe_credit_sessions (user_id, stripe_session_id, credits, status)
+            VALUES (:uid, :sid, :credits, 'pending')
+        """),
+        {"uid": user_id, "sid": session_obj.id, "credits": pack["credits"]},
+    )
+    await session.commit()
+    return {"checkout_url": session_obj.url}
+
+
+@app.post("/credits/webhook")
+async def stripe_credits_webhook(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Handle Stripe webhook to fulfill purchased credits."""
+    import stripe as stripe_lib
+
+    payload = await request.body()
+    sig = request.headers.get("stripe-signature", "")
+
+    if not settings.stripe_webhook_secret or not settings.stripe_secret_key:
+        raise HTTPException(status_code=503, detail="Payments not configured")
+
+    stripe_lib.api_key = settings.stripe_secret_key
+    try:
+        event = stripe_lib.Webhook.construct_event(payload, sig, settings.stripe_webhook_secret)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid webhook signature")
+
+    if event["type"] == "checkout.session.completed":
+        stripe_session = event["data"]["object"]
+        metadata = stripe_session.get("metadata", {})
+        user_id = metadata.get("user_id")
+        credits = int(metadata.get("credits", 0))
+        stripe_session_id = stripe_session["id"]
+
+        payment_type = metadata.get("type", "credits")
+
+        if payment_type == "bundle":
+            bundle_id = metadata.get("bundle_id")
+            if bundle_id and user_id:
+                amount_paid = float(metadata.get("amount", 0))
+                # Set queries_remaining from bundle's queries_included
+                qi_row = await session.execute(
+                    sql_text("SELECT queries_included FROM knowledge_bundles WHERE id = :bid"),
+                    {"bid": bundle_id},
+                )
+                qi_rec = qi_row.mappings().first()
+                queries_included = int(qi_rec["queries_included"]) if qi_rec else 0
+                await session.execute(
+                    sql_text("""
+                        UPDATE bundle_purchases
+                        SET amount_paid = :amount, stripe_session_id = :sid,
+                            queries_remaining = :qi
+                        WHERE bundle_id = :bid AND user_id = :uid
+                    """),
+                    {"amount": amount_paid, "sid": stripe_session_id, "bid": bundle_id, "uid": user_id, "qi": queries_included},
+                )
+                # 80% to creator
+                if amount_paid > 0:
+                    await session.execute(
+                        sql_text("""
+                            UPDATE clone_identity ci
+                            SET total_earnings_usd = total_earnings_usd + :earn
+                            FROM knowledge_bundles kb
+                            WHERE kb.id = :bid AND ci.clone_id = kb.clone_id
+                        """),
+                        {"earn": amount_paid * 0.80, "bid": bundle_id},
+                    )
+                await session.commit()
+        elif payment_type == "consumer_bundle":
+            bundle_id = metadata.get("bundle_id")
+            if bundle_id and user_id:
+                amount_paid = float(metadata.get("amount", 0))
+                await session.execute(
+                    sql_text("""
+                        UPDATE consumer_bundle_purchases
+                        SET amount_paid = :amount, stripe_session_id = :sid
+                        WHERE bundle_id = :bid AND user_id = :uid
+                    """),
+                    {"amount": amount_paid, "sid": stripe_session_id, "bid": bundle_id, "uid": user_id},
+                )
+                await session.commit()
+        elif user_id and credits > 0:
+            # Mark session complete
+            await session.execute(
+                sql_text("UPDATE stripe_credit_sessions SET status='complete' WHERE stripe_session_id=:sid"),
+                {"sid": stripe_session_id},
+            )
+            # Upsert credits balance
+            await session.execute(
+                sql_text("""
+                    INSERT INTO query_credits (user_id, credits_remaining, updated_at)
+                    VALUES (:uid, :credits, NOW())
+                    ON CONFLICT (user_id)
+                    DO UPDATE SET credits_remaining = query_credits.credits_remaining + :credits,
+                                  updated_at = NOW()
+                """),
+                {"uid": user_id, "credits": credits},
+            )
+            await session.commit()
+
+    return {"received": True}
+
+
+# ---------------------------------------------------------------------------
+# Creator earnings
+# ---------------------------------------------------------------------------
+
+@app.get("/dashboard/earnings")
+async def get_earnings(
+    clone_id: UUID = Query(...),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Return earnings and query volume stats for a clone creator."""
+    row = await session.execute(
+        sql_text("""
+            SELECT display_name, total_queries, total_earnings_usd, price_per_query, is_listed
+            FROM clone_identity WHERE clone_id = :cid
+        """),
+        {"cid": str(clone_id)},
+    )
+    record = row.mappings().first()
+    if not record:
+        raise HTTPException(status_code=404, detail="Clone not found")
+
+    # Query volume over time (last 30 days)
+    timeline_rows = await session.execute(
+        sql_text("""
+            SELECT DATE(created_at) AS day, COUNT(*) AS queries
+            FROM query_transactions
+            WHERE clone_id = :cid AND created_at >= NOW() - INTERVAL '30 days'
+            GROUP BY DATE(created_at)
+            ORDER BY day ASC
+        """),
+        {"cid": str(clone_id)},
+    )
+    timeline = [{"day": str(r["day"]), "queries": r["queries"]} for r in timeline_rows.mappings()]
+
+    # Ratings summary
+    rating_row = await session.execute(
+        sql_text("""
+            SELECT COALESCE(AVG(rating), 0)::FLOAT AS avg_rating, COUNT(*)::INT AS count
+            FROM clone_ratings WHERE clone_id = :cid
+        """),
+        {"cid": str(clone_id)},
+    )
+    rating_rec = dict(rating_row.mappings().first() or {})
+
+    return {
+        "display_name": record["display_name"],
+        "is_listed": record["is_listed"],
+        "total_queries": record["total_queries"],
+        "total_earnings_usd": float(record["total_earnings_usd"]),
+        "price_per_query": float(record["price_per_query"]),
+        "avg_rating": rating_rec.get("avg_rating", 0.0),
+        "rating_count": rating_rec.get("count", 0),
+        "query_timeline": timeline,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -597,6 +1948,95 @@ async def chat_stream(
     caller_user_id = request.headers.get("X-User-Id")
     await _check_clone_access(body.clone_id, caller_user_id, None, session)
     await _check_rate_limit(body.clone_id, session)
+
+    # Credit deduction (mirrors /brain/chat — must happen before streaming starts)
+    price_row = await session.execute(
+        sql_text("SELECT user_id, price_per_query, is_listed FROM clone_identity WHERE clone_id = :cid"),
+        {"cid": str(body.clone_id)},
+    )
+    price_rec = price_row.mappings().first()
+    caller_is_owner = bool(caller_user_id and price_rec and caller_user_id == price_rec["user_id"])
+    # Deduct credits when price > 0 AND (caller is not the owner, OR owner is testing as consumer)
+    is_paid = (
+        price_rec
+        and float(price_rec["price_per_query"]) > 0
+        and not (caller_is_owner and body.owner_mode)
+    )
+    if is_paid:
+        if not caller_user_id:
+            raise HTTPException(status_code=401, detail="Login required to query this clone")
+        multiplier = CREDITS_MULTIPLIER.get(body.response_mode, 1)
+        credits_cost = int(float(price_rec["price_per_query"])) * multiplier
+        bal_row = await session.execute(
+            sql_text("SELECT credits_remaining FROM query_credits WHERE user_id = :uid"),
+            {"uid": caller_user_id},
+        )
+        bal_rec = bal_row.mappings().first()
+        if not bal_rec or bal_rec["credits_remaining"] < credits_cost:
+            raise HTTPException(status_code=402, detail=f"Insufficient credits (need {credits_cost})")
+        await session.execute(
+            sql_text("UPDATE query_credits SET credits_remaining = credits_remaining - :cost, updated_at = NOW() WHERE user_id = :uid"),
+            {"cost": credits_cost, "uid": caller_user_id},
+        )
+        await session.execute(
+            sql_text("INSERT INTO query_transactions (user_id, clone_id, credits_used, response_mode) VALUES (:uid, :cid, :cost, :mode)"),
+            {"uid": caller_user_id, "cid": str(body.clone_id), "cost": credits_cost, "mode": body.response_mode},
+        )
+        # Earnings: credits × $0.04/credit × 80% creator share (skip when owner is self-testing)
+        if not caller_is_owner:
+            creator_earn = credits_cost * 0.04 * 0.80
+            await session.execute(
+                sql_text("""
+                    UPDATE clone_identity
+                    SET total_queries = total_queries + 1,
+                        total_earnings_usd = total_earnings_usd + :earn
+                    WHERE clone_id = :cid
+                """),
+                {"earn": creator_earn, "cid": str(body.clone_id)},
+            )
+        await session.commit()
+    elif price_rec:
+        await session.execute(
+            sql_text("UPDATE clone_identity SET total_queries = total_queries + 1 WHERE clone_id = :cid"),
+            {"cid": str(body.clone_id)},
+        )
+        await session.commit()
+
+    # Consumer brain: retrieve relevant memories about the caller
+    if caller_user_id:
+        consumer_brain_ctx = await _retrieve_consumer_brain(caller_user_id, body.message, session)
+        if consumer_brain_ctx:
+            body = body.model_copy(update={"metadata": {**body.metadata, "consumer_brain": consumer_brain_ctx}})
+
+    # Consumer profile: inject cross-session summary so clone remembers the person
+    if caller_user_id:
+        try:
+            async with session.begin_nested():   # savepoint — failure rolls back only this block
+                profile_row = await session.execute(
+                    sql_text("SELECT summary FROM consumer_profiles WHERE clone_id = :cid AND consumer_user_id = :uid"),
+                    {"cid": str(body.clone_id), "uid": caller_user_id},
+                )
+                profile_rec = profile_row.mappings().first()
+                if profile_rec and profile_rec["summary"]:
+                    body = body.model_copy(update={"metadata": {**body.metadata, "consumer_context": profile_rec["summary"]}})
+                await session.execute(
+                    sql_text("""
+                        INSERT INTO consumer_profiles (clone_id, consumer_user_id, total_sessions, total_messages, last_session_at)
+                        VALUES (:cid, :uid, 1, 1, NOW())
+                        ON CONFLICT (clone_id, consumer_user_id) DO UPDATE
+                        SET total_messages = consumer_profiles.total_messages + 1,
+                            last_session_at = NOW()
+                    """),
+                    {"cid": str(body.clone_id), "uid": caller_user_id},
+                )
+            await session.commit()
+            asyncio.create_task(
+                _maybe_update_consumer_profile(str(body.clone_id), caller_user_id, str(body.session_id))
+            )
+        except Exception as _cp_err:
+            _log.warning("consumer_profiles update skipped: %s", _cp_err)
+            await session.rollback()
+
     await load_clone_keys(session, body.clone_id)
     brain = DoppelBrain(session=session, clone_id=body.clone_id)
     try:
@@ -626,15 +2066,193 @@ async def chat(
     caller_user_id = request.headers.get("X-User-Id")
     await _check_clone_access(body.clone_id, caller_user_id, None, session)
     await _check_rate_limit(body.clone_id, session)
+
+    # Marketplace credit check: if clone has a price and caller isn't the owner, deduct credits
+    price_row = await session.execute(
+        sql_text("SELECT user_id, price_per_query, is_listed FROM clone_identity WHERE clone_id = :cid"),
+        {"cid": str(body.clone_id)},
+    )
+    price_rec = price_row.mappings().first()
+    caller_is_owner = bool(caller_user_id and price_rec and caller_user_id == price_rec["user_id"])
+    # Deduct credits when price > 0 AND (caller is not the owner, OR owner is testing as consumer)
+    is_paid = (
+        price_rec
+        and float(price_rec["price_per_query"]) > 0
+        and not (caller_is_owner and body.owner_mode)
+    )
+    if is_paid:
+        if not caller_user_id:
+            raise HTTPException(status_code=401, detail="Login required to query this clone")
+        multiplier = CREDITS_MULTIPLIER.get(body.response_mode, 1)
+        credits_cost = int(float(price_rec["price_per_query"])) * multiplier
+        bal_row = await session.execute(
+            sql_text("SELECT credits_remaining FROM query_credits WHERE user_id = :uid"),
+            {"uid": caller_user_id},
+        )
+        bal_rec = bal_row.mappings().first()
+        if not bal_rec or bal_rec["credits_remaining"] < credits_cost:
+            raise HTTPException(status_code=402, detail=f"Insufficient credits (need {credits_cost})")
+        # Deduct credits_cost credits
+        await session.execute(
+            sql_text("UPDATE query_credits SET credits_remaining = credits_remaining - :cost, updated_at = NOW() WHERE user_id = :uid"),
+            {"cost": credits_cost, "uid": caller_user_id},
+        )
+        # Record transaction
+        await session.execute(
+            sql_text("INSERT INTO query_transactions (user_id, clone_id, credits_used, response_mode) VALUES (:uid, :cid, :cost, :mode)"),
+            {"uid": caller_user_id, "cid": str(body.clone_id), "cost": credits_cost, "mode": body.response_mode},
+        )
+        # Earnings: credits × $0.04/credit × 80% creator share (skip when owner self-tests)
+        if not caller_is_owner:
+            creator_earn = credits_cost * 0.04 * 0.80
+            await session.execute(
+                sql_text("""
+                    UPDATE clone_identity
+                    SET total_queries = total_queries + 1,
+                        total_earnings_usd = total_earnings_usd + :earn
+                    WHERE clone_id = :cid
+                """),
+                {"earn": creator_earn, "cid": str(body.clone_id)},
+            )
+        await session.commit()
+    elif price_rec:
+        # Free query — still increment total_queries
+        await session.execute(
+            sql_text("UPDATE clone_identity SET total_queries = total_queries + 1 WHERE clone_id = :cid"),
+            {"cid": str(body.clone_id)},
+        )
+        await session.commit()
+
+    # Consumer memory: inject profile context for authenticated consumers
+    if caller_user_id:
+        profile_row = await session.execute(
+            sql_text("SELECT summary, total_sessions FROM consumer_profiles WHERE clone_id = :cid AND consumer_user_id = :uid"),
+            {"cid": str(body.clone_id), "uid": caller_user_id},
+        )
+        profile_rec = profile_row.mappings().first()
+        if profile_rec and profile_rec["summary"]:
+            body = body.model_copy(update={"metadata": {**body.metadata, "consumer_context": profile_rec["summary"]}})
+        # Update message count and last_session_at
+        await session.execute(
+            sql_text("""
+                INSERT INTO consumer_profiles (clone_id, consumer_user_id, total_sessions, total_messages, last_session_at)
+                VALUES (:cid, :uid, 1, 1, NOW())
+                ON CONFLICT (clone_id, consumer_user_id) DO UPDATE
+                SET total_messages = consumer_profiles.total_messages + 1,
+                    last_session_at = NOW()
+            """),
+            {"cid": str(body.clone_id), "uid": caller_user_id},
+        )
+        await session.commit()
+
+    # Consumer brain: retrieve relevant memories about the caller
+    if caller_user_id:
+        consumer_brain_ctx = await _retrieve_consumer_brain(caller_user_id, body.message, session)
+        if consumer_brain_ctx:
+            body = body.model_copy(update={"metadata": {**body.metadata, "consumer_brain": consumer_brain_ctx}})
+
     await load_clone_keys(session, body.clone_id)
     brain = DoppelBrain(session=session, clone_id=body.clone_id)
     try:
-        return await brain.process(body)
+        result = await brain.process(body)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         _log.error("brain.process failed clone_id=%s: %s", body.clone_id, e, exc_info=True)
         raise HTTPException(status_code=500, detail="Brain processing error")
+
+    # Fire-and-forget: update consumer profile summary after every 5 messages
+    if caller_user_id:
+        asyncio.create_task(
+            _maybe_update_consumer_profile(str(body.clone_id), caller_user_id, str(body.session_id))
+        )
+    return result
+
+
+async def _retrieve_consumer_brain(
+    consumer_user_id: str,
+    message: str,
+    session: AsyncSession,
+    top_k: int = 6,
+) -> str | None:
+    """Retrieve the most relevant consumer memories for a given message."""
+    try:
+        from doppel.brain.db.vector import embed_batch
+        embeddings = await embed_batch([message])
+        vec_literal = "[" + ",".join(str(v) for v in embeddings[0]) + "]"
+        rows = await session.execute(
+            sql_text("""
+                SELECT content, category,
+                       1 - (embedding <=> :emb::vector) AS similarity
+                FROM consumer_memory
+                WHERE consumer_user_id = :uid
+                  AND embedding IS NOT NULL
+                ORDER BY embedding <=> :emb::vector
+                LIMIT :k
+            """),
+            {"uid": consumer_user_id, "emb": vec_literal, "k": top_k},
+        )
+        results = rows.mappings().all()
+        if not results:
+            return None
+        lines = [f"- [{r['category']}] {r['content']}" for r in results if r["similarity"] > 0.3]
+        return "\n".join(lines) if lines else None
+    except Exception:
+        return None
+
+
+async def _maybe_update_consumer_profile(clone_id: str, consumer_user_id: str, session_id: str) -> None:
+    """Update consumer profile summary every 5 messages using LLM synthesis."""
+    try:
+        from doppel.brain.db.connection import AsyncSessionLocal
+        async with AsyncSessionLocal() as db:
+            # Only update every 5th message
+            row = await db.execute(
+                sql_text("SELECT total_messages FROM consumer_profiles WHERE clone_id = :cid AND consumer_user_id = :uid"),
+                {"cid": clone_id, "uid": consumer_user_id},
+            )
+            rec = row.mappings().first()
+            if not rec or rec["total_messages"] % 5 != 0:
+                return
+            # Fetch last 10 traces for this session
+            traces_row = await db.execute(
+                sql_text("""
+                    SELECT (brain_input->>'message') AS msg, response
+                    FROM reasoning_traces
+                    WHERE session_id = :sid
+                    ORDER BY created_at DESC LIMIT 10
+                """),
+                {"sid": session_id},
+            )
+            traces = traces_row.mappings().all()
+            if not traces:
+                return
+            convo = "\n".join(f"User: {t['msg']}\nClone: {t['response']}" for t in reversed(traces) if t.get("msg"))
+            if not convo:
+                return
+            import anthropic as _anth
+            from doppel.brain.context import get_anthropic_key
+            client = _anth.AsyncAnthropic(api_key=get_anthropic_key())
+            resp = await client.messages.create(
+                model=settings.classification_model,
+                max_tokens=200,
+                messages=[{"role": "user", "content": (
+                    f"Based on this conversation, write 2–3 sentences summarising what the clone should remember about this person "
+                    f"for future conversations. Focus on their goals, context, and what they care about.\n\n{convo}"
+                )}],
+            )
+            summary = resp.content[0].text.strip()
+            await db.execute(
+                sql_text("""
+                    UPDATE consumer_profiles
+                    SET summary = :summary, last_session_at = NOW()
+                    WHERE clone_id = :cid AND consumer_user_id = :uid
+                """),
+                {"summary": summary, "cid": clone_id, "uid": consumer_user_id},
+            )
+            await db.commit()
+    except Exception as exc:
+        _log.warning("_maybe_update_consumer_profile failed: %s", exc)
 
 
 # ---------------------------------------------------------------------------
@@ -743,6 +2361,1386 @@ async def get_brain_quality(
         "escalations": int(s.get("escalations") or 0),
         "trend_7d": trend,
     }
+
+
+# ---------------------------------------------------------------------------
+# Brain — session message history
+# ---------------------------------------------------------------------------
+
+@app.get("/brain/sessions/{session_id}/messages")
+async def get_session_messages(
+    session_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Return the chat history for a session, ordered chronologically."""
+    rows = await session.execute(
+        sql_text("""
+            SELECT
+                brain_input->>'message' AS user_message,
+                response                AS clone_message,
+                path,
+                confidence,
+                created_at
+            FROM reasoning_traces
+            WHERE session_id = :sid
+            ORDER BY created_at ASC
+            LIMIT 200
+        """),
+        {"sid": session_id},
+    )
+    messages = []
+    for r in rows.mappings():
+        messages.append({
+            "role": "user",
+            "content": r["user_message"],
+            "timestamp": r["created_at"].isoformat() if r["created_at"] else None,
+        })
+        messages.append({
+            "role": "clone",
+            "content": r["clone_message"],
+            "path_taken": r["path"],
+            "confidence": float(r["confidence"]) if r["confidence"] is not None else None,
+            "timestamp": r["created_at"].isoformat() if r["created_at"] else None,
+        })
+    return {"messages": messages, "session_id": session_id}
+
+
+# ---------------------------------------------------------------------------
+# Brain — session summary export
+# ---------------------------------------------------------------------------
+
+@app.post("/brain/summary")
+async def brain_summary(
+    body: dict,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """
+    Generate a structured markdown summary of a chat session.
+    Fetches the last 20 traces for session_id, calls LLM to produce
+    Key Insights / Recommendations / Action Items.
+    Costs 2 credits for paid clones.
+    """
+    clone_id = body.get("clone_id")
+    session_id = body.get("session_id")
+    if not clone_id or not session_id:
+        raise HTTPException(status_code=400, detail="clone_id and session_id required")
+
+    caller_user_id = request.headers.get("X-User-Id")
+
+    # Credit check: 2 credits for paid clones
+    price_row = await session.execute(
+        sql_text("SELECT user_id, price_per_query, is_listed, display_name FROM clone_identity WHERE clone_id = :cid"),
+        {"cid": str(clone_id)},
+    )
+    price_rec = price_row.mappings().first()
+    if not price_rec:
+        raise HTTPException(status_code=404, detail="Clone not found")
+
+    clone_name = price_rec["display_name"]
+    is_paid = price_rec["is_listed"] and float(price_rec["price_per_query"]) > 0 and caller_user_id != price_rec["user_id"]
+
+    if is_paid:
+        if not caller_user_id:
+            raise HTTPException(status_code=401, detail="Login required")
+        bal_row = await session.execute(
+            sql_text("SELECT credits_remaining FROM query_credits WHERE user_id = :uid"),
+            {"uid": caller_user_id},
+        )
+        bal_rec = bal_row.mappings().first()
+        if not bal_rec or bal_rec["credits_remaining"] < 2:
+            raise HTTPException(status_code=402, detail="Insufficient credits (summary costs 2 credits)")
+        await session.execute(
+            sql_text("UPDATE query_credits SET credits_remaining = credits_remaining - 2 WHERE user_id = :uid"),
+            {"uid": caller_user_id},
+        )
+        await session.commit()
+
+    # Fetch last 20 traces for this session
+    traces_row = await session.execute(
+        sql_text("""
+            SELECT (brain_input->>'message') AS user_msg, response
+            FROM reasoning_traces
+            WHERE session_id = :sid
+            ORDER BY created_at ASC LIMIT 20
+        """),
+        {"sid": str(session_id)},
+    )
+    traces = traces_row.mappings().all()
+    if not traces:
+        raise HTTPException(status_code=404, detail="No conversation found for this session")
+
+    convo = "\n".join(
+        f"User: {t['user_msg']}\n{clone_name}: {t['response']}"
+        for t in traces
+        if t.get("user_msg")
+    )
+
+    import anthropic as _anth
+    from doppel.brain.context import get_anthropic_key
+    client = _anth.AsyncAnthropic(api_key=get_anthropic_key())
+    resp = await client.messages.create(
+        model=settings.reasoning_model,
+        max_tokens=800,
+        messages=[{"role": "user", "content": (
+            f"You are summarising a conversation between a user and {clone_name}'s AI knowledge clone.\n\n"
+            f"Conversation:\n{convo}\n\n"
+            "Produce a concise structured summary in markdown with exactly these three sections:\n"
+            "## Key Insights\n- bullet 1\n- bullet 2\n...\n\n"
+            "## Recommendations\n- bullet 1\n- bullet 2\n...\n\n"
+            "## Action Items\n1. item 1\n2. item 2\n..."
+        )}],
+    )
+    summary_text = resp.content[0].text.strip()
+    return {"summary": summary_text, "format": "markdown", "clone_name": clone_name}
+
+
+@app.post("/brain/training/save")
+async def brain_training_save(
+    body: dict,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """
+    Save a training session to the appropriate brain.
+    - is_owner=True: embeds Q&A exchange as knowledge chunks into the clone's memory.
+    - is_owner=False: summarises what the clone learned about the consumer,
+      upserts consumer_profiles.
+    """
+    clone_id = body.get("clone_id")
+    session_id = body.get("session_id")
+    is_owner: bool = bool(body.get("is_owner", False))
+    if not clone_id or not session_id:
+        raise HTTPException(status_code=400, detail="clone_id and session_id required")
+
+    caller_user_id = request.headers.get("X-User-Id")
+
+    # Fetch clone metadata
+    clone_row = await session.execute(
+        sql_text("SELECT user_id, display_name FROM clone_identity WHERE clone_id = :cid"),
+        {"cid": str(clone_id)},
+    )
+    clone_rec = clone_row.mappings().first()
+    if not clone_rec:
+        raise HTTPException(status_code=404, detail="Clone not found")
+    clone_name = clone_rec["display_name"]
+
+    # Fetch conversation traces for this session
+    traces_row = await session.execute(
+        sql_text("""
+            SELECT (brain_input->>'message') AS user_msg, response
+            FROM reasoning_traces
+            WHERE session_id = :sid
+            ORDER BY created_at ASC LIMIT 40
+        """),
+        {"sid": str(session_id)},
+    )
+    traces = [t for t in traces_row.mappings().all() if t.get("user_msg") and t.get("response")]
+    if not traces:
+        raise HTTPException(status_code=404, detail="No conversation found for this session")
+
+    import anthropic as _anth
+    from doppel.brain.context import get_anthropic_key
+    client = _anth.AsyncAnthropic(api_key=get_anthropic_key())
+
+    if is_owner:
+        # Embed each Q&A turn as a knowledge chunk in the clone's memory
+        from doppel.ingestion.pipeline import _store_chunk_with_embedding
+        from doppel.brain.db.vector import embed_batch
+        from doppel.ingestion.connectors.base import RawItem
+        from datetime import datetime, timezone
+
+        await load_clone_keys(session, clone_id)
+        chunks = []
+        for t in traces:
+            chunk = f"Q: {t['user_msg']}\nA: {t['response']}"
+            chunks.append(chunk)
+
+        embeddings = await embed_batch(chunks)
+        now = datetime.now(timezone.utc)
+        for chunk, embedding in zip(chunks, embeddings):
+            item = RawItem(
+                content=chunk,
+                source="training_session",
+                authored_by_user=True,
+                context_type="conversation",
+                created_at=now,
+            )
+            await _store_chunk_with_embedding(
+                session=session,
+                clone_id=clone_id,
+                content=chunk,
+                embedding=embedding,
+                item=item,
+                formality=0.5,
+            )
+        await session.commit()
+        return {"saved": len(chunks), "type": "knowledge_chunks"}
+
+    else:
+        # Summarise what was learned about the consumer, upsert consumer_profiles
+        if not caller_user_id:
+            raise HTTPException(status_code=401, detail="Login required")
+
+        convo = "\n".join(
+            f"Clone: {t['response']}\nUser: {t['user_msg']}" for t in traces
+        )
+        resp = await client.messages.create(
+            model=settings.reasoning_model,
+            max_tokens=400,
+            messages=[{"role": "user", "content": (
+                f"{clone_name}'s AI clone just had a training conversation with a user. "
+                f"Based on this conversation, write 2–3 sentences summarising what the clone "
+                f"learned about this person — their background, goals, preferences, and context.\n\n"
+                f"Conversation:\n{convo}"
+            )}],
+        )
+        summary = resp.content[0].text.strip()
+        await session.execute(
+            sql_text("""
+                INSERT INTO consumer_profiles (clone_id, consumer_user_id, summary, last_session_at, total_sessions, total_messages)
+                VALUES (:cid, :uid, :summary, NOW(), 1, :msgs)
+                ON CONFLICT (clone_id, consumer_user_id) DO UPDATE SET
+                    summary = :summary,
+                    last_session_at = NOW(),
+                    total_sessions = consumer_profiles.total_sessions + 1,
+                    total_messages = consumer_profiles.total_messages + :msgs
+            """),
+            {"cid": str(clone_id), "uid": caller_user_id, "summary": summary, "msgs": len(traces)},
+        )
+        await session.commit()
+        return {"saved": len(traces), "type": "consumer_profile", "summary": summary}
+
+
+# ---------------------------------------------------------------------------
+# Synthesis — multi-clone query + deliberation
+# ---------------------------------------------------------------------------
+
+@app.post("/synthesis/query")
+async def synthesis_query(body: dict, request: Request) -> dict:
+    """
+    Query 2–5 clones with the same message in parallel.
+    Returns per-clone perspectives + a synthesized answer.
+    Costs 1 credit per clone queried.
+    """
+    clone_ids: list[str] = body.get("clone_ids", [])
+    message: str = body.get("message", "").strip()
+    caller_user_id = request.headers.get("X-User-Id")
+
+    if not clone_ids or len(clone_ids) < 2 or len(clone_ids) > 5:
+        raise HTTPException(status_code=400, detail="Provide 2–5 clone IDs")
+    if not message:
+        raise HTTPException(status_code=400, detail="message is required")
+    if not caller_user_id:
+        raise HTTPException(status_code=401, detail="Login required for synthesis")
+
+    n = len(clone_ids)
+    async with AsyncSessionLocal() as db:
+        bal_row = await db.execute(
+            sql_text("SELECT credits_remaining FROM query_credits WHERE user_id = :uid"),
+            {"uid": caller_user_id},
+        )
+        bal_rec = bal_row.mappings().first()
+        bal = bal_rec["credits_remaining"] if bal_rec else 0
+        if bal < n:
+            raise HTTPException(status_code=402, detail=f"Insufficient credits (need {n})")
+
+    async def _query_one(clone_id: str) -> dict:
+        try:
+            async with AsyncSessionLocal() as db:
+                await load_clone_keys(db, clone_id)
+                row = await db.execute(
+                    sql_text("SELECT display_name FROM clone_identity WHERE clone_id = :cid"),
+                    {"cid": clone_id},
+                )
+                rec = row.mappings().first()
+                name = rec["display_name"] if rec else "Unknown"
+                b = BrainInput(clone_id=clone_id, message=message, sender_id=caller_user_id)
+                brain = DoppelBrain(session=db, clone_id=clone_id)
+                result = await brain.process(b)
+            return {"clone_id": clone_id, "name": name, "response": result.response, "confidence": result.confidence or 0.9}
+        except Exception as exc:
+            return {"clone_id": clone_id, "name": "Unknown", "error": str(exc)}
+
+    perspectives = await asyncio.gather(*[_query_one(cid) for cid in clone_ids])
+    valid = [p for p in perspectives if "error" not in p]
+    credits_used = len(valid)
+
+    if credits_used > 0:
+        async with AsyncSessionLocal() as db:
+            await db.execute(
+                sql_text("UPDATE query_credits SET credits_remaining = credits_remaining - :n, updated_at = NOW() WHERE user_id = :uid"),
+                {"n": credits_used, "uid": caller_user_id},
+            )
+            await db.commit()
+
+    import anthropic as _anth
+    from doppel.brain.context import get_anthropic_key
+    client = _anth.AsyncAnthropic(api_key=get_anthropic_key())
+    persp_text = "\n\n".join(f"**{p['name']}:** {p['response']}" for p in valid)
+    resp = await client.messages.create(
+        model=settings.reasoning_model,
+        max_tokens=400,
+        messages=[{"role": "user", "content": (
+            f"Question: {message}\n\n"
+            f"Perspectives from {len(valid)} experts:\n\n{persp_text}\n\n"
+            "Synthesize these into a 150–200 word unified answer. Highlight agreements and divergences. Be direct."
+        )}],
+    )
+    synthesis = resp.content[0].text.strip()
+    return {"perspectives": valid, "synthesis": synthesis, "credits_used": credits_used}
+
+
+@app.post("/synthesis/deliberate")
+async def synthesis_deliberate(body: dict, request: Request) -> dict:
+    """
+    Two clones debate a topic back and forth for N rounds.
+    Each turn costs 1 credit. Total = rounds × 2 credits.
+    """
+    clone_ids: list[str] = body.get("clone_ids", [])
+    topic: str = body.get("topic", "").strip()
+    rounds: int = min(max(int(body.get("rounds", 3)), 2), 5)
+    caller_user_id = request.headers.get("X-User-Id")
+
+    if len(clone_ids) != 2:
+        raise HTTPException(status_code=400, detail="Exactly 2 clone IDs required")
+    if not topic:
+        raise HTTPException(status_code=400, detail="topic is required")
+    if not caller_user_id:
+        raise HTTPException(status_code=401, detail="Login required for deliberation")
+
+    total_credits = rounds * 2
+    async with AsyncSessionLocal() as db:
+        bal_row = await db.execute(
+            sql_text("SELECT credits_remaining FROM query_credits WHERE user_id = :uid"),
+            {"uid": caller_user_id},
+        )
+        bal_rec = bal_row.mappings().first()
+        bal = bal_rec["credits_remaining"] if bal_rec else 0
+        if bal < total_credits:
+            raise HTTPException(status_code=402, detail=f"Insufficient credits (need {total_credits} for {rounds} rounds)")
+
+    names: dict[str, str] = {}
+    async with AsyncSessionLocal() as db:
+        for cid in clone_ids:
+            row = await db.execute(
+                sql_text("SELECT display_name FROM clone_identity WHERE clone_id = :cid"),
+                {"cid": cid},
+            )
+            rec = row.mappings().first()
+            names[cid] = rec["display_name"] if rec else "Unknown"
+
+    turns: list[dict] = []
+    prev_message = topic
+
+    for round_num in range(1, rounds + 1):
+        for i, cid in enumerate(clone_ids):
+            other_name = names[clone_ids[1 - i]]
+            if turns:
+                prompt = (
+                    f"You are deliberating on: '{topic}'.\n"
+                    f"{other_name} just said: {prev_message}\n"
+                    "Respond in 3–5 sentences. Add new insight, challenge or build on what was said. Be direct."
+                )
+            else:
+                prompt = (
+                    f"You are starting a deliberation on: '{topic}'.\n"
+                    "Share your initial perspective in 3–5 sentences. Be direct and concrete."
+                )
+            async with AsyncSessionLocal() as db:
+                await load_clone_keys(db, cid)
+                b = BrainInput(clone_id=cid, message=prompt, sender_id=caller_user_id)
+                brain = DoppelBrain(session=db, clone_id=cid)
+                result = await brain.process(b)
+            prev_message = result.response
+            turns.append({"clone_id": cid, "name": names[cid], "message": result.response, "round": round_num})
+
+    async with AsyncSessionLocal() as db:
+        await db.execute(
+            sql_text("UPDATE query_credits SET credits_remaining = credits_remaining - :n, updated_at = NOW() WHERE user_id = :uid"),
+            {"n": total_credits, "uid": caller_user_id},
+        )
+        await db.commit()
+
+    import anthropic as _anth
+    from doppel.brain.context import get_anthropic_key
+    client = _anth.AsyncAnthropic(api_key=get_anthropic_key())
+    transcript = "\n".join(f"{t['name']} (round {t['round']}): {t['message']}" for t in turns)
+    resp = await client.messages.create(
+        model=settings.reasoning_model,
+        max_tokens=300,
+        messages=[{"role": "user", "content": (
+            f"Topic: {topic}\n\nDeliberation transcript:\n{transcript}\n\n"
+            "Summarize key points of agreement and disagreement in 100–150 words. Be concise."
+        )}],
+    )
+    return {"turns": turns, "summary": resp.content[0].text.strip(), "credits_used": total_credits}
+
+
+# ---------------------------------------------------------------------------
+# Knowledge Bundles
+# ---------------------------------------------------------------------------
+
+def _require_bundle_owner(caller_user_id: str | None, owner_user_id: str) -> None:
+    if not caller_user_id or caller_user_id != owner_user_id:
+        raise HTTPException(status_code=403, detail="Not the bundle owner")
+
+
+@app.post("/clones/{handle}/bundles", status_code=201)
+async def create_bundle(
+    handle: str,
+    body: dict,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Creator: create a new knowledge bundle."""
+    caller_user_id = request.headers.get("X-User-Id")
+    row = await session.execute(
+        sql_text("SELECT clone_id, user_id FROM clone_identity WHERE handle = :h"),
+        {"h": handle},
+    )
+    rec = row.mappings().first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Clone not found")
+    _require_bundle_owner(caller_user_id, rec["user_id"])
+
+    title = (body.get("title") or "").strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="title is required")
+
+    result = await session.execute(
+        sql_text("""
+            INSERT INTO knowledge_bundles (clone_id, title, description, price_usd, queries_included)
+            VALUES (:cid, :title, :desc, :price, :qi)
+            RETURNING id, title, description, price_usd, queries_included, is_published, created_at
+        """),
+        {
+            "cid": str(rec["clone_id"]),
+            "title": title,
+            "desc": (body.get("description") or "").strip() or None,
+            "price": float(body.get("price_usd", 0.00)),
+            "qi": int(body.get("queries_included", 0)),
+        },
+    )
+    await session.commit()
+    row_out = result.mappings().first()
+    out = dict(row_out)
+    out["price_usd"] = float(out["price_usd"])
+    out["clone_count"] = 0
+    return out
+
+
+@app.get("/clones/{handle}/bundles")
+async def list_creator_bundles(
+    handle: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Creator: list all bundles for this clone (owner only)."""
+    caller_user_id = request.headers.get("X-User-Id")
+    row = await session.execute(
+        sql_text("SELECT clone_id, user_id FROM clone_identity WHERE handle = :h"),
+        {"h": handle},
+    )
+    rec = row.mappings().first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Clone not found")
+    _require_bundle_owner(caller_user_id, rec["user_id"])
+
+    bundles_row = await session.execute(
+        sql_text("""
+            SELECT kb.id, kb.title, kb.description, kb.price_usd, kb.queries_included,
+                   kb.is_published, kb.created_at,
+                   COUNT(DISTINCT bcm.clone_id) AS clone_count
+            FROM knowledge_bundles kb
+            LEFT JOIN bundle_clone_members bcm ON bcm.bundle_id = kb.id
+            WHERE kb.clone_id = :cid
+            GROUP BY kb.id
+            ORDER BY kb.created_at DESC
+        """),
+        {"cid": str(rec["clone_id"])},
+    )
+    bundles = [dict(r) for r in bundles_row.mappings().all()]
+    for b in bundles:
+        b["price_usd"] = float(b["price_usd"])
+    return {"bundles": bundles}
+
+
+@app.patch("/bundles/{bundle_id}")
+async def update_bundle(
+    bundle_id: str,
+    body: dict,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Creator: update bundle metadata."""
+    caller_user_id = request.headers.get("X-User-Id")
+    row = await session.execute(
+        sql_text("""
+            SELECT kb.id, ci.user_id
+            FROM knowledge_bundles kb
+            JOIN clone_identity ci ON ci.clone_id = kb.clone_id
+            WHERE kb.id = :bid
+        """),
+        {"bid": bundle_id},
+    )
+    rec = row.mappings().first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Bundle not found")
+    _require_bundle_owner(caller_user_id, rec["user_id"])
+
+    # Validate publish: at least 1 clone member
+    is_published = body.get("is_published")
+    if is_published:
+        clone_count_row = await session.execute(
+            sql_text("SELECT COUNT(*) AS cnt FROM bundle_clone_members WHERE bundle_id = :bid"),
+            {"bid": bundle_id},
+        )
+        clone_count = clone_count_row.scalar() or 0
+        if clone_count < 1:
+            raise HTTPException(status_code=400, detail="Add at least one clone before publishing")
+
+    updates: list[str] = []
+    params: dict = {"bid": bundle_id}
+    for field, col in [("title", "title"), ("description", "description"), ("price_usd", "price_usd"), ("is_published", "is_published"), ("queries_included", "queries_included")]:
+        if field in body:
+            updates.append(f"{col} = :{field}")
+            params[field] = body[field]
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+
+    updates.append("updated_at = NOW()")
+    await session.execute(
+        sql_text(f"UPDATE knowledge_bundles SET {', '.join(updates)} WHERE id = :bid"),
+        params,
+    )
+    await session.commit()
+    return {"ok": True}
+
+
+@app.post("/bundles/{bundle_id}/items", status_code=201)
+async def add_bundle_item(
+    bundle_id: str,
+    body: dict,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Creator: add a topic to a bundle."""
+    caller_user_id = request.headers.get("X-User-Id")
+    row = await session.execute(
+        sql_text("SELECT kb.id, ci.user_id FROM knowledge_bundles kb JOIN clone_identity ci ON ci.clone_id = kb.clone_id WHERE kb.id = :bid"),
+        {"bid": bundle_id},
+    )
+    rec = row.mappings().first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Bundle not found")
+    _require_bundle_owner(caller_user_id, rec["user_id"])
+
+    topic = (body.get("topic") or "").strip()
+    if not topic:
+        raise HTTPException(status_code=400, detail="topic is required")
+
+    pos_row = await session.execute(
+        sql_text("SELECT COALESCE(MAX(position), -1) + 1 AS pos FROM bundle_items WHERE bundle_id = :bid"),
+        {"bid": bundle_id},
+    )
+    pos = pos_row.mappings().first()["pos"]
+
+    result = await session.execute(
+        sql_text("""
+            INSERT INTO bundle_items (bundle_id, topic, position)
+            VALUES (:bid, :topic, :pos)
+            RETURNING id, bundle_id, topic, position, status
+        """),
+        {"bid": bundle_id, "topic": topic, "pos": pos},
+    )
+    await session.commit()
+    return dict(result.mappings().first())
+
+
+@app.delete("/bundles/{bundle_id}/items/{item_id}", status_code=204)
+async def delete_bundle_item(
+    bundle_id: str,
+    item_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    """Creator: remove an item from a bundle."""
+    caller_user_id = request.headers.get("X-User-Id")
+    row = await session.execute(
+        sql_text("SELECT ci.user_id FROM knowledge_bundles kb JOIN clone_identity ci ON ci.clone_id = kb.clone_id WHERE kb.id = :bid"),
+        {"bid": bundle_id},
+    )
+    rec = row.mappings().first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Bundle not found")
+    _require_bundle_owner(caller_user_id, rec["user_id"])
+
+    await session.execute(
+        sql_text("DELETE FROM bundle_items WHERE id = :iid AND bundle_id = :bid"),
+        {"iid": item_id, "bid": bundle_id},
+    )
+    await session.commit()
+
+
+@app.post("/bundles/{bundle_id}/clones", status_code=201)
+async def add_bundle_clone(
+    bundle_id: str,
+    body: dict,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Creator: add a clone to a bundle."""
+    caller_user_id = request.headers.get("X-User-Id")
+    row = await session.execute(
+        sql_text("SELECT ci.user_id FROM knowledge_bundles kb JOIN clone_identity ci ON ci.clone_id = kb.clone_id WHERE kb.id = :bid"),
+        {"bid": bundle_id},
+    )
+    rec = row.mappings().first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Bundle not found")
+    _require_bundle_owner(caller_user_id, rec["user_id"])
+
+    clone_id = (body.get("clone_id") or "").strip()
+    if not clone_id:
+        raise HTTPException(status_code=422, detail="clone_id is required")
+
+    # Verify clone exists and is listed
+    ci_row = await session.execute(
+        sql_text("SELECT clone_id, display_name, handle, category, total_queries FROM clone_identity WHERE clone_id = :cid"),
+        {"cid": clone_id},
+    )
+    ci = ci_row.mappings().first()
+    if not ci:
+        raise HTTPException(status_code=404, detail="Clone not found")
+
+    pos_row = await session.execute(
+        sql_text("SELECT COALESCE(MAX(position), -1) + 1 AS pos FROM bundle_clone_members WHERE bundle_id = :bid"),
+        {"bid": bundle_id},
+    )
+    pos = pos_row.mappings().first()["pos"]
+
+    await session.execute(
+        sql_text("INSERT INTO bundle_clone_members (bundle_id, clone_id, position) VALUES (:bid, :cid, :pos) ON CONFLICT (bundle_id, clone_id) DO NOTHING"),
+        {"bid": bundle_id, "cid": clone_id, "pos": pos},
+    )
+    await session.commit()
+    return {
+        "clone_id": str(ci["clone_id"]),
+        "display_name": ci["display_name"],
+        "handle": ci["handle"],
+        "category": ci["category"],
+        "total_queries": int(ci["total_queries"]),
+        "position": pos,
+    }
+
+
+@app.delete("/bundles/{bundle_id}/clones/{clone_id}", status_code=204)
+async def remove_bundle_clone(
+    bundle_id: str,
+    clone_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    caller_user_id = request.headers.get("X-User-Id")
+    row = await session.execute(
+        sql_text("SELECT ci.user_id FROM knowledge_bundles kb JOIN clone_identity ci ON ci.clone_id = kb.clone_id WHERE kb.id = :bid"),
+        {"bid": bundle_id},
+    )
+    rec = row.mappings().first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Bundle not found")
+    _require_bundle_owner(caller_user_id, rec["user_id"])
+    await session.execute(
+        sql_text("DELETE FROM bundle_clone_members WHERE bundle_id = :bid AND clone_id = :cid"),
+        {"bid": bundle_id, "cid": clone_id},
+    )
+    await session.commit()
+
+
+@app.get("/bundles/{bundle_id}/clones")
+async def list_bundle_clones(
+    bundle_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    caller_user_id = request.headers.get("X-User-Id")
+    row = await session.execute(
+        sql_text("SELECT ci.user_id FROM knowledge_bundles kb JOIN clone_identity ci ON ci.clone_id = kb.clone_id WHERE kb.id = :bid"),
+        {"bid": bundle_id},
+    )
+    rec = row.mappings().first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Bundle not found")
+    _require_bundle_owner(caller_user_id, rec["user_id"])
+
+    clones_row = await session.execute(
+        sql_text("""
+            SELECT ci.clone_id, ci.display_name, ci.handle, ci.category, ci.total_queries,
+                   bcm.position
+            FROM bundle_clone_members bcm
+            JOIN clone_identity ci ON ci.clone_id = bcm.clone_id
+            WHERE bcm.bundle_id = :bid
+            ORDER BY bcm.position
+        """),
+        {"bid": bundle_id},
+    )
+    clones = [dict(r) for r in clones_row.mappings().all()]
+    for c in clones:
+        c["total_queries"] = int(c["total_queries"])
+    return {"clones": clones}
+
+
+@app.get("/bundles/{bundle_id}/items")
+async def list_bundle_items(
+    bundle_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Creator: list all items for a bundle (owner only)."""
+    caller_user_id = request.headers.get("X-User-Id")
+    row = await session.execute(
+        sql_text("SELECT ci.user_id FROM knowledge_bundles kb JOIN clone_identity ci ON ci.clone_id = kb.clone_id WHERE kb.id = :bid"),
+        {"bid": bundle_id},
+    )
+    rec = row.mappings().first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Bundle not found")
+    _require_bundle_owner(caller_user_id, rec["user_id"])
+
+    items_row = await session.execute(
+        sql_text("SELECT id, topic, position, status FROM bundle_items WHERE bundle_id = :bid ORDER BY position"),
+        {"bid": bundle_id},
+    )
+    return {"items": [dict(r) for r in items_row.mappings().all()]}
+
+
+@app.post("/bundles/{bundle_id}/generate", status_code=202)
+async def generate_bundle_items(
+    bundle_id: str,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Creator: generate briefing content for all pending items in the bundle."""
+    caller_user_id = request.headers.get("X-User-Id")
+    row = await session.execute(
+        sql_text("""
+            SELECT kb.id, kb.clone_id, ci.user_id
+            FROM knowledge_bundles kb
+            JOIN clone_identity ci ON ci.clone_id = kb.clone_id
+            WHERE kb.id = :bid
+        """),
+        {"bid": bundle_id},
+    )
+    rec = row.mappings().first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Bundle not found")
+    _require_bundle_owner(caller_user_id, rec["user_id"])
+
+    # Mark all pending items as 'generating'
+    await session.execute(
+        sql_text("UPDATE bundle_items SET status = 'generating' WHERE bundle_id = :bid AND status = 'pending'"),
+        {"bid": bundle_id},
+    )
+    await session.commit()
+
+    background_tasks.add_task(_generate_bundle_items_bg, bundle_id, str(rec["clone_id"]))
+    return {"ok": True, "message": "Generation started"}
+
+
+async def _generate_bundle_items_bg(bundle_id: str, clone_id: str) -> None:
+    """Background task: call brain for each pending bundle item."""
+    async with AsyncSessionLocal() as db:
+        items_row = await db.execute(
+            sql_text("SELECT id, topic FROM bundle_items WHERE bundle_id = :bid AND status = 'generating' ORDER BY position"),
+            {"bid": bundle_id},
+        )
+        items = items_row.mappings().all()
+
+    for item in items:
+        try:
+            async with AsyncSessionLocal() as db:
+                await load_clone_keys(db, clone_id)
+                b = BrainInput(
+                    clone_id=clone_id,
+                    message=(
+                        f"Write a comprehensive briefing on the following topic from your personal knowledge and experience:\n\n"
+                        f"{item['topic']}\n\n"
+                        "Structure it with: an overview paragraph, 3–5 key insights as bullet points, "
+                        "and a recommendations section. Be specific, draw on real examples."
+                    ),
+                )
+                brain = DoppelBrain(session=db, clone_id=clone_id)
+                result = await brain.process(b)
+                await db.execute(
+                    sql_text("""
+                        UPDATE bundle_items
+                        SET status = 'ready', briefing_content = :content, generated_at = NOW()
+                        WHERE id = :iid
+                    """),
+                    {"content": result.response, "iid": str(item["id"])},
+                )
+                await db.commit()
+        except Exception as exc:
+            async with AsyncSessionLocal() as db:
+                await db.execute(
+                    sql_text("UPDATE bundle_items SET status = 'failed' WHERE id = :iid"),
+                    {"iid": str(item["id"])},
+                )
+                await db.commit()
+            _log.error("Bundle item generation failed item_id=%s: %s", item["id"], exc)
+
+
+@app.post("/bundles/{bundle_id}/checkout")
+async def bundle_checkout(
+    bundle_id: str,
+    body: dict,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Consumer: create Stripe checkout session to purchase a bundle."""
+    import stripe as stripe_lib
+
+    caller_user_id = request.headers.get("X-User-Id")
+    if not caller_user_id:
+        raise HTTPException(status_code=401, detail="Login required")
+
+    row = await session.execute(
+        sql_text("SELECT id, title, price_usd, is_published FROM knowledge_bundles WHERE id = :bid"),
+        {"bid": bundle_id},
+    )
+    rec = row.mappings().first()
+    if not rec or not rec["is_published"]:
+        raise HTTPException(status_code=404, detail="Bundle not found")
+
+    # Check already purchased
+    already = await session.execute(
+        sql_text("SELECT id FROM bundle_purchases WHERE bundle_id = :bid AND user_id = :uid"),
+        {"bid": bundle_id, "uid": caller_user_id},
+    )
+    if already.mappings().first():
+        raise HTTPException(status_code=409, detail="Already purchased")
+
+    if not settings.stripe_secret_key:
+        raise HTTPException(status_code=503, detail="Payments not configured")
+
+    stripe_lib.api_key = settings.stripe_secret_key
+    price_cents = int(float(rec["price_usd"]) * 100)
+    session_obj = stripe_lib.checkout.Session.create(
+        payment_method_types=["card"],
+        mode="payment",
+        line_items=[{
+            "price_data": {
+                "currency": "usd",
+                "unit_amount": price_cents,
+                "product_data": {"name": f"Doppel Bundle: {rec['title']}"},
+            },
+            "quantity": 1,
+        }],
+        metadata={"type": "bundle", "bundle_id": bundle_id, "user_id": caller_user_id, "amount": str(float(rec["price_usd"]))},
+        success_url=f"{settings.app_url}/marketplace/bundles/{bundle_id}?success=1",
+        cancel_url=f"{settings.app_url}/marketplace/bundles/{bundle_id}",
+    )
+
+    # Record pending purchase (queries_remaining set on webhook completion)
+    await session.execute(
+        sql_text("""
+            INSERT INTO bundle_purchases (bundle_id, user_id, stripe_session_id)
+            VALUES (:bid, :uid, :sid)
+            ON CONFLICT (bundle_id, user_id) DO NOTHING
+        """),
+        {"bid": bundle_id, "uid": caller_user_id, "sid": session_obj.id},
+    )
+    await session.commit()
+    return {"checkout_url": session_obj.url}
+
+
+@app.get("/bundles/{bundle_id}/access")
+async def check_bundle_access(
+    bundle_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Consumer: check if the caller has purchased this bundle."""
+    caller_user_id = request.headers.get("X-User-Id")
+    if not caller_user_id:
+        return {"has_access": False}
+
+    row = await session.execute(
+        sql_text("SELECT id FROM bundle_purchases WHERE bundle_id = :bid AND user_id = :uid AND amount_paid IS NOT NULL"),
+        {"bid": bundle_id, "uid": caller_user_id},
+    )
+    return {"has_access": row.mappings().first() is not None}
+
+
+@app.get("/bundles/{bundle_id}/read")
+async def read_bundle(
+    bundle_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Consumer: read all briefing content for a purchased bundle."""
+    caller_user_id = request.headers.get("X-User-Id")
+    if not caller_user_id:
+        raise HTTPException(status_code=401, detail="Login required")
+
+    # Check ownership — creators can always read their own bundles
+    bundle_row = await session.execute(
+        sql_text("""
+            SELECT kb.id, kb.title, ci.user_id AS owner_id
+            FROM knowledge_bundles kb
+            JOIN clone_identity ci ON ci.clone_id = kb.clone_id
+            WHERE kb.id = :bid
+        """),
+        {"bid": bundle_id},
+    )
+    bundle_rec = bundle_row.mappings().first()
+    if not bundle_rec:
+        raise HTTPException(status_code=404, detail="Bundle not found")
+
+    if bundle_rec["owner_id"] != caller_user_id:
+        purchase_row = await session.execute(
+            sql_text("SELECT id FROM bundle_purchases WHERE bundle_id = :bid AND user_id = :uid AND amount_paid IS NOT NULL"),
+            {"bid": bundle_id, "uid": caller_user_id},
+        )
+        if not purchase_row.mappings().first():
+            raise HTTPException(status_code=402, detail="Purchase required to access this bundle")
+
+    items_row = await session.execute(
+        sql_text("SELECT id, topic, briefing_content, position FROM bundle_items WHERE bundle_id = :bid AND status = 'ready' ORDER BY position"),
+        {"bid": bundle_id},
+    )
+    items = [dict(r) for r in items_row.mappings().all()]
+    return {"bundle_id": bundle_id, "title": bundle_rec["title"], "items": items}
+
+
+# ---------------------------------------------------------------------------
+# Consumer bundles — user-curated cross-clone bundles
+# ---------------------------------------------------------------------------
+
+@app.post("/consumer-bundles", status_code=201)
+async def create_consumer_bundle(
+    body: dict,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    caller_user_id = request.headers.get("X-User-Id")
+    if not caller_user_id:
+        raise HTTPException(status_code=401, detail="Login required")
+    title = (body.get("title") or "").strip()
+    if not title:
+        raise HTTPException(status_code=422, detail="title is required")
+    row = await session.execute(
+        sql_text("""
+            INSERT INTO consumer_bundles (user_id, title, description, is_public, price_usd)
+            VALUES (:uid, :title, :desc, :pub, :price)
+            RETURNING id, user_id, title, description, is_public, price_usd, created_at
+        """),
+        {
+            "uid": caller_user_id,
+            "title": title,
+            "desc": (body.get("description") or "").strip() or None,
+            "pub": bool(body.get("is_public", False)),
+            "price": float(body.get("price_usd", 0.00)),
+        },
+    )
+    await session.commit()
+    out = dict(row.mappings().first())
+    out["price_usd"] = float(out["price_usd"])
+    out["item_count"] = 0
+    out["ready_count"] = 0
+    return out
+
+
+@app.get("/consumer-bundles")
+async def list_consumer_bundles(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    caller_user_id = request.headers.get("X-User-Id")
+    if not caller_user_id:
+        raise HTTPException(status_code=401, detail="Login required")
+    rows = await session.execute(
+        sql_text("""
+            SELECT cb.id, cb.title, cb.description, cb.is_public, cb.price_usd, cb.created_at,
+                   COUNT(cbi.id) AS item_count,
+                   COUNT(cbi.id) FILTER (WHERE cbi.status = 'ready') AS ready_count
+            FROM consumer_bundles cb
+            LEFT JOIN consumer_bundle_items cbi ON cbi.bundle_id = cb.id
+            WHERE cb.user_id = :uid
+            GROUP BY cb.id
+            ORDER BY cb.created_at DESC
+        """),
+        {"uid": caller_user_id},
+    )
+    bundles = [dict(r) for r in rows.mappings().all()]
+    for b in bundles:
+        b["price_usd"] = float(b["price_usd"])
+    return {"bundles": bundles}
+
+
+@app.patch("/consumer-bundles/{bundle_id}")
+async def update_consumer_bundle(
+    bundle_id: str,
+    body: dict,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    caller_user_id = request.headers.get("X-User-Id")
+    if not caller_user_id:
+        raise HTTPException(status_code=401, detail="Login required")
+    row = await session.execute(
+        sql_text("SELECT id, user_id FROM consumer_bundles WHERE id = :bid"),
+        {"bid": bundle_id},
+    )
+    rec = row.mappings().first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Bundle not found")
+    if rec["user_id"] != caller_user_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    updates: list[str] = []
+    params: dict = {"bid": bundle_id}
+    for field in ["title", "description", "is_public", "price_usd"]:
+        if field in body:
+            updates.append(f"{field} = :{field}")
+            params[field] = body[field]
+    if not updates:
+        raise HTTPException(status_code=422, detail="Nothing to update")
+    updates.append("updated_at = NOW()")
+    await session.execute(
+        sql_text(f"UPDATE consumer_bundles SET {', '.join(updates)} WHERE id = :bid"),
+        params,
+    )
+    await session.commit()
+    return {"ok": True}
+
+
+@app.delete("/consumer-bundles/{bundle_id}", status_code=204)
+async def delete_consumer_bundle(
+    bundle_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    caller_user_id = request.headers.get("X-User-Id")
+    if not caller_user_id:
+        raise HTTPException(status_code=401, detail="Login required")
+    row = await session.execute(
+        sql_text("SELECT user_id FROM consumer_bundles WHERE id = :bid"),
+        {"bid": bundle_id},
+    )
+    rec = row.mappings().first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Bundle not found")
+    if rec["user_id"] != caller_user_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    await session.execute(sql_text("DELETE FROM consumer_bundles WHERE id = :bid"), {"bid": bundle_id})
+    await session.commit()
+
+
+@app.post("/consumer-bundles/{bundle_id}/items", status_code=201)
+async def add_consumer_bundle_item(
+    bundle_id: str,
+    body: dict,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    caller_user_id = request.headers.get("X-User-Id")
+    if not caller_user_id:
+        raise HTTPException(status_code=401, detail="Login required")
+    row = await session.execute(
+        sql_text("SELECT user_id FROM consumer_bundles WHERE id = :bid"),
+        {"bid": bundle_id},
+    )
+    rec = row.mappings().first()
+    if not rec or rec["user_id"] != caller_user_id:
+        raise HTTPException(status_code=404, detail="Bundle not found")
+    clone_id = (body.get("clone_id") or "").strip()
+    topic = (body.get("topic") or "").strip()
+    if not clone_id or not topic:
+        raise HTTPException(status_code=422, detail="clone_id and topic are required")
+    # Get next position
+    pos_row = await session.execute(
+        sql_text("SELECT COALESCE(MAX(position), -1) + 1 AS next_pos FROM consumer_bundle_items WHERE bundle_id = :bid"),
+        {"bid": bundle_id},
+    )
+    next_pos = pos_row.mappings().first()["next_pos"]
+    item_row = await session.execute(
+        sql_text("""
+            INSERT INTO consumer_bundle_items (bundle_id, clone_id, topic, position)
+            VALUES (:bid, :cid, :topic, :pos)
+            RETURNING id, clone_id, topic, position, status
+        """),
+        {"bid": bundle_id, "cid": clone_id, "topic": topic, "pos": next_pos},
+    )
+    await session.commit()
+    item = dict(item_row.mappings().first())
+    # Fetch clone name for display
+    clone_row = await session.execute(
+        sql_text("SELECT display_name, handle FROM clone_identity WHERE clone_id = :cid"),
+        {"cid": clone_id},
+    )
+    clone_rec = clone_row.mappings().first()
+    if clone_rec:
+        item["clone_name"] = clone_rec["display_name"]
+        item["clone_handle"] = clone_rec["handle"]
+    return item
+
+
+@app.delete("/consumer-bundles/{bundle_id}/items/{item_id}", status_code=204)
+async def remove_consumer_bundle_item(
+    bundle_id: str,
+    item_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    caller_user_id = request.headers.get("X-User-Id")
+    if not caller_user_id:
+        raise HTTPException(status_code=401, detail="Login required")
+    row = await session.execute(
+        sql_text("SELECT user_id FROM consumer_bundles WHERE id = :bid"),
+        {"bid": bundle_id},
+    )
+    rec = row.mappings().first()
+    if not rec or rec["user_id"] != caller_user_id:
+        raise HTTPException(status_code=404, detail="Bundle not found")
+    await session.execute(
+        sql_text("DELETE FROM consumer_bundle_items WHERE id = :iid AND bundle_id = :bid"),
+        {"iid": item_id, "bid": bundle_id},
+    )
+    await session.commit()
+
+
+@app.get("/consumer-bundles/{bundle_id}/items")
+async def list_consumer_bundle_items(
+    bundle_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    caller_user_id = request.headers.get("X-User-Id")
+    if not caller_user_id:
+        raise HTTPException(status_code=401, detail="Login required")
+    row = await session.execute(
+        sql_text("SELECT user_id FROM consumer_bundles WHERE id = :bid"),
+        {"bid": bundle_id},
+    )
+    rec = row.mappings().first()
+    if not rec or rec["user_id"] != caller_user_id:
+        raise HTTPException(status_code=404, detail="Bundle not found")
+    rows = await session.execute(
+        sql_text("""
+            SELECT cbi.id, cbi.clone_id, cbi.topic, cbi.position, cbi.status, cbi.credits_used,
+                   ci.display_name AS clone_name, ci.handle AS clone_handle
+            FROM consumer_bundle_items cbi
+            JOIN clone_identity ci ON ci.clone_id = cbi.clone_id
+            WHERE cbi.bundle_id = :bid
+            ORDER BY cbi.position
+        """),
+        {"bid": bundle_id},
+    )
+    return {"items": [dict(r) for r in rows.mappings().all()]}
+
+
+@app.post("/consumer-bundles/{bundle_id}/generate")
+async def generate_consumer_bundle(
+    bundle_id: str,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Generate content for all pending items, costing 1 credit per item."""
+    caller_user_id = request.headers.get("X-User-Id")
+    if not caller_user_id:
+        raise HTTPException(status_code=401, detail="Login required")
+    row = await session.execute(
+        sql_text("SELECT user_id FROM consumer_bundles WHERE id = :bid"),
+        {"bid": bundle_id},
+    )
+    rec = row.mappings().first()
+    if not rec or rec["user_id"] != caller_user_id:
+        raise HTTPException(status_code=404, detail="Bundle not found")
+
+    items_row = await session.execute(
+        sql_text("""
+            SELECT cbi.id, cbi.clone_id, cbi.topic,
+                   ci.display_name AS clone_name
+            FROM consumer_bundle_items cbi
+            JOIN clone_identity ci ON ci.clone_id = cbi.clone_id
+            WHERE cbi.bundle_id = :bid AND cbi.status = 'pending'
+        """),
+        {"bid": bundle_id},
+    )
+    items = [dict(r) for r in items_row.mappings().all()]
+    if not items:
+        return {"queued": 0}
+
+    # Check credit balance
+    credit_row = await session.execute(
+        sql_text("SELECT credits_remaining FROM query_credits WHERE user_id = :uid"),
+        {"uid": caller_user_id},
+    )
+    credit_rec = credit_row.mappings().first()
+    balance = credit_rec["credits_remaining"] if credit_rec else 0
+    if balance < len(items):
+        raise HTTPException(status_code=402, detail=f"Insufficient credits. Need {len(items)}, have {balance}.")
+
+    # Mark all as generating
+    await session.execute(
+        sql_text("UPDATE consumer_bundle_items SET status = 'generating' WHERE bundle_id = :bid AND status = 'pending'"),
+        {"bid": bundle_id},
+    )
+    await session.commit()
+
+    background_tasks.add_task(_generate_consumer_items, bundle_id, items, caller_user_id)
+    return {"queued": len(items)}
+
+
+async def _generate_consumer_items(bundle_id: str, items: list[dict], user_id: str) -> None:
+    """Background: query each clone per topic, store content, deduct credits."""
+    from doppel.brain.orchestrator import BrainOrchestrator
+    from doppel.brain.models import BrainInput
+    import uuid as _uuid
+
+    async with AsyncSessionLocal() as session:
+        for item in items:
+            try:
+                prompt = (
+                    f"Write a detailed briefing on the following topic from your own expertise and perspective: "
+                    f'"{item["topic"]}". '
+                    "Structure your response as actionable insights the reader can apply. "
+                    "Be specific. 300–500 words."
+                )
+                brain = BrainOrchestrator(session)
+                result = await brain.process(BrainInput(
+                    clone_id=_uuid.UUID(str(item["clone_id"])),
+                    message=prompt,
+                    sender_id=user_id,
+                    session_id=_uuid.uuid4(),
+                ))
+                await session.execute(
+                    sql_text("""
+                        UPDATE consumer_bundle_items
+                        SET status = 'ready', content = :content, credits_used = 1, generated_at = NOW()
+                        WHERE id = :iid
+                    """),
+                    {"content": result.response, "iid": str(item["id"])},
+                )
+                # Deduct 1 credit
+                await session.execute(
+                    sql_text("""
+                        UPDATE query_credits SET credits_remaining = credits_remaining - 1, updated_at = NOW()
+                        WHERE user_id = :uid AND credits_remaining > 0
+                    """),
+                    {"uid": user_id},
+                )
+                await session.commit()
+            except Exception as exc:
+                print(f"[consumer-bundle] item {item['id']} failed: {exc}")
+                await session.execute(
+                    sql_text("UPDATE consumer_bundle_items SET status = 'failed' WHERE id = :iid"),
+                    {"iid": str(item["id"])},
+                )
+                await session.commit()
+
+
+@app.get("/consumer-bundles/{bundle_id}/read")
+async def read_consumer_bundle(
+    bundle_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Read full content — owner always; others only if purchased."""
+    caller_user_id = request.headers.get("X-User-Id")
+    if not caller_user_id:
+        raise HTTPException(status_code=401, detail="Login required")
+
+    row = await session.execute(
+        sql_text("SELECT id, title, user_id, is_public, price_usd FROM consumer_bundles WHERE id = :bid"),
+        {"bid": bundle_id},
+    )
+    rec = row.mappings().first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Bundle not found")
+
+    is_owner = rec["user_id"] == caller_user_id
+    if not is_owner:
+        if float(rec["price_usd"]) > 0:
+            purchase_row = await session.execute(
+                sql_text("SELECT id FROM consumer_bundle_purchases WHERE bundle_id = :bid AND user_id = :uid AND amount_paid IS NOT NULL"),
+                {"bid": bundle_id, "uid": caller_user_id},
+            )
+            if not purchase_row.mappings().first():
+                raise HTTPException(status_code=402, detail="Purchase required")
+        elif not rec["is_public"]:
+            raise HTTPException(status_code=403, detail="Private bundle")
+
+    items_row = await session.execute(
+        sql_text("""
+            SELECT cbi.id, cbi.topic, cbi.content, cbi.position, cbi.status,
+                   ci.display_name AS clone_name, ci.handle AS clone_handle
+            FROM consumer_bundle_items cbi
+            JOIN clone_identity ci ON ci.clone_id = cbi.clone_id
+            WHERE cbi.bundle_id = :bid AND cbi.status = 'ready'
+            ORDER BY cbi.position
+        """),
+        {"bid": bundle_id},
+    )
+    items = [dict(r) for r in items_row.mappings().all()]
+    return {"bundle_id": bundle_id, "title": rec["title"], "items": items}
+
+
+@app.post("/consumer-bundles/{bundle_id}/checkout")
+async def consumer_bundle_checkout(
+    bundle_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    caller_user_id = request.headers.get("X-User-Id")
+    if not caller_user_id:
+        raise HTTPException(status_code=401, detail="Login required")
+
+    row = await session.execute(
+        sql_text("SELECT id, title, price_usd, is_public FROM consumer_bundles WHERE id = :bid"),
+        {"bid": bundle_id},
+    )
+    rec = row.mappings().first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Bundle not found")
+    if float(rec["price_usd"]) <= 0:
+        raise HTTPException(status_code=422, detail="Bundle is free")
+
+    if not settings.stripe_secret_key:
+        raise HTTPException(status_code=503, detail="Payments not configured")
+
+    stripe_lib.api_key = settings.stripe_secret_key
+    price_cents = int(float(rec["price_usd"]) * 100)
+    session_obj = stripe_lib.checkout.Session.create(
+        payment_method_types=["card"],
+        mode="payment",
+        line_items=[{
+            "price_data": {
+                "currency": "usd",
+                "unit_amount": price_cents,
+                "product_data": {"name": rec["title"]},
+            },
+            "quantity": 1,
+        }],
+        metadata={"type": "consumer_bundle", "bundle_id": bundle_id, "user_id": caller_user_id, "amount": str(float(rec["price_usd"]))},
+        success_url=f"{settings.app_url}/marketplace/bundles/{bundle_id}?success=1",
+        cancel_url=f"{settings.app_url}/marketplace/bundles/{bundle_id}",
+    )
+
+    await session.execute(
+        sql_text("""
+            INSERT INTO consumer_bundle_purchases (bundle_id, user_id, stripe_session_id)
+            VALUES (:bid, :uid, :sid)
+            ON CONFLICT (bundle_id, user_id) DO NOTHING
+        """),
+        {"bid": bundle_id, "uid": caller_user_id, "sid": session_obj.id},
+    )
+    await session.commit()
+    return {"checkout_url": session_obj.url}
 
 
 # ---------------------------------------------------------------------------
@@ -872,10 +3870,12 @@ async def ingest(
 def _price_to_tier() -> dict[str, str]:
     mapping: dict[str, str] = {}
     for price_id, tier in [
-        (settings.stripe_pro_monthly_price_id, "pro"),
-        (settings.stripe_pro_yearly_price_id, "pro"),
-        (settings.stripe_creator_monthly_price_id, "creator"),
-        (settings.stripe_creator_yearly_price_id, "creator"),
+        (settings.stripe_personal_monthly_price_id, "personal"),
+        (settings.stripe_personal_yearly_price_id, "personal"),
+        (settings.stripe_ent_pro_monthly_price_id, "enterprise_pro"),
+        (settings.stripe_ent_pro_yearly_price_id, "enterprise_pro"),
+        (settings.stripe_ent_max_monthly_price_id, "enterprise_max"),
+        (settings.stripe_ent_max_yearly_price_id, "enterprise_max"),
     ]:
         if price_id:
             mapping[price_id] = tier
@@ -1184,6 +4184,92 @@ async def admin_set_plan(
     return {"ok": True, "user_id": clerk_user_id, "tier": tier}
 
 
+@app.post("/admin/credits/grant")
+async def admin_grant_credits(
+    body: dict,
+    caller_user_id: str = Query(...),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Add credits to any user's account. caller_user_id must match ADMIN_USER_ID."""
+    _require_admin(caller_user_id)
+
+    target_user_id = body.get("user_id", "").strip()
+    credits = int(body.get("credits", 0))
+    if not target_user_id:
+        raise HTTPException(status_code=400, detail="user_id is required")
+    if credits <= 0:
+        raise HTTPException(status_code=400, detail="credits must be a positive integer")
+
+    await session.execute(
+        sql_text("""
+            INSERT INTO query_credits (user_id, credits_remaining, updated_at)
+            VALUES (:user_id, :credits, NOW())
+            ON CONFLICT (user_id) DO UPDATE
+            SET credits_remaining = query_credits.credits_remaining + :credits,
+                updated_at = NOW()
+        """),
+        {"user_id": target_user_id, "credits": credits},
+    )
+    await session.commit()
+
+    row = await session.execute(
+        sql_text("SELECT credits_remaining FROM query_credits WHERE user_id = :uid"),
+        {"uid": target_user_id},
+    )
+    row = row.fetchone()
+    new_balance = row[0] if row else credits
+    return {"ok": True, "user_id": target_user_id, "credits_granted": credits, "new_balance": new_balance}
+
+
+@app.post("/admin/clones/{handle}/verify")
+async def admin_verify_clone(
+    handle: str,
+    body: dict,
+    caller_user_id: str = Query(...),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Grant verified badge to a clone. caller_user_id must match ADMIN_USER_ID."""
+    _require_admin(caller_user_id)
+    note = body.get("note", "")
+    result = await session.execute(
+        sql_text("""
+            UPDATE clone_identity
+            SET is_verified = TRUE, verified_at = NOW(), verification_note = :note
+            WHERE handle = :handle
+            RETURNING clone_id, display_name
+        """),
+        {"handle": handle, "note": note},
+    )
+    row = result.mappings().first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Clone not found")
+    await session.commit()
+    return {"ok": True, "handle": handle, "display_name": row["display_name"], "is_verified": True}
+
+
+@app.delete("/admin/clones/{handle}/verify")
+async def admin_revoke_verify(
+    handle: str,
+    caller_user_id: str = Query(...),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Revoke verified badge from a clone."""
+    _require_admin(caller_user_id)
+    result = await session.execute(
+        sql_text("""
+            UPDATE clone_identity
+            SET is_verified = FALSE, verified_at = NULL, verification_note = NULL
+            WHERE handle = :handle
+            RETURNING clone_id
+        """),
+        {"handle": handle},
+    )
+    if not result.mappings().first():
+        raise HTTPException(status_code=404, detail="Clone not found")
+    await session.commit()
+    return {"ok": True, "handle": handle, "is_verified": False}
+
+
 @app.post("/admin/migrate")
 async def admin_run_migration() -> dict:
     """Force re-run the DB schema migration without restarting."""
@@ -1220,11 +4306,13 @@ async def admin_list_users(
     try:
         rows = await session.execute(
             sql_text("""
-                SELECT user_id, display_name, handle,
-                       COALESCE(subscription_tier, 'free') AS subscription_tier,
-                       stripe_customer_id, created_at
-                FROM clone_identity
-                ORDER BY created_at DESC
+                SELECT ci.user_id, ci.display_name, ci.handle,
+                       COALESCE(ci.subscription_tier, 'free') AS subscription_tier,
+                       ci.stripe_customer_id, ci.created_at,
+                       COALESCE(qc.credits_remaining, 0) AS credits_remaining
+                FROM clone_identity ci
+                LEFT JOIN query_credits qc ON qc.user_id = ci.user_id
+                ORDER BY ci.created_at DESC
                 LIMIT :lim OFFSET :off
             """),
             {"lim": limit, "off": offset},
@@ -1240,6 +4328,7 @@ async def admin_list_users(
             "subscription_tier": r["subscription_tier"] or "free",
             "stripe_customer_id": r["stripe_customer_id"],
             "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+            "credits_remaining": r["credits_remaining"],
         }
         for r in rows.mappings().all()
     ]
@@ -1846,9 +4935,6 @@ def _extract_text_from_file(filename: str, content: bytes) -> str:
         return content.decode("utf-8", errors="replace")
     except Exception:
         raise ValueError(f"Cannot extract text from file type '{ext}'")
-
-
-from fastapi import File, Form, UploadFile
 
 
 @app.post("/ingestion/file", status_code=201)
@@ -2759,7 +5845,6 @@ async def review_email_draft(
 
     # Wire feedback into DPO learning pipeline if we have a trace
     if meta["trace_id"]:
-        signal_map = {"approved": "approve", "edited": "edit", "rejected": "reject"}
         try:
             from doppel.brain.learning.feedback import record_feedback
             await record_feedback(
@@ -2767,7 +5852,7 @@ async def review_email_draft(
                 FeedbackSignal(
                     trace_id=UUID(str(meta["trace_id"])),
                     clone_id=UUID(str(meta["clone_id"])),
-                    signal_type=signal_map[body.status],
+                    signal_type=body.status,
                     corrected_response=body.edited_version if body.status == "edited" else None,
                 ),
             )
@@ -3658,7 +6743,6 @@ async def get_identity(
         sql_text("""
             SELECT clone_id, style_fingerprint, value_system,
                    epistemic_profile, admin_policies,
-                   COALESCE(relational_profile, '{}') AS relational_profile,
                    is_preserved, legal_hold_until,
                    retention_days_episodic, retention_days_traces
             FROM clone_identity WHERE user_id = :uid LIMIT 1
@@ -3674,7 +6758,6 @@ async def get_identity(
         "style_fingerprint": rec["style_fingerprint"] or {},
         "value_system": rec["value_system"] or {},
         "epistemic_profile": rec["epistemic_profile"] or {},
-        "relational_profile": rec["relational_profile"] or {},
         "admin_policies": rec["admin_policies"] or {},
         "is_preserved": bool(rec["is_preserved"]),
         "legal_hold_until": rec["legal_hold_until"].isoformat() if rec["legal_hold_until"] else None,
@@ -3696,7 +6779,7 @@ async def patch_identity(
 ) -> dict:
     """Partial-update one identity layer (merges with existing)."""
 
-    allowed = {"style_fingerprint", "value_system", "epistemic_profile", "relational_profile"}
+    allowed = {"style_fingerprint", "value_system", "epistemic_profile"}
     if body.layer not in allowed:
         raise HTTPException(status_code=422, detail=f"layer must be one of: {allowed}")
 
@@ -5488,9 +8571,9 @@ async def gdpr_delete(
 
     clone_id = str(clone["clone_id"])
 
-    # Cascade in FK-safe order
+    # Cascade in FK-safe order (agent_queries uses org_id, not clone_id — excluded)
     for table in [
-        "access_audit_log", "agent_queries", "clone_permissions",
+        "access_audit_log", "clone_permissions",
         "developer_api_keys", "email_drafts", "episodic_memory",
         "ingestion_jobs", "meeting_sessions", "oauth_tokens",
         "proposals", "reasoning_traces", "semantic_memory",
@@ -5507,6 +8590,51 @@ async def gdpr_delete(
     )
     await session.commit()
     return {"status": "deleted", "clone_id": clone_id}
+
+
+@app.delete("/clones/{handle}")
+async def delete_clone_by_handle(
+    handle: str,
+    caller_user_id: str = Query(...),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Delete a specific clone by handle. Caller must be the owner."""
+    clone_row = await session.execute(
+        sql_text("""
+            SELECT clone_id, user_id, is_preserved, legal_hold_until
+            FROM clone_identity WHERE handle = :h
+        """),
+        {"h": handle},
+    )
+    clone = clone_row.mappings().first()
+    if not clone:
+        raise HTTPException(status_code=404, detail="Clone not found")
+    if str(clone["user_id"]) != caller_user_id:
+        raise HTTPException(status_code=403, detail="Not the clone owner")
+
+    _guard_preserved(dict(clone), "delete")
+
+    clone_id = str(clone["clone_id"])
+
+    # agent_queries uses org_id, not clone_id — excluded from cascade
+    for table in [
+        "access_audit_log", "clone_permissions",
+        "developer_api_keys", "email_drafts", "episodic_memory",
+        "ingestion_jobs", "meeting_sessions", "oauth_tokens",
+        "proposals", "reasoning_traces", "semantic_memory",
+        "slack_installations",
+    ]:
+        await session.execute(
+            sql_text(f"DELETE FROM {table} WHERE clone_id = :id"),  # noqa: S608
+            {"id": clone_id},
+        )
+
+    await session.execute(
+        sql_text("DELETE FROM clone_identity WHERE clone_id = :id"),
+        {"id": clone_id},
+    )
+    await session.commit()
+    return {"status": "deleted", "clone_id": clone_id, "handle": handle}
 
 
 # ---------------------------------------------------------------------------

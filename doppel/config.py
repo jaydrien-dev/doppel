@@ -50,7 +50,17 @@ class Settings(BaseSettings):
     # --- Stripe ---
     stripe_secret_key: str = Field(default="", alias="STRIPE_SECRET_KEY")
     stripe_webhook_secret: str = Field(default="", alias="STRIPE_WEBHOOK_SECRET")
-    # Price IDs live on the frontend (NEXT_PUBLIC_STRIPE_*) — backend only needs secret key + webhook secret
+    # Subscription price IDs — create these in the Stripe dashboard (Products → Add product)
+    stripe_personal_monthly_price_id: str = Field(default="", alias="STRIPE_PERSONAL_MONTHLY_PRICE_ID")
+    stripe_personal_yearly_price_id: str = Field(default="", alias="STRIPE_PERSONAL_YEARLY_PRICE_ID")
+    stripe_ent_pro_monthly_price_id: str = Field(default="", alias="STRIPE_ENT_PRO_MONTHLY_PRICE_ID")
+    stripe_ent_pro_yearly_price_id: str = Field(default="", alias="STRIPE_ENT_PRO_YEARLY_PRICE_ID")
+    stripe_ent_max_monthly_price_id: str = Field(default="", alias="STRIPE_ENT_MAX_MONTHLY_PRICE_ID")
+    stripe_ent_max_yearly_price_id: str = Field(default="", alias="STRIPE_ENT_MAX_YEARLY_PRICE_ID")
+    # Credit pack price IDs (one-time payments) — optional, falls back to inline price_data
+    stripe_credits_starter_price_id: str = Field(default="", alias="STRIPE_CREDITS_STARTER_PRICE_ID")
+    stripe_credits_standard_price_id: str = Field(default="", alias="STRIPE_CREDITS_STANDARD_PRICE_ID")
+    stripe_credits_pro_price_id: str = Field(default="", alias="STRIPE_CREDITS_PRO_PRICE_ID")
     app_url: str = Field(default="http://localhost:3000", alias="APP_URL")
 
     # --- Ingestion ---

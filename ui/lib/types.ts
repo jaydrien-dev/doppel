@@ -12,7 +12,8 @@ export type ContextType =
   | "email_compose"
   | "meeting"
   | "decision"
-  | "document";
+  | "document"
+  | "training";
 
 export interface BrainInput {
   clone_id: string;       // UUID
@@ -106,6 +107,16 @@ export interface CloneOwnerInfo extends ClonePublicInfo {
   stripe_customer_id?: string;
   allowed_emails: string[];
   rate_limit_per_day: number;
+  // Identity
+  avatar_url?: string | null;
+  listing_banner_url?: string | null;
+  listing_title?: string | null;
+  is_verified?: boolean;
+  // Marketplace
+  is_listed?: boolean;
+  price_per_query?: number;
+  category?: string;
+  listing_description?: string;
 }
 
 export interface EmailDraft {
@@ -203,6 +214,8 @@ export interface ChatMessage {
   needs_escalation?: boolean;
   // True while tokens are still arriving (streaming)
   isStreaming?: boolean;
+  // True for messages loaded from history (not sent this session)
+  isHistory?: boolean;
 }
 
 // ---------------------------------------------------------------------------

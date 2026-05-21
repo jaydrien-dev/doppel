@@ -403,7 +403,7 @@ export default function TasksPage() {
     <div className="p-8">
       <p className="text-sm text-white/40">
         Create your clone first.{" "}
-        <a href="/dashboard" className="text-white/60 underline underline-offset-2">Overview →</a>
+        <a href="/onboarding" className="text-white/60 underline underline-offset-2">Get started →</a>
       </p>
     </div>
   );

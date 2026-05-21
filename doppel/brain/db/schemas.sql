@@ -165,6 +165,7 @@ ALTER TABLE clone_identity ADD COLUMN IF NOT EXISTS rate_limit_per_day INTEGER N
 ALTER TABLE clone_identity ADD COLUMN IF NOT EXISTS epistemic_profile JSONB NOT NULL DEFAULT '{}';
 ALTER TABLE clone_identity ADD COLUMN IF NOT EXISTS admin_policies JSONB NOT NULL DEFAULT '{}';
 ALTER TABLE clone_identity ADD COLUMN IF NOT EXISTS relational_profile JSONB NOT NULL DEFAULT '{}';
+ALTER TABLE clone_identity ADD COLUMN IF NOT EXISTS elevenlabs_voice_id TEXT;
 
 
 -- ---------------------------------------------------------------------------
@@ -523,3 +524,236 @@ CREATE TABLE IF NOT EXISTS handoff_reports (
     UNIQUE (clone_id)
 );
 CREATE INDEX IF NOT EXISTS handoff_reports_clone_idx ON handoff_reports (clone_id);
+
+
+-- ---------------------------------------------------------------------------
+-- MARKETPLACE — Clone listings
+-- ---------------------------------------------------------------------------
+
+-- Listing fields on clone_identity
+ALTER TABLE clone_identity ADD COLUMN IF NOT EXISTS listing_title       TEXT;
+ALTER TABLE clone_identity ADD COLUMN IF NOT EXISTS is_listed           BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE clone_identity ADD COLUMN IF NOT EXISTS price_per_query     NUMERIC(8,4) NOT NULL DEFAULT 0.00;
+ALTER TABLE clone_identity ADD COLUMN IF NOT EXISTS category            TEXT;
+ALTER TABLE clone_identity ADD COLUMN IF NOT EXISTS listing_description TEXT;
+ALTER TABLE clone_identity ADD COLUMN IF NOT EXISTS listing_banner_url  TEXT;
+ALTER TABLE clone_identity ADD COLUMN IF NOT EXISTS avatar_url          TEXT;
+ALTER TABLE clone_identity ADD COLUMN IF NOT EXISTS total_queries       BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE clone_identity ADD COLUMN IF NOT EXISTS total_earnings_usd  NUMERIC(12,4) NOT NULL DEFAULT 0.00;
+
+CREATE INDEX IF NOT EXISTS marketplace_listed_idx
+    ON clone_identity (is_listed, category, total_queries DESC)
+    WHERE is_listed = TRUE;
+
+-- Clone ratings
+CREATE TABLE IF NOT EXISTS clone_ratings (
+    id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    clone_id     UUID NOT NULL REFERENCES clone_identity(clone_id) ON DELETE CASCADE,
+    rater_user_id TEXT NOT NULL,
+    rating       SMALLINT NOT NULL CHECK (rating BETWEEN 1 AND 5),
+    review_text  TEXT,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (clone_id, rater_user_id)
+);
+CREATE INDEX IF NOT EXISTS ratings_clone_idx ON clone_ratings (clone_id);
+
+-- Query credits: per-user balance
+CREATE TABLE IF NOT EXISTS query_credits (
+    id                UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id           TEXT NOT NULL UNIQUE,
+    credits_remaining BIGINT NOT NULL DEFAULT 0,
+    updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Per-query spend ledger
+CREATE TABLE IF NOT EXISTS query_transactions (
+    id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id       TEXT NOT NULL,
+    clone_id      UUID NOT NULL REFERENCES clone_identity(clone_id) ON DELETE CASCADE,
+    credits_used  INT NOT NULL DEFAULT 1,
+    response_mode TEXT NOT NULL DEFAULT 'fast',  -- fast | pro | extended
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS qtx_user_idx  ON query_transactions (user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS qtx_clone_idx ON query_transactions (clone_id, created_at DESC);
+
+-- Migration for existing installs:
+ALTER TABLE query_transactions ADD COLUMN IF NOT EXISTS response_mode TEXT NOT NULL DEFAULT 'fast';
+
+-- Stripe checkout sessions for credit top-ups
+CREATE TABLE IF NOT EXISTS stripe_credit_sessions (
+    id               UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id          TEXT NOT NULL,
+    stripe_session_id TEXT NOT NULL UNIQUE,
+    credits          INT NOT NULL,
+    status           TEXT NOT NULL DEFAULT 'pending', -- pending | complete | expired
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- -------------------------------------------------------------------------
+-- Verified clone badge (admin-granted trust signal)
+-- -------------------------------------------------------------------------
+ALTER TABLE clone_identity ADD COLUMN IF NOT EXISTS is_verified BOOLEAN DEFAULT FALSE;
+ALTER TABLE clone_identity ADD COLUMN IF NOT EXISTS verified_at TIMESTAMPTZ;
+ALTER TABLE clone_identity ADD COLUMN IF NOT EXISTS verification_note TEXT;
+
+-- -------------------------------------------------------------------------
+-- Persistent consumer memory (clone remembers individual users across sessions)
+-- -------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS consumer_profiles (
+    id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    clone_id            UUID NOT NULL REFERENCES clone_identity(clone_id) ON DELETE CASCADE,
+    consumer_user_id    TEXT NOT NULL,
+    summary             TEXT,
+    context_notes       JSONB DEFAULT '[]',
+    first_session_at    TIMESTAMPTZ DEFAULT NOW(),
+    last_session_at     TIMESTAMPTZ DEFAULT NOW(),
+    total_sessions      INT DEFAULT 1,
+    total_messages      INT DEFAULT 0,
+    UNIQUE(clone_id, consumer_user_id)
+);
+CREATE INDEX IF NOT EXISTS consumer_profiles_clone_idx ON consumer_profiles (clone_id, consumer_user_id);
+
+-- -------------------------------------------------------------------------
+-- Knowledge bundles (creator-packaged deep briefings, one-time purchase)
+-- -------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS knowledge_bundles (
+    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    clone_id        UUID NOT NULL REFERENCES clone_identity(clone_id) ON DELETE CASCADE,
+    title           TEXT NOT NULL,
+    description     TEXT,
+    price_usd       NUMERIC(8,2) NOT NULL DEFAULT 0.00,
+    is_published    BOOLEAN DEFAULT FALSE,
+    created_at      TIMESTAMPTZ DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS bundles_clone_idx ON knowledge_bundles (clone_id);
+
+CREATE TABLE IF NOT EXISTS bundle_items (
+    id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    bundle_id           UUID NOT NULL REFERENCES knowledge_bundles(id) ON DELETE CASCADE,
+    topic               TEXT NOT NULL,
+    briefing_content    TEXT,
+    position            INT DEFAULT 0,
+    status              TEXT DEFAULT 'pending',  -- pending | generating | ready | failed
+    generated_at        TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS bundle_items_bundle_idx ON bundle_items (bundle_id, position);
+
+CREATE TABLE IF NOT EXISTS bundle_purchases (
+    id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    bundle_id           UUID NOT NULL REFERENCES knowledge_bundles(id),
+    user_id             TEXT NOT NULL,
+    stripe_session_id   TEXT,
+    amount_paid         NUMERIC(8,2),
+    created_at          TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(bundle_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS bundle_purchases_user_idx ON bundle_purchases (user_id);
+
+-- Bundle multi-clone model: clones that are part of a bundle
+CREATE TABLE IF NOT EXISTS bundle_clone_members (
+    id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    bundle_id   UUID NOT NULL REFERENCES knowledge_bundles(id) ON DELETE CASCADE,
+    clone_id    UUID NOT NULL REFERENCES clone_identity(clone_id),
+    position    INT DEFAULT 0,
+    UNIQUE(bundle_id, clone_id)
+);
+CREATE INDEX IF NOT EXISTS bundle_clone_members_bundle_idx ON bundle_clone_members (bundle_id);
+
+-- Queries bundled into the purchase
+ALTER TABLE knowledge_bundles ADD COLUMN IF NOT EXISTS queries_included INT DEFAULT 0;
+
+-- Track remaining bundle queries per purchase
+ALTER TABLE bundle_purchases ADD COLUMN IF NOT EXISTS queries_remaining INT DEFAULT 0;
+
+-- -------------------------------------------------------------------------
+-- Consumer bundles (user-curated, cross-clone, optionally resellable)
+-- -------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS consumer_bundles (
+    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id         TEXT NOT NULL,
+    title           TEXT NOT NULL,
+    description     TEXT,
+    is_public       BOOLEAN DEFAULT FALSE,
+    price_usd       NUMERIC(8,2) DEFAULT 0.00,
+    created_at      TIMESTAMPTZ DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS consumer_bundles_user_idx ON consumer_bundles (user_id);
+CREATE INDEX IF NOT EXISTS consumer_bundles_public_idx ON consumer_bundles (is_public, created_at DESC) WHERE is_public = TRUE;
+
+CREATE TABLE IF NOT EXISTS consumer_bundle_items (
+    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    bundle_id       UUID NOT NULL REFERENCES consumer_bundles(id) ON DELETE CASCADE,
+    clone_id        UUID NOT NULL REFERENCES clone_identity(clone_id),
+    topic           TEXT NOT NULL,
+    content         TEXT,
+    position        INT DEFAULT 0,
+    status          TEXT DEFAULT 'pending',  -- pending | generating | ready | failed
+    credits_used    INT DEFAULT 0,
+    generated_at    TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS consumer_bundle_items_bundle_idx ON consumer_bundle_items (bundle_id, position);
+
+CREATE TABLE IF NOT EXISTS consumer_bundle_purchases (
+    id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    bundle_id           UUID NOT NULL REFERENCES consumer_bundles(id),
+    user_id             TEXT NOT NULL,
+    stripe_session_id   TEXT,
+    amount_paid         NUMERIC(8,2),
+    created_at          TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(bundle_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS consumer_bundle_purchases_user_idx ON consumer_bundle_purchases (user_id);
+
+-- ---------------------------------------------------------------------------
+-- CONSUMER CLONES
+-- Tracks which clones a consumer has explicitly added to their home messages.
+-- Populated via share links (/add/[handle]) and the explore page.
+-- Independent of chat history — clones appear in sidebar even before first msg.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS consumer_clones (
+    id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    clone_id            UUID NOT NULL REFERENCES clone_identity(clone_id) ON DELETE CASCADE,
+    consumer_user_id    TEXT NOT NULL,
+    added_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(clone_id, consumer_user_id)
+);
+CREATE INDEX IF NOT EXISTS consumer_clones_user_idx ON consumer_clones (consumer_user_id, added_at DESC);
+
+-- ---------------------------------------------------------------------------
+-- CONSUMER BRAIN
+-- Personal knowledge store for consumers — retrieved to give clones context.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS consumer_memory (
+    id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    consumer_user_id    TEXT NOT NULL,
+    content             TEXT NOT NULL,
+    embedding           VECTOR(1536),
+    category            TEXT NOT NULL DEFAULT 'background',  -- background | goal | preference | experience | expertise
+    source              TEXT NOT NULL DEFAULT 'manual',      -- manual | inferred
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS consumer_memory_user_idx ON consumer_memory (consumer_user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS consumer_memory_embedding_idx ON consumer_memory USING ivfflat (embedding vector_cosine_ops) WITH (lists = 50);
+
+-- Migration for existing installs:
+ALTER TABLE consumer_memory ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT 'background';
+
+
+-- ---------------------------------------------------------------------------
+-- PAYOUT REQUESTS
+-- Creator cash-out requests; processed by ops team.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS payout_requests (
+    id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id             TEXT NOT NULL,
+    clone_id            UUID REFERENCES clone_identity(clone_id) ON DELETE SET NULL,
+    credits_requested   INT NOT NULL,
+    usd_amount          NUMERIC(8,2) NOT NULL,
+    status              TEXT NOT NULL DEFAULT 'pending',  -- pending | processing | paid | rejected
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    processed_at        TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS payout_requests_user_idx ON payout_requests (user_id, created_at DESC);

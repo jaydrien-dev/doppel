@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 28" width="120" height="28" font-family="Plus Jakarta Sans, system-ui, sans-serif">
+  <g transform="translate(0, 4)">
+    <rect x="0" y="0" width="20" height="20" rx="6" fill="#FFFFFF" opacity="0.08"></rect>
+    <rect x="0" y="0" width="20" height="20" rx="6" fill="none" stroke="#FFFFFF" stroke-opacity="0.14"></rect>
+    <circle cx="8" cy="8" r="4.6" fill="#FFFFFF" opacity="0.95"></circle>
+    <circle cx="14.5" cy="13.5" r="3.4" fill="#FFFFFF" opacity="0.55"></circle>
+  </g>
+  <text x="28" y="20" font-size="18" font-weight="600" letter-spacing="-0.02em" fill="#FFFFFF" fill-opacity="0.85">doppel</text>
+</svg>

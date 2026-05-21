@@ -1,13 +1,8 @@
 "use client";
 
-import { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import useSWR from "swr";
 import { useClone } from "@/lib/hooks/useClone";
-import { createClone } from "@/lib/api";
-import { StyleFingerprintCard } from "@/components/dashboard/StyleFingerprintCard";
-import { CloneQualityCard } from "@/components/dashboard/CloneQualityCard";
 import type { BrainStats, ActivityTrace } from "@/lib/types";
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
@@ -40,18 +35,29 @@ function StatsBar({ cloneId }: { cloneId: string }) {
     { refreshInterval: 60_000 }
   );
 
-  const items = [
+  const approvalModifier =
+    quality?.approval_rate != null
+      ? quality.approval_rate >= 80
+        ? "stat-tile--green"
+        : quality.approval_rate < 60
+        ? "stat-tile--red"
+        : ""
+      : "";
+
+  const items: { label: string; value: string; sub: string; modifier: string }[] = [
     {
       label: "Memories",
       value: stats?.total != null ? stats.total.toLocaleString() : "—",
       sub: stats?.sources?.length
         ? `${stats.sources.length} source${stats.sources.length !== 1 ? "s" : ""} connected`
         : "no sources yet",
+      modifier: "stat-tile--blue",
     },
     {
       label: "Episodic",
       value: stats?.episodic != null ? stats.episodic.toLocaleString() : "—",
       sub: stats?.semantic != null ? `+${stats.semantic} semantic facts` : "",
+      modifier: "",
     },
     {
       label: "Responses",
@@ -62,6 +68,7 @@ function StatsBar({ cloneId }: { cloneId: string }) {
           : quality
           ? "all reviewed"
           : "",
+      modifier: "stat-tile--green",
     },
     {
       label: "Approval",
@@ -70,16 +77,17 @@ function StatsBar({ cloneId }: { cloneId: string }) {
         quality?.avg_confidence != null
           ? `${quality.avg_confidence}% avg confidence`
           : "no responses yet",
+      modifier: approvalModifier,
     },
   ];
 
   return (
-    <div className="grid grid-cols-4 gap-4">
-      {items.map(({ label, value, sub }) => (
-        <div key={label} className="glass rounded-2xl px-5 py-4">
-          <p className="text-2xl font-light text-white/85 tabular-nums">{value}</p>
-          <p className="text-xs text-white/45 mt-1">{label}</p>
-          <p className="text-[11px] text-white/20 mt-0.5 truncate">{sub}</p>
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, marginBottom: 28 }}>
+      {items.map(({ label, value, sub, modifier }) => (
+        <div key={label} className={["stat-tile", modifier].filter(Boolean).join(" ")}>
+          <p className="stat-tile__value">{value}</p>
+          <p className="stat-tile__label">{label}</p>
+          {sub && <p className="stat-tile__sub">{sub}</p>}
         </div>
       ))}
     </div>
@@ -99,9 +107,12 @@ function RecentQueries() {
 
   if (isLoading) {
     return (
-      <div className="flex flex-col gap-2">
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         {[...Array(5)].map((_, i) => (
-          <div key={i} className="h-11 glass rounded-xl animate-pulse" />
+          <div
+            key={i}
+            style={{ height: 44, borderRadius: 12, background: "rgba(255,255,255,0.04)", animation: "pulse 1.5s ease-in-out infinite" }}
+          />
         ))}
       </div>
     );
@@ -109,9 +120,9 @@ function RecentQueries() {
 
   if (traces.length === 0) {
     return (
-      <div className="glass rounded-xl px-4 py-10 text-center">
-        <p className="text-sm text-white/25">No queries yet.</p>
-        <p className="text-xs text-white/20 mt-1">
+      <div className="card" style={{ textAlign: "center", padding: "40px 24px" }}>
+        <p style={{ fontSize: 13, color: "rgba(255,255,255,0.25)" }}>No queries yet.</p>
+        <p style={{ fontSize: 12, color: "rgba(255,255,255,0.18)", marginTop: 4 }}>
           Test your clone to see activity here.
         </p>
       </div>
@@ -119,42 +130,30 @@ function RecentQueries() {
   }
 
   return (
-    <div className="flex flex-col gap-1.5">
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
       {traces.map((trace) => {
-        const signal = trace.feedback_signal;
-        const dot =
-          signal === "approved"
-            ? "bg-emerald-400/70"
-            : signal === "edited"
-            ? "bg-blue-300/60"
-            : signal === "rejected"
-            ? "bg-red-400/60"
-            : "bg-white/15";
+        const sig = trace.feedback_signal;
+        const dotColor =
+          sig === "approved" ? "#34D399"
+          : sig === "edited"   ? "#60A5FA"
+          : sig === "rejected" ? "#F87171"
+          : "rgba(255,255,255,0.18)";
 
         return (
-          <div
-            key={trace.id}
-            className="flex items-center gap-3 glass hover:glass-md rounded-xl px-4 py-3 transition-all group"
-          >
-            <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${dot}`} />
-            <p className="flex-1 text-sm text-white/55 truncate group-hover:text-white/75 transition-colors">
-              {trace.input_message}
-            </p>
-            <div className="flex items-center gap-3 shrink-0">
+          <div key={trace.id} className="act-row">
+            <span className="act-row__dot" style={{ background: dotColor }} />
+            <span className="act-row__text">{trace.input_message}</span>
+            <span className="act-row__meta">
               {trace.confidence != null && (
-                <span className="text-[11px] text-white/25 font-mono">
-                  {trace.confidence}%
-                </span>
+                <span className="act-row__conf">{trace.confidence}%</span>
               )}
               {trace.needs_escalation && (
-                <span className="text-[10px] text-amber-300/60 bg-amber-400/10 rounded-full px-1.5 py-px">
+                <span className="badge badge--warn" style={{ padding: "1px 7px", fontSize: 10 }}>
                   escalated
                 </span>
               )}
-              <span className="text-[11px] text-white/20 w-5 text-right">
-                {rel(trace.created_at)}
-              </span>
-            </div>
+              <span style={{ width: 22, textAlign: "right" }}>{rel(trace.created_at)}</span>
+            </span>
           </div>
         );
       })}
@@ -166,11 +165,11 @@ function RecentQueries() {
 // Data sources panel
 // ---------------------------------------------------------------------------
 const SOURCE_LABELS: Record<string, string> = {
-  gmail: "Gmail",
-  slack: "Slack",
-  github: "GitHub",
-  notion: "Notion",
-  upload: "File upload",
+  gmail:   "Gmail",
+  slack:   "Slack",
+  github:  "GitHub",
+  notion:  "Notion",
+  upload:  "File upload",
   meeting: "Meetings",
   seed_qa: "Manual Q&A",
 };
@@ -186,21 +185,22 @@ function SourcesPanel({ cloneId }: { cloneId: string }) {
   const ALL = ["gmail", "slack", "github", "notion", "upload", "meeting", "seed_qa"];
 
   return (
-    <div className="glass rounded-2xl p-5">
-      <p className="text-xs font-medium text-white/45 mb-4">Data sources</p>
-      <div className="flex flex-col gap-2.5">
+    <div className="card">
+      <p className="card-title">Data sources</p>
+      <div>
         {ALL.map((src) => (
-          <div key={src} className="flex items-center justify-between">
-            <span className="text-sm text-white/50">{SOURCE_LABELS[src]}</span>
+          <div key={src} className="src-row">
+            <span className="src-row__name">{SOURCE_LABELS[src]}</span>
             {connected.has(src) ? (
-              <span className="flex items-center gap-1.5 text-[11px] text-emerald-400/70">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400/60" />
+              <span className="src-row__status src-row__status--on">
+                <span style={{ width: 6, height: 6, borderRadius: 999, background: "#34D399", display: "inline-block" }} />
                 Connected
               </span>
             ) : (
               <Link
                 href="/dashboard/train"
-                className="text-[11px] text-white/20 hover:text-white/45 transition-colors"
+                className="src-row__status src-row__status--off"
+                style={{ transition: "color 180ms" }}
               >
                 Connect →
               </Link>
@@ -208,91 +208,9 @@ function SourcesPanel({ cloneId }: { cloneId: string }) {
           </div>
         ))}
       </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Quick actions panel
-// ---------------------------------------------------------------------------
-function QuickActions({
-  cloneHandle,
-  cloneId,
-}: {
-  cloneHandle: string;
-  cloneId: string;
-}) {
-  const { data: stats } = useSWR<BrainStats>(
-    `/api/brain/stats?clone_id=${cloneId}`,
-    fetcher
-  );
-  const { data: quality } = useSWR<{ pending_review: number }>(
-    `/api/brain/quality?clone_id=${cloneId}`,
-    fetcher
-  );
-
-  const lowMemory = (stats?.total ?? 0) < 50;
-  const pending = quality?.pending_review ?? 0;
-
-  const actions = [
-    {
-      label: "Open clone chat ↗",
-      href: `/c/${cloneHandle}`,
-      external: true,
-      highlight: false,
-    },
-    {
-      label: lowMemory ? "Add training data →" : "Train →",
-      href: "/dashboard/train",
-      highlight: lowMemory,
-    },
-    ...(pending > 0
-      ? [
-          {
-            label: `Review ${pending} response${pending !== 1 ? "s" : ""} →`,
-            href: "/dashboard/activity?filter=pending",
-            highlight: true,
-          },
-        ]
-      : []),
-    { label: "Deploy settings →", href: "/dashboard/deploy", highlight: false },
-  ];
-
-  return (
-    <div className="glass rounded-2xl p-5">
-      <p className="text-xs font-medium text-white/45 mb-3">Quick actions</p>
-      <div className="flex flex-col gap-2">
-        {actions.map((a) => (
-          <Link
-            key={a.href}
-            href={a.href}
-            target={"external" in a && a.external ? "_blank" : undefined}
-            rel={"external" in a && a.external ? "noopener noreferrer" : undefined}
-            className={`flex items-center justify-between rounded-xl px-3 py-2.5 text-sm transition-all ${
-              a.highlight
-                ? "glass-md text-white/75 hover:glass-hi"
-                : "glass text-white/40 hover:glass-md hover:text-white/65"
-            }`}
-          >
-            {a.label}
-            <svg
-              width="12"
-              height="12"
-              viewBox="0 0 12 12"
-              fill="none"
-              className="text-white/25 shrink-0"
-            >
-              <path
-                d="M2 6h8M6 2l4 4-4 4"
-                stroke="currentColor"
-                strokeWidth="1.3"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </Link>
-        ))}
-      </div>
+      <Link href="/dashboard/train" className="btn btn--sm" style={{ marginTop: 14, width: "100%", justifyContent: "center" }}>
+        Manage sources
+      </Link>
     </div>
   );
 }
@@ -300,83 +218,19 @@ function QuickActions({
 // ---------------------------------------------------------------------------
 // No-clone state
 // ---------------------------------------------------------------------------
-function CreateCloneForm() {
-  const router = useRouter();
-  const [step, setStep] = useState<"prompt" | "form">("prompt");
-  const [handle, setHandle] = useState("");
-  const [name, setName] = useState("");
-  const [error, setError] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-
-  if (step === "prompt") {
-    return (
-      <div className="flex items-center justify-center h-full p-8">
-        <div className="glass rounded-2xl p-8 w-full max-w-md">
-          <h1 className="text-xl font-light text-white/85 mb-2">Create your clone</h1>
-          <p className="text-sm text-white/40 mb-7 leading-relaxed">
-            Your digital consciousness — a chatbot that thinks and sounds exactly like you.
-          </p>
-          <button
-            onClick={() => setStep("form")}
-            className="glass-md hover:glass-hi rounded-xl px-5 py-3 text-sm text-white/70 hover:text-white/90 transition-all"
-          >
-            Get started →
-          </button>
-        </div>
-      </div>
-    );
-  }
-
+function NoCloneState() {
   return (
-    <div className="flex items-center justify-center h-full p-8">
-      <div className="glass rounded-2xl p-8 w-full max-w-md">
-        <h1 className="text-xl font-light text-white/85 mb-6">Set up your clone</h1>
-        <div className="flex flex-col gap-4">
-          <div>
-            <label className="text-xs text-white/40 mb-1.5 block">Display name</label>
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Jane Smith"
-              className="w-full glass rounded-xl px-4 py-2.5 text-sm text-white/85 placeholder:text-white/25 outline-none"
-            />
-          </div>
-          <div>
-            <label className="text-xs text-white/40 mb-1.5 block">
-              Handle{" "}
-              <span className="text-white/25">· your public URL: /c/your-handle</span>
-            </label>
-            <input
-              type="text"
-              value={handle}
-              onChange={(e) =>
-                setHandle(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ""))
-              }
-              placeholder="jane-smith"
-              className="w-full glass rounded-xl px-4 py-2.5 text-sm text-white/85 placeholder:text-white/25 outline-none"
-            />
-          </div>
-          {error && <p className="text-xs text-white/40">{error}</p>}
-          <button
-            disabled={submitting || !handle || !name}
-            onClick={async () => {
-              setSubmitting(true);
-              setError("");
-              try {
-                await createClone({ handle, display_name: name });
-                router.push("/onboarding");
-              } catch (e) {
-                setError(e instanceof Error ? e.message : "Failed to create clone");
-              } finally {
-                setSubmitting(false);
-              }
-            }}
-            className="glass-md hover:glass-hi rounded-xl px-5 py-3 text-sm text-white/70 hover:text-white/90 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            {submitting ? "Creating…" : "Create clone →"}
-          </button>
-        </div>
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", padding: 32 }}>
+      <div className="card" style={{ width: "100%", maxWidth: 448 }}>
+        <h1 style={{ fontSize: 20, fontWeight: 300, color: "rgba(255,255,255,0.85)", marginBottom: 8 }}>
+          Create your clone
+        </h1>
+        <p style={{ fontSize: 13, color: "rgba(255,255,255,0.40)", marginBottom: 28, lineHeight: 1.6 }}>
+          Your digital consciousness — a chatbot that thinks and sounds exactly like you.
+        </p>
+        <Link href="/onboarding" className="btn btn--primary">
+          Get started →
+        </Link>
       </div>
     </div>
   );
@@ -390,79 +244,49 @@ export default function DashboardPage() {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-full">
-        <div className="w-5 h-5 rounded-full border border-white/20 border-t-white/60 animate-spin" />
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%" }}>
+        <div style={{ width: 20, height: 20, borderRadius: "50%", border: "1px solid rgba(255,255,255,0.20)", borderTopColor: "rgba(255,255,255,0.60)", animation: "spin 0.7s linear infinite" }} />
       </div>
     );
   }
 
-  if (!clone) return <CreateCloneForm />;
+  if (!clone) return <NoCloneState />;
 
   return (
-    <div className="p-8 max-w-5xl flex flex-col gap-6">
-      {/* Header */}
-      <div className="flex items-start justify-between">
+    <div className="db-page" style={{ "--page-accent": "#1A73E8" } as React.CSSProperties}>
+      <div className="db-page-head">
         <div>
-          <h1 className="text-2xl font-light text-white/85">{clone.display_name}</h1>
-          <div className="flex items-center gap-3 mt-1.5">
-            <span className="text-sm text-white/30 font-mono">@{clone.handle}</span>
-            <span className="flex items-center gap-1.5 text-[11px] text-emerald-400/70">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400/60" />
-              Active
-            </span>
-            <span className="text-[11px] text-white/25 bg-white/[0.05] border border-white/[0.06] rounded-full px-2 py-px capitalize">
-              {clone.access_mode ?? "private"}
-            </span>
-          </div>
+          <p className="db-eyebrow">Overview</p>
+          <h1 className="db-h1">
+            Your clone is responding. <em>Stay in the loop.</em>
+          </h1>
         </div>
-        <div className="flex items-center gap-2">
-          <Link
-            href={`/c/${clone.handle}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="glass hover:glass-md rounded-xl px-4 py-2 text-sm text-white/45 hover:text-white/65 transition-all"
-          >
-            Open chat ↗
-          </Link>
-          <Link
-            href="/dashboard/train"
-            className="glass-md hover:glass-hi rounded-xl px-4 py-2 text-sm text-white/65 hover:text-white/85 transition-all"
-          >
-            Train →
+        <div style={{ display: "flex", gap: 8 }}>
+          <Link href="/dashboard/test" className="btn btn--primary">
+            Test clone →
           </Link>
         </div>
       </div>
 
-      {/* 4-stat bar */}
       <StatsBar cloneId={clone.clone_id} />
 
-      {/* Main 2-col: recent queries + sidebar */}
-      <div className="grid grid-cols-[3fr_2fr] gap-6 items-start">
-        {/* Recent queries */}
-        <div className="glass rounded-2xl p-5">
-          <div className="flex items-center justify-between mb-4">
-            <p className="text-xs font-medium text-white/45">Recent queries</p>
-            <Link
-              href="/dashboard/activity"
-              className="text-[11px] text-white/20 hover:text-white/45 transition-colors"
-            >
+      {/* Two-col layout: activity list + sidebar */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 280px", gap: 20, alignItems: "start" }}>
+        {/* Left: recent queries */}
+        <div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+            <h3 className="db-h3">Recent queries</h3>
+            <Link href="/dashboard/activity" className="btn btn--ghost btn--sm">
               View all →
             </Link>
           </div>
           <RecentQueries />
         </div>
 
-        {/* Right column */}
-        <div className="flex flex-col gap-4">
+        {/* Right: sources */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <SourcesPanel cloneId={clone.clone_id} />
-          <QuickActions cloneHandle={clone.handle} cloneId={clone.clone_id} />
         </div>
-      </div>
-
-      {/* Bottom 2-col: style + quality */}
-      <div className="grid grid-cols-2 gap-6">
-        <StyleFingerprintCard fingerprint={clone.style_fingerprint} />
-        <CloneQualityCard cloneId={clone.clone_id} />
       </div>
     </div>
   );

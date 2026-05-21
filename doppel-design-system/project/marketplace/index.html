@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en" class="doppel-light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Doppel — production polish</title>
+
+  <!-- Tokens (loaded first; defines all --var custom properties) -->
+  <link rel="stylesheet" href="colors_and_type.css">
+  <!-- Surface styles (split for editability) -->
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="browse.css">
+  <link rel="stylesheet" href="cards.css">
+  <link rel="stylesheet" href="detail.css">
+  <link rel="stylesheet" href="chat.css">
+
+  <!-- React + Babel (pinned) -->
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+</head>
+<body>
+  <div id="root"></div>
+
+  <!-- Load shared modules in dependency order -->
+  <script type="text/babel" data-presets="react" src="primitives.jsx"></script>
+  <script type="text/babel" data-presets="react" src="data.jsx"></script>
+  <script type="text/babel" data-presets="react" src="chrome.jsx"></script>
+  <script type="text/babel" data-presets="react" src="BrowseScreen.jsx"></script>
+  <script type="text/babel" data-presets="react" src="DetailScreen.jsx"></script>
+  <script type="text/babel" data-presets="react" src="ChatScreen.jsx"></script>
+
+  <script type="text/babel" data-presets="react">
+    /* ============================================================================
+       App shell — routes between Browse → Detail → Chat
+       (useState / useEffect are aliased in primitives.jsx, loaded above)
+       ========================================================================== */
+
+    function App() {
+      // Parse hash route
+      const parse = () => {
+        const h = (window.location.hash || "").replace(/^#/, "");
+        if (h.startsWith("detail-")) return { screen: "detail", cloneId: h.slice(7) };
+        if (h.startsWith("chat-"))   return { screen: "chat",   cloneId: h.slice(5) };
+        if (h === "chat")            return { screen: "chat",   cloneId: "sarah-chen" };
+        if (h === "detail")          return { screen: "detail", cloneId: "sarah-chen" };
+        return { screen: "browse" };
+      };
+      const [state, setState] = useState(parse);
+
+      useEffect(() => {
+        const onHash = () => setState(parse());
+        window.addEventListener("hashchange", onHash);
+        return () => window.removeEventListener("hashchange", onHash);
+      }, []);
+
+      const goto = (screen, cloneId) => {
+        if (screen === "browse") window.location.hash = "";
+        else if (cloneId)        window.location.hash = `${screen}-${cloneId}`;
+        else                     window.location.hash = screen;
+        // Scroll to top on screen change
+        window.scrollTo({ top: 0, behavior: "instant" });
+      };
+
+      const clone = state.cloneId ? (CLONES.find((c) => c.id === state.cloneId) ?? CLONES[0]) : CLONES[0];
+
+      return (
+        <>
+          <DemoBar screen={state.screen} setScreen={(s) => goto(s, s === "browse" ? null : (state.cloneId ?? "sarah-chen"))} />
+          {state.screen === "browse" && (
+            <BrowseScreen onOpen={(c) => goto("detail", c.id)} />
+          )}
+          {state.screen === "detail" && (
+            <DetailScreen
+              clone={clone}
+              onBack={() => goto("browse")}
+              onAsk={() => goto("chat", clone.id)}
+            />
+          )}
+          {state.screen === "chat" && (
+            <ChatScreen clone={clone} onBack={() => goto("detail", clone.id)} />
+          )}
+        </>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+</body>
+</html>

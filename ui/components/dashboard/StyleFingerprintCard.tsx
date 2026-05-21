@@ -7,16 +7,25 @@ interface StyleFingerprintCardProps {
 function Meter({ label, value }: { label: string; value: number }) {
   const pct = Math.round(Math.min(Math.max(value, 0), 1) * 100);
   return (
-    <div className="flex items-center gap-3">
-      <span className="text-xs text-white/40 w-20 shrink-0">{label}</span>
-      <div className="flex-1 h-px bg-white/[0.08] rounded-full overflow-hidden relative">
-        <div
-          className="absolute inset-y-0 left-0 h-full bg-white/30 rounded-full"
-          style={{ width: `${pct}%` }}
-        />
+    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+      <span style={{ fontSize: 12, color: "rgba(255,255,255,0.40)", width: 76, flexShrink: 0 }}>
+        {label}
+      </span>
+      <div style={{ flex: 1, height: 4, borderRadius: 9999, background: "rgba(255,255,255,0.06)", overflow: "hidden" }}>
+        <div style={{ width: `${pct}%`, height: "100%", borderRadius: 9999, background: "rgba(255,255,255,0.25)" }} />
       </div>
-      <span className="text-xs text-white/30 w-8 text-right shrink-0">{pct}%</span>
+      <span style={{ fontSize: 12, color: "rgba(255,255,255,0.30)", width: 30, textAlign: "right", flexShrink: 0 }}>
+        {pct}%
+      </span>
     </div>
+  );
+}
+
+function Tag({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="glass" style={{ borderRadius: 10, padding: "3px 10px", fontSize: 11, color: "rgba(255,255,255,0.40)" }}>
+      {children}
+    </span>
   );
 }
 
@@ -28,20 +37,20 @@ export function StyleFingerprintCard({ fingerprint }: StyleFingerprintCardProps)
   const fp = fingerprint as StyleFingerprint;
 
   return (
-    <div className="glass rounded-2xl p-6">
-      <div className="flex items-center gap-2 mb-5">
-        <div className="w-2 h-2 rounded-full bg-white/30" />
-        <h2 className="text-sm font-medium text-white/60">Writing style</h2>
+    <div className="card">
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 18 }}>
+        <span style={{ width: 6, height: 6, borderRadius: "50%", background: "rgba(255,255,255,0.30)", display: "inline-block" }} />
+        <p className="card-title" style={{ margin: 0 }}>Writing style</p>
       </div>
 
       {!hasData ? (
-        <div className="text-sm text-white/30 py-2">
+        <p style={{ fontSize: 13, color: "rgba(255,255,255,0.30)", padding: "4px 0" }}>
           Style profile will appear after your first ingestion.
-        </div>
+        </p>
       ) : (
-        <div className="flex flex-col gap-4">
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           {/* Meters */}
-          <div className="flex flex-col gap-3">
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             <Meter label="Formality" value={fp.preferred_formality} />
             <Meter label="Directness" value={fp.directness} />
             <Meter label="Warmth" value={fp.warmth} />
@@ -49,20 +58,24 @@ export function StyleFingerprintCard({ fingerprint }: StyleFingerprintCardProps)
           </div>
 
           {/* Boolean flags */}
-          <div className="flex flex-wrap gap-2 pt-2">
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, paddingTop: 4 }}>
             {fp.uses_contractions && <Tag>Contractions</Tag>}
             {fp.uses_bullet_points && <Tag>Lists</Tag>}
             {fp.uses_emojis && <Tag>Emojis</Tag>}
             <Tag>{fp.response_length_preference ?? "medium"} length</Tag>
           </div>
 
-          {/* Phrases */}
+          {/* Signature phrases */}
           {fp.signature_phrases?.length > 0 && (
             <div>
-              <p className="text-[11px] text-white/30 mb-2 uppercase tracking-wider">Signature phrases</p>
-              <div className="flex flex-wrap gap-1.5">
+              <p className="db-eyebrow" style={{ marginBottom: 8 }}>Signature phrases</p>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                 {fp.signature_phrases.slice(0, 6).map((p, i) => (
-                  <span key={i} className="glass rounded-lg px-2.5 py-1 text-xs text-white/50">
+                  <span
+                    key={i}
+                    className="glass"
+                    style={{ borderRadius: 10, padding: "3px 10px", fontSize: 12, color: "rgba(255,255,255,0.50)" }}
+                  >
                     "{p}"
                   </span>
                 ))}
@@ -72,11 +85,5 @@ export function StyleFingerprintCard({ fingerprint }: StyleFingerprintCardProps)
         </div>
       )}
     </div>
-  );
-}
-
-function Tag({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="glass rounded-lg px-2.5 py-1 text-[11px] text-white/40">{children}</span>
   );
 }

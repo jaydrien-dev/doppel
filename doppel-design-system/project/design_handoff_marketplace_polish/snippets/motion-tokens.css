@@ -1,0 +1,128 @@
+/* ============================================================================
+   Doppel motion tokens — paste into ui/app/globals.css under :root
+   ========================================================================== */
+
+:root {
+  /* iOS-class easing. The ONLY easing curve in product UI. */
+  --ease-ios:    cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  /* Spring is RESERVED for the marketing landing only. Do not import here. */
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  /* Durations — don't invent intermediate values */
+  --dur-fast:    180ms;   /* hover / state changes */
+  --dur-base:    280ms;   /* panel transitions, segmented controls */
+  --dur-slow:    420ms;   /* entries, count-ups, bar fills */
+}
+
+/* ============================================================================
+   Keyframes
+   ========================================================================== */
+
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes scale-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes pulse-soft {
+  0%, 100% { opacity: 0.55; }
+  50%      { opacity: 1; }
+}
+
+/* Heart-save tap feedback */
+@keyframes pop {
+  0%   { transform: scale(1); }
+  35%  { transform: scale(1.22); }
+  100% { transform: scale(1); }
+}
+
+/* Typing indicator */
+@keyframes dot-bounce {
+  0%, 80%, 100% { transform: translateY(0); opacity: 0.4; }
+  40%           { transform: translateY(-4px); opacity: 1; }
+}
+
+/* ============================================================================
+   Utility classes — drop on any element
+   ========================================================================== */
+
+.anim-fade-up   { animation: fade-up   var(--dur-slow) var(--ease-ios) both; }
+.anim-fade-in   { animation: fade-in   var(--dur-slow) var(--ease-ios) both; }
+.anim-scale-in  { animation: scale-in  var(--dur-base) var(--ease-ios) both; }
+
+/* Stagger — apply to a parent; up to 11 children fade-up in sequence.
+   Use a key={n} on the parent to retrigger when filters change. */
+.stagger > *                { animation: fade-up var(--dur-slow) var(--ease-ios) both; }
+.stagger > *:nth-child(1)   { animation-delay:   0ms; }
+.stagger > *:nth-child(2)   { animation-delay:  40ms; }
+.stagger > *:nth-child(3)   { animation-delay:  80ms; }
+.stagger > *:nth-child(4)   { animation-delay: 120ms; }
+.stagger > *:nth-child(5)   { animation-delay: 160ms; }
+.stagger > *:nth-child(6)   { animation-delay: 200ms; }
+.stagger > *:nth-child(7)   { animation-delay: 240ms; }
+.stagger > *:nth-child(8)   { animation-delay: 280ms; }
+.stagger > *:nth-child(9)   { animation-delay: 320ms; }
+.stagger > *:nth-child(10)  { animation-delay: 360ms; }
+.stagger > *:nth-child(n+11){ animation-delay: 400ms; }
+
+/* Shimmer background — use on skeleton elements alongside a base background */
+.shimmer {
+  background: linear-gradient(90deg, #F1F3F4 0%, #E8EAED 50%, #F1F3F4 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.6s ease-in-out infinite;
+}
+
+/* ============================================================================
+   Reduced-motion fallback
+   ========================================================================== */
+
+@media (prefers-reduced-motion: reduce) {
+  .anim-fade-up, .anim-fade-in, .anim-scale-in,
+  .stagger > * {
+    animation: none !important;
+  }
+  .shimmer { animation-duration: 0s !important; }
+}
+
+/* ============================================================================
+   useCountUp — drop-in React hook (TypeScript)
+   ----------------------------------------------------------------------------
+   Put this in ui/lib/useCountUp.ts so the detail page can use it.
+
+   import { useEffect, useState } from "react";
+
+   export function useCountUp(target: number, duration = 700): number {
+     const [v, setV] = useState(0);
+     useEffect(() => {
+       let raf: number;
+       const start = performance.now();
+       const tick = (now: number) => {
+         const t = Math.min(1, (now - start) / duration);
+         const eased = 1 - Math.pow(1 - t, 5);  // easeOutQuint
+         setV(Math.round(target * eased));
+         if (t < 1) raf = requestAnimationFrame(tick);
+       };
+       raf = requestAnimationFrame(tick);
+       return () => cancelAnimationFrame(raf);
+     }, [target, duration]);
+     return v;
+   }
+
+   Usage:
+     const animated = useCountUp(11204);
+     <span>{animated.toLocaleString()}</span>
+   ========================================================================== */

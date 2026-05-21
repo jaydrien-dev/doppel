@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en" class="">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Doppel — set up your clone</title>
+
+  <link rel="stylesheet" href="colors_and_type.css">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="onboarding.css">
+
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel" data-presets="react" src="primitives.jsx"></script>
+  <script type="text/babel" data-presets="react" src="steps.jsx"></script>
+
+  <script type="text/babel" data-presets="react">
+    const USER_NAME = "Sarah Chen"; // would come from Clerk in production
+
+    function Confetti() {
+      const bits = useMemo(() => Array.from({ length: 32 }, (_, i) => ({
+        left:  Math.random() * 100,
+        delay: Math.random() * 0.5,
+        color: ["#1A73E8","#A78BFA","#E91E63","#34D399","#FBBF24","#00838F","#F57C00"][i % 7],
+        size:  6 + Math.random() * 6,
+        rot:   Math.random() * 360,
+      })), []);
+      return (
+        <div className="confetti">
+          {bits.map((b, i) => (
+            <span key={i} className="confetti__bit" style={{
+              left: `${b.left}%`,
+              animationDelay: `${b.delay}s`,
+              background: b.color,
+              width: `${b.size}px`, height: `${b.size}px`,
+              borderRadius: i % 3 === 0 ? "50%" : i % 3 === 1 ? "2px" : "0",
+              transform: `rotate(${b.rot}deg)`,
+            }} />
+          ))}
+        </div>
+      );
+    }
+
+    function App() {
+      const [step, setStep] = useState(0);   // 0,1,2
+      const [source, setSource] = useState(null);
+      const [done, setDone] = useState(false);
+      const [showConfetti, setShowConfetti] = useState(false);
+
+      const accent = source?.color ?? "#1A73E8";
+
+      const goto = (i) => {
+        setStep(i);
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      };
+
+      const pickSource = (s) => {
+        setSource(s);
+        // Brief delay to feel responsive, then continue
+        setTimeout(() => goto(1), 220);
+      };
+
+      const finish = () => {
+        setShowConfetti(true);
+        setTimeout(() => setDone(true), 800);
+      };
+
+      // Reset
+      const restart = () => {
+        setDone(false); setShowConfetti(false); setSource(null); setStep(0);
+      };
+
+      if (done) {
+        return (
+          <div style={{
+            minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center",
+            padding: "40px 24px", textAlign: "center", position: "relative", zIndex: 1,
+          }}>
+            <div className="bg" style={{
+              background: `radial-gradient(circle at 50% 30%, ${accent}30 0%, transparent 50%), radial-gradient(circle at 50% 70%, #34D39920 0%, transparent 50%)`
+            }} />
+            <div className="bg__dots" />
+            <div className="anim-fade-up" style={{ position: "relative", zIndex: 2 }}>
+              <div style={{
+                width: 72, height: 72, borderRadius: 999, margin: "0 auto 22px",
+                background: `radial-gradient(circle, ${accent}40 0%, ${accent}10 70%)`,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                color: accent, fontSize: 32,
+              }}>{I.check}</div>
+              <h1 className="h-title" style={{ "--accent": accent }}>You're <em>in.</em></h1>
+              <p className="h-sub" style={{ margin: "0 auto" }}>Your clone is ready. Let's go talk to it.</p>
+              <div style={{ display: "flex", gap: 10, justifyContent: "center", marginTop: 28, flexWrap: "wrap" }}>
+                <button className="btn btn--primary btn--lg" style={{ "--accent": accent }}>Open my clone {I.arrow}</button>
+                <button className="btn btn--secondary btn--lg" onClick={restart}>Start over (demo)</button>
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      return (
+        <div style={{ minHeight: "100vh", position: "relative", "--accent": accent }}>
+          <div className="bg" style={{
+            background: `
+              radial-gradient(circle at 20% 20%, ${accent}24 0%, transparent 40%),
+              radial-gradient(circle at 78% 24%, rgba(167,139,250,0.16) 0%, transparent 42%),
+              radial-gradient(circle at 50% 92%, rgba(233,30,99,0.12) 0%, transparent 44%)
+            `
+          }} />
+          <div className="bg__dots" />
+
+          {showConfetti && <Confetti />}
+
+          <header className="top">
+            <span className="top__brand">
+              <span className="top__brand__mark" />
+              doppel
+            </span>
+            <div className="steps" style={{ marginLeft: 24 }}>
+              <div className={`steps__dot ${step === 0 ? "steps__dot--current" : step > 0 ? "steps__dot--done" : ""}`} />
+              <div className={`steps__dot ${step === 1 ? "steps__dot--current" : step > 1 ? "steps__dot--done" : ""}`} />
+              <div className={`steps__dot ${step === 2 ? "steps__dot--current" : step > 2 ? "steps__dot--done" : ""}`} />
+            </div>
+            <button className="top__skip" onClick={finish}>Skip setup</button>
+          </header>
+
+          <main className="stage-wrap">
+            {step === 0 && <Step1_Source onPick={pickSource} onSkip={finish} userName={USER_NAME} />}
+            {step === 1 && <Step2_Train source={source} onContinue={() => goto(2)} />}
+            {step === 2 && <Step3_Share source={source} userName={USER_NAME} onFinish={finish} />}
+          </main>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+</body>
+</html>

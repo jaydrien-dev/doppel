@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { submitFeedback } from "@/lib/api";
 import type { ChatMessage, FeedbackSignalType, MemorySource } from "@/lib/types";
 
@@ -8,79 +8,86 @@ interface MessageBubbleProps {
   message: ChatMessage;
   cloneId?: string;
   ownerMode?: boolean;
+  cloneInitial?: string;
+  cloneColor?: string;
 }
 
-function confidenceColor(c: number): string {
-  if (c >= 0.8) return "text-emerald-400/80 border-emerald-400/25";
-  if (c >= 0.6) return "text-amber-400/80 border-amber-400/25";
-  return "text-red-400/70 border-red-400/20";
-}
+// Icon SVGs (14px viewBox, 1.4 stroke, currentColor)
+const ISource = () => (
+  <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+    <path d="M3 2.5h6l3 3V13a.5.5 0 01-.5.5h-8A.5.5 0 013 13V3a.5.5 0 010-.5z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"/>
+    <path d="M9 2.5V5h3" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"/>
+    <path d="M5 8h6M5 10h4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+  </svg>
+);
+const ICopy = () => (
+  <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
+    <rect x="4" y="4" width="8" height="8" rx="1.2" stroke="currentColor" strokeWidth="1.2"/>
+    <path d="M10 4V3a1 1 0 00-1-1H3a1 1 0 00-1 1v6a1 1 0 001 1h1" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
+  </svg>
+);
+const IRefresh = () => (
+  <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
+    <path d="M12 3v3h-3M2 11V8h3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
+    <path d="M3 6a4 4 0 016.5-1.5L12 6M11 8a4 4 0 01-6.5 1.5L2 8" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+  </svg>
+);
+const IUp = () => (
+  <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
+    <path d="M3 8.5l4-4 4 4M7 4.5V12" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
+  </svg>
+);
+const IDown = () => (
+  <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
+    <path d="M3 5.5l4 4 4-4M7 9.5V2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
+  </svg>
+);
+const IEdit = () => (
+  <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
+    <path d="M9.5 2.5l2 2-7 7H2.5v-2l7-7z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
+  </svg>
+);
 
-function sourceLabel(source: string): { label: string; color: string } {
+function sourceKind(source: string): string {
   const s = source.toLowerCase();
-  if (s.includes("gmail") || s.includes("email")) return { label: "Email", color: "bg-blue-500/15 text-blue-300/70" };
-  if (s.includes("slack")) return { label: "Slack", color: "bg-purple-500/15 text-purple-300/70" };
-  if (s.includes("meet") || s.includes("zoom") || s.includes("call")) return { label: "Meeting", color: "bg-indigo-500/15 text-indigo-300/70" };
-  if (s.includes("qa") || s.includes("seed") || s.includes("question")) return { label: "Q&A", color: "bg-emerald-500/15 text-emerald-300/70" };
-  if (s.includes("manual") || s.includes("text")) return { label: "Manual", color: "bg-white/10 text-white/40" };
-  if (s.includes("document") || s.includes("doc")) return { label: "Doc", color: "bg-amber-500/15 text-amber-300/70" };
-  return { label: source.slice(0, 12), color: "bg-white/10 text-white/35" };
+  if (s.includes("gmail") || s.includes("email")) return "Email";
+  if (s.includes("slack")) return "Slack";
+  if (s.includes("meet") || s.includes("zoom") || s.includes("call")) return "Meeting";
+  if (s.includes("qa") || s.includes("seed") || s.includes("question")) return "Q&A";
+  if (s.includes("notion") || s.includes("document") || s.includes("doc")) return "Doc";
+  if (s.includes("manual") || s.includes("text")) return "Manual";
+  return source.slice(0, 12);
 }
 
-function SourcesPanel({ sources }: { sources: MemorySource[] }) {
-  const [open, setOpen] = useState(false);
-  const top = sources.slice(0, 4);
-
+function ConfidenceBar({ value }: { value: number }) {
+  const [w, setW] = useState(0);
+  useEffect(() => {
+    const t = setTimeout(() => setW(Math.round(value * 100)), 80);
+    return () => clearTimeout(t);
+  }, [value]);
   return (
-    <div className="px-1">
-      <button
-        onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-1.5 text-[10px] text-white/30 hover:text-white/50 transition-colors"
-      >
-        <svg
-          width="8" height="8" viewBox="0 0 8 8" fill="none"
-          className={`transition-transform duration-150 ${open ? "rotate-90" : ""}`}
-        >
-          <path d="M2 1.5l3 2.5-3 2.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
-        </svg>
-        {sources.length} {sources.length === 1 ? "source" : "sources"}
-      </button>
-
-      {open && (
-        <div className="mt-2 flex flex-col gap-1.5">
-          {top.map((s, i) => {
-            const { label, color } = sourceLabel(s.source);
-            const pct = Math.round(s.similarity * 100);
-            return (
-              <div key={i} className="glass rounded-xl px-3 py-2.5 text-[11px] leading-relaxed">
-                <div className="flex items-center gap-2 mb-1.5">
-                  <span className={`px-1.5 py-0.5 rounded text-[9px] font-medium uppercase tracking-wide ${color}`}>
-                    {label}
-                  </span>
-                  <span className="text-white/20 text-[10px]">{pct}% match</span>
-                  {s.created_at && (
-                    <span className="text-white/15 text-[10px] ml-auto">
-                      {new Date(s.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-                    </span>
-                  )}
-                </div>
-                <p className="text-white/45">
-                  {(s.content ?? "").slice(0, 140)}{(s.content ?? "").length > 140 ? "…" : ""}
-                </p>
-              </div>
-            );
-          })}
-        </div>
-      )}
+    <div className="msg__conf">
+      <span style={{ color: "var(--fg-dark-2)" }}>Confidence</span>
+      <div className="msg__conf__bar">
+        <span style={{ width: `${w}%` }} />
+      </div>
+      <span className="msg__conf__val">{Math.round(value * 100)}%</span>
     </div>
   );
 }
 
-export function MessageBubble({ message, cloneId, ownerMode }: MessageBubbleProps) {
+export function MessageBubble({
+  message,
+  cloneId,
+  ownerMode,
+  cloneInitial = "A",
+  cloneColor = "#1A73E8",
+}: MessageBubbleProps) {
   const isUser = message.role === "user";
   const [feedbackSent, setFeedbackSent] = useState<FeedbackSignalType | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(message.content);
+  const [copied, setCopied] = useState(false);
 
   async function sendFeedback(type: FeedbackSignalType, corrected?: string) {
     if (!message.trace_id || !cloneId) return;
@@ -93,115 +100,141 @@ export function MessageBubble({ message, cloneId, ownerMode }: MessageBubbleProp
     }).catch(() => {});
   }
 
+  function handleCopy() {
+    navigator.clipboard.writeText(message.content);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  }
+
   const conf = message.confidence;
+  // Split into paragraphs; fall back to single paragraph
+  const paras = message.content.split(/\n\n+/).filter(Boolean);
+  const sources = message.sources ?? [];
 
   return (
-    <div className={`flex items-start gap-3 px-4 py-2 ${isUser ? "flex-row-reverse" : ""}`}>
-      {/* Avatar */}
+    <div className={`msg msg--${isUser ? "me" : "ai"}`}>
       {!isUser && (
-        <div className="w-7 h-7 rounded-full glass-md flex items-center justify-center shrink-0 mt-0.5">
-          <span className="text-[10px] font-medium text-white/50">AI</span>
+        <div className="msg__av" style={{ background: cloneColor }}>
+          {cloneInitial}
         </div>
       )}
 
-      <div className={`flex flex-col gap-1.5 max-w-[78%] ${isUser ? "items-end" : "items-start"}`}>
+      <div className="msg__col">
         {/* Bubble */}
-        <div
-          className={`rounded-2xl px-4 py-3 text-sm leading-relaxed ${
-            isUser
-              ? "glass-md rounded-tr-sm text-white/90"
-              : "glass rounded-tl-sm text-white/85"
-          }`}
-        >
+        <div className="msg__bubble">
           {isEditing ? (
-            <div className="flex flex-col gap-2">
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               <textarea
                 value={editValue}
                 onChange={(e) => setEditValue(e.target.value)}
-                className="w-full bg-transparent resize-none text-white/90 outline-none text-sm leading-relaxed min-w-[280px]"
+                style={{
+                  width: "100%", background: "transparent", resize: "none",
+                  color: "inherit", outline: "none", fontSize: 14, lineHeight: 1.55,
+                  minWidth: 280, border: "none",
+                }}
                 rows={4}
                 autoFocus
               />
-              <div className="flex gap-2 justify-end">
+              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
                 <button
                   onClick={() => setIsEditing(false)}
-                  className="text-xs text-white/40 hover:text-white/60 transition-colors"
+                  style={{ fontSize: 12, color: "var(--fg-dark-3)", background: "none", border: "none", cursor: "pointer" }}
                 >
                   Cancel
                 </button>
                 <button
-                  onClick={() => {
-                    sendFeedback("edited", editValue);
-                    setIsEditing(false);
-                  }}
-                  className="text-xs text-white/70 hover:text-white/90 transition-colors font-medium"
+                  onClick={() => { sendFeedback("edited", editValue); setIsEditing(false); }}
+                  style={{ fontSize: 12, color: "var(--fg-dark-1)", background: "none", border: "none", cursor: "pointer", fontWeight: 500 }}
                 >
                   Save correction
                 </button>
               </div>
             </div>
           ) : (
-            <p className="whitespace-pre-wrap">{message.content}</p>
+            paras.map((p, i) => <p key={i}>{p}</p>)
           )}
         </div>
 
-        {/* Confidence + metadata row */}
-        {!isUser && !message.isStreaming && (conf !== undefined || message.path_taken) && (
-          <div className="flex items-center gap-2 px-1">
-            {conf !== undefined && (
-              <span className={`text-[10px] font-medium border rounded px-1.5 py-0.5 ${confidenceColor(conf)}`}>
-                {Math.round(conf * 100)}% confident
+        {/* Source citation pills — always visible when sources exist */}
+        {!isUser && !message.isStreaming && sources.length > 0 && (
+          <div className="msg__cite">
+            <span className="msg__cite__label">
+              <ISource /> Sources
+            </span>
+            {sources.slice(0, 4).map((s: MemorySource, i: number) => (
+              <span key={i} className="msg__cite__pill">
+                <span className="msg__cite__pill__icon"><ISource /></span>
+                <span>{sourceKind(s.source)}</span>
+                {s.content && (
+                  <span style={{ color: "var(--fg-dark-3)" }}>
+                    — {s.content.slice(0, 35)}{s.content.length > 35 ? "…" : ""}
+                  </span>
+                )}
               </span>
-            )}
+            ))}
+          </div>
+        )}
+
+        {/* Confidence bar (animated) */}
+        {!isUser && !message.isStreaming && conf !== undefined && (
+          <ConfidenceBar value={conf} />
+        )}
+
+        {/* Extra badges (path taken, escalation) */}
+        {!isUser && !message.isStreaming && (message.path_taken || message.needs_escalation) && (
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
             {message.path_taken && (
-              <span className="text-[10px] text-white/20 uppercase tracking-wider">
+              <span style={{ fontSize: 10, color: "var(--fg-dark-3)", textTransform: "uppercase", letterSpacing: "0.1em" }}>
                 {message.path_taken === "slow" ? "deep" : "fast"}
               </span>
             )}
             {message.needs_escalation && (
-              <span className="text-[10px] text-amber-400/60 border border-amber-400/20 rounded px-1.5 py-0.5">
+              <span style={{ fontSize: 10, color: "rgba(251,191,36,0.7)", border: "1px solid rgba(251,191,36,0.2)", borderRadius: 4, padding: "1px 6px" }}>
                 needs review
               </span>
             )}
           </div>
         )}
 
-        {/* Sources provenance */}
-        {!isUser && !message.isStreaming && message.sources && message.sources.length > 0 && (
-          <SourcesPanel sources={message.sources} />
-        )}
-
-        {/* Feedback buttons — owner mode only */}
-        {ownerMode && !isUser && message.trace_id && !feedbackSent && !message.isStreaming && (
-          <div className="flex items-center gap-1.5 px-1">
+        {/* Hover-reveal action buttons */}
+        {!isUser && !message.isStreaming && (
+          <div className="msg__actions">
             <button
-              onClick={() => sendFeedback("approved")}
-              className="text-[10px] text-white/30 hover:text-white/60 transition-colors"
-              title="Approve"
+              className={`msg__act${copied ? " msg__act--active" : ""}`}
+              onClick={handleCopy}
+              aria-label="Copy"
+              title="Copy"
             >
-              ✓ approve
+              <ICopy />
             </button>
-            <span className="text-white/15">·</span>
-            <button
-              onClick={() => setIsEditing(true)}
-              className="text-[10px] text-white/30 hover:text-white/60 transition-colors"
-              title="Edit"
-            >
-              ✎ edit
+            <button className="msg__act" aria-label="Regenerate" title="Regenerate">
+              <IRefresh />
             </button>
-            <span className="text-white/15">·</span>
-            <button
-              onClick={() => sendFeedback("rejected")}
-              className="text-[10px] text-white/30 hover:text-white/60 transition-colors"
-              title="Reject"
-            >
-              ✕ reject
-            </button>
+            {ownerMode && message.trace_id && !feedbackSent ? (
+              <>
+                <button className="msg__act" onClick={() => sendFeedback("approved")} aria-label="Helpful" title="Helpful">
+                  <IUp />
+                </button>
+                <button className="msg__act" onClick={() => sendFeedback("rejected")} aria-label="Not helpful" title="Not helpful">
+                  <IDown />
+                </button>
+                <button className="msg__act" onClick={() => setIsEditing(true)} aria-label="Edit" title="Edit correction">
+                  <IEdit />
+                </button>
+              </>
+            ) : (
+              !ownerMode && (
+                <>
+                  <button className="msg__act" aria-label="Helpful" title="Helpful"><IUp /></button>
+                  <button className="msg__act" aria-label="Not helpful" title="Not helpful"><IDown /></button>
+                </>
+              )
+            )}
           </div>
         )}
 
         {feedbackSent && !isUser && (
-          <span className="text-[10px] text-white/25 px-1">
+          <span style={{ fontSize: 11, color: "var(--fg-dark-3)", paddingLeft: 4 }}>
             Feedback saved — {feedbackSent}
           </span>
         )}

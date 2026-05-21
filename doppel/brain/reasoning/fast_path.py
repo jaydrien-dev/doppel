@@ -35,15 +35,61 @@ async def run_stream(
     """
     context_block = mem_system.render_context_block(memory, working)
     system_prompt = identity.render_persona_block() + "\n\n" + _FAST_INSTRUCTIONS
+    consumer_ctx = brain_input.metadata.get("consumer_context")
+    if consumer_ctx:
+        system_prompt += f"\n\n## About the person you're talking to\n{consumer_ctx}"
+    consumer_brain = brain_input.metadata.get("consumer_brain")
+    if consumer_brain:
+        system_prompt += f"\n\n## What they've shared about themselves\n{consumer_brain}"
+    teaching_topic = brain_input.metadata.get("lesson_topic", "")
+    if teaching_topic:
+        system_prompt += (
+            f"\n\n## Teaching Mode\n"
+            f"You are now teaching. Lesson: **{teaching_topic}**\n"
+            f"Structure: (1) Core concept from your specific perspective. "
+            f"(2) Concrete example from your own experience. (3) One hands-on exercise.\n"
+            f"Calibrate depth and language to the student's level from their profile above."
+        )
+    if brain_input.context_type == "training":
+        is_owner = brain_input.metadata.get("training_owner", False)
+        if is_owner:
+            system_prompt += (
+                "\n\n## Training Mode — Knowledge Gap Filling\n"
+                "You are in active training with your creator. Your job is to identify gaps in your own "
+                "knowledge and ask focused, structured questions to fill them. Be methodical: choose ONE "
+                "specific topic or scenario where your knowledge feels thin, probe it deeply with follow-up "
+                "questions, then move to the next gap. Every response must end with exactly one clear, "
+                "specific question. Do not give long answers — your role is to draw knowledge OUT, not "
+                "demonstrate what you already know. Stay curious, stay structured."
+            )
+        else:
+            system_prompt += (
+                "\n\n## Training Mode — Consumer Onboarding\n"
+                "You are learning about this person so you can serve them better in future conversations. "
+                "Ask structured, thoughtful questions about their background, goals, how they think, and "
+                "what they need from you. One question at a time. Acknowledge each answer warmly and "
+                "specifically before asking the next. Stay curious and specific — avoid generic questions. "
+                "After every 3-4 questions, briefly summarise what you've learned so far. "
+                "Every response must end with exactly one focused question."
+            )
     user_content = _build_user_message(brain_input.message, context_block, perceived)
     sources = _extract_sources(memory)
     full_text = ""
+
+    image_b64 = brain_input.metadata.get("image_base64")
+    if image_b64:
+        _user_msg_content = [
+            {"type": "image", "source": {"type": "base64", "media_type": brain_input.metadata.get("image_media_type", "image/jpeg"), "data": image_b64}},
+            {"type": "text", "text": user_content},
+        ]
+    else:
+        _user_msg_content = user_content
 
     async with anthropic.AsyncAnthropic(api_key=get_anthropic_key()).messages.stream(
         model=settings.reasoning_model,
         max_tokens=1024,
         system=system_prompt,
-        messages=[{"role": "user", "content": user_content}],
+        messages=[{"role": "user", "content": _user_msg_content}],
     ) as stream:
         async for text_chunk in stream.text_stream:
             full_text += text_chunk
@@ -73,19 +119,39 @@ async def run(
     """
     context_block = mem_system.render_context_block(memory, working)
 
-    system_prompt = (
-        identity.render_persona_block()
-        + "\n\n"
-        + _FAST_INSTRUCTIONS
-    )
+    system_prompt = identity.render_persona_block() + "\n\n" + _FAST_INSTRUCTIONS
+    consumer_ctx = brain_input.metadata.get("consumer_context")
+    if consumer_ctx:
+        system_prompt += f"\n\n## About the person you're talking to\n{consumer_ctx}"
+    consumer_brain = brain_input.metadata.get("consumer_brain")
+    if consumer_brain:
+        system_prompt += f"\n\n## What they've shared about themselves\n{consumer_brain}"
+    teaching_topic = brain_input.metadata.get("lesson_topic", "")
+    if teaching_topic:
+        system_prompt += (
+            f"\n\n## Teaching Mode\n"
+            f"You are now teaching. Lesson: **{teaching_topic}**\n"
+            f"Structure: (1) Core concept from your specific perspective. "
+            f"(2) Concrete example from your own experience. (3) One hands-on exercise.\n"
+            f"Calibrate depth and language to the student's level from their profile above."
+        )
 
     user_content = _build_user_message(brain_input.message, context_block, perceived)
+
+    image_b64 = brain_input.metadata.get("image_base64")
+    if image_b64:
+        _user_msg_content = [
+            {"type": "image", "source": {"type": "base64", "media_type": brain_input.metadata.get("image_media_type", "image/jpeg"), "data": image_b64}},
+            {"type": "text", "text": user_content},
+        ]
+    else:
+        _user_msg_content = user_content
 
     response = await anthropic.AsyncAnthropic(api_key=get_anthropic_key()).messages.create(
         model=settings.reasoning_model,
         max_tokens=1024,
         system=system_prompt,
-        messages=[{"role": "user", "content": user_content}],
+        messages=[{"role": "user", "content": _user_msg_content}],
     )
 
     response_text = response.content[0].text.strip()
@@ -105,14 +171,35 @@ async def run(
 
 def _build_user_message(message: str, context_block: str, perceived: PerceivedInput) -> str:
     parts = []
+
     if context_block:
-        parts.append(context_block)
-    parts.append(f"## Message\n{message}")
+        parts.append(
+            f"## Retrieved memories (most relevant first)\n"
+            f"The following context was retrieved for this question. "
+            f"Prioritize the most specific and recent material.\n\n"
+            f"{context_block}"
+        )
+    else:
+        parts.append(
+            "## Retrieved memories\n"
+            "No directly relevant memories were retrieved for this question."
+        )
+
+    parts.append(
+        f"## Situation\n"
+        f"Intent: {perceived.intent}\n"
+        f"Stakes: {perceived.stakes}\n"
+        f"Emotional register: {perceived.emotional_register}\n"
+        f"Topics: {', '.join(perceived.topics) if perceived.topics else 'general'}"
+    )
+
     if perceived.emotional_register in ("tense", "urgent"):
         parts.append(
-            f"(Note: the emotional register of this message is {perceived.emotional_register} — "
-            "calibrate your tone accordingly)"
+            f"Note: the emotional register of this message is {perceived.emotional_register}. "
+            "Match the seriousness of the moment — don't lighten it."
         )
+
+    parts.append(f"## Message\n{message}")
     return "\n\n".join(parts)
 
 
@@ -130,7 +217,26 @@ def _extract_sources(memory: MemoryContext) -> list[SourceRef]:
 
 _FAST_INSTRUCTIONS = """\
 ## Task
-Respond to the message below as yourself — drawing on your memories and knowledge.
-Keep it natural. Don't over-explain. Match the expected length for this context.
-If you genuinely don't know something, say so clearly rather than guessing.
+Respond to the message as yourself — the real person, not a generic assistant.
+
+Rules you must follow:
+
+1. **Draw on specific memories.** The retrieved context is there for a reason. Reference it
+   concretely when it's relevant — mention actual past situations, positions you've taken,
+   things you've done. Generic platitudes ("it depends", "it's complicated") are not your voice.
+
+2. **Sound like yourself.** Your persona block defines how you communicate — sentence rhythm,
+   vocabulary, directness level. Match it precisely. If you're terse in real life, be terse here.
+   If you speak in short declarative bursts, do that. Do not default to an assistant voice.
+
+3. **No filler openers.** Never start with "Great question!", "Certainly!", "Of course!",
+   "Happy to help!", or any variant. Start with your actual answer.
+
+4. **Appropriate length for chat.** 1–3 focused sentences handles most questions. Go longer
+   only when the question genuinely requires more — a multi-part question, a complex topic
+   you have real things to say about. Don't pad.
+
+5. **Honest about gaps.** If the retrieved memories don't cover what they're asking, say so
+   directly: "I don't have much context on that" or "I haven't thought through this one."
+   Do not speculate or fill gaps with generic wisdom.
 """

@@ -19,11 +19,16 @@ class BrainInput(BaseModel):
     clone_id: UUID
     session_id: UUID = Field(default_factory=uuid4)
     message: str
-    context_type: Literal["chat", "email_draft", "meeting", "decision"] = "chat"
+    context_type: Literal["chat", "email_draft", "meeting", "decision", "training"] = "chat"
     sender_id: Optional[str] = None        # who is talking to the clone
     sender_name: Optional[str] = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     timestamp: datetime = Field(default_factory=datetime.utcnow)
+    # Consumer-controlled reasoning depth
+    response_mode: Literal["auto", "fast", "pro", "extended"] = "auto"
+    # When True: caller is the owner training their clone — skip credit deduction for owner.
+    # When False: treat caller as a consumer — deduct credits even if caller is the owner.
+    owner_mode: bool = True
 
 
 # ---------------------------------------------------------------------------
@@ -262,7 +267,7 @@ class FeedbackSignal(BaseModel):
     """User feedback on a clone response — primary training signal."""
     trace_id: UUID
     clone_id: UUID
-    signal_type: Literal["approve", "edit", "reject", "rating"]
+    signal_type: Literal["approved", "edited", "rejected", "rating"]
     corrected_response: Optional[str] = None    # if edited
     correction_reason: Optional[str] = None
     rating: Optional[int] = None               # 1–5 if signal_type == "rating"

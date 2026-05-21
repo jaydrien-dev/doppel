@@ -1,0 +1,241 @@
+/* ============================================================================
+   Doppel onboarding — component styles
+   Adapted from doppel-design-system/project/onboarding/
+   ========================================================================== */
+
+/* ============ ADDITIONAL KEYFRAMES (not already in globals.css) ============ */
+@keyframes dot-bounce {
+  0%, 80%, 100% { transform: translateY(0); opacity: 0.4; }
+  40%            { transform: translateY(-4px); opacity: 1; }
+}
+@keyframes flash {
+  0%   { background-color: rgba(255, 255, 255, 0.16); }
+  100% { background-color: transparent; }
+}
+
+/* ============ AMBIENT BG ================================================== */
+.ob-bg {
+  position: fixed; inset: 0; z-index: 0;
+  background:
+    radial-gradient(circle at 20% 20%, rgba(26, 115, 232, 0.14) 0%, transparent 40%),
+    radial-gradient(circle at 78% 24%, rgba(167, 139, 250, 0.12) 0%, transparent 42%),
+    radial-gradient(circle at 50% 92%, rgba(233, 30, 99, 0.08) 0%, transparent 44%);
+  pointer-events: none;
+  transition: background var(--dur-slow, 420ms) var(--ease-ios, cubic-bezier(0.25, 0.46, 0.45, 0.94));
+}
+.ob-bg__dots {
+  position: fixed; inset: 0; z-index: 0;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+  background-size: 32px 32px;
+  mask-image: radial-gradient(ellipse 80% 60% at 50% 40%, #000 30%, transparent 80%);
+  -webkit-mask-image: radial-gradient(ellipse 80% 60% at 50% 40%, #000 30%, transparent 80%);
+  pointer-events: none;
+}
+
+/* ============ STEP RAIL =================================================== */
+.ob-steps {
+  display: flex; align-items: center; gap: 8px;
+  padding: 4px 6px; border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+.ob-steps__dot {
+  width: 26px; height: 4px; border-radius: 999px;
+  background: rgba(255, 255, 255, 0.15);
+  transition: width 280ms cubic-bezier(0.25, 0.46, 0.45, 0.94),
+              background 280ms cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+.ob-steps__dot--done {
+  background: var(--accent, #1A73E8);
+}
+.ob-steps__dot--current {
+  background: var(--accent, #1A73E8);
+  width: 64px;
+  box-shadow: 0 0 0 3px rgba(26, 115, 232, 0.22);
+}
+
+/* ============ STAGE ======================================================= */
+.ob-stage {
+  position: relative; z-index: 1;
+  max-width: 920px; margin: 0 auto;
+  padding: 8px 24px 80px;
+}
+
+.ob-eyebrow {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: 11px; font-weight: 500;
+  letter-spacing: 0.18em; text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.40);
+  margin-bottom: 14px;
+}
+.ob-eyebrow__dot {
+  width: 6px; height: 6px; border-radius: 999px;
+  background: var(--accent, #1A73E8);
+  box-shadow: 0 0 0 4px rgba(26, 115, 232, 0.22);
+  animation: pulse-glow 2.4s ease-in-out infinite;
+}
+
+.ob-h-title {
+  font-size: clamp(28px, 4.4vw, 44px);
+  font-weight: 300; line-height: 1.05;
+  letter-spacing: -0.025em;
+  color: rgba(255, 255, 255, 0.85);
+  margin: 0 0 12px;
+}
+.ob-h-title em {
+  font-style: normal; font-weight: 500;
+  background: linear-gradient(120deg, var(--accent, #4A90E2) 0%, color-mix(in srgb, var(--accent, #4A90E2) 60%, #FBBF24) 100%);
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.ob-h-sub {
+  font-size: 15px; line-height: 1.55;
+  color: rgba(255, 255, 255, 0.50);
+  margin: 0;
+  max-width: 540px;
+}
+
+/* ============ BUTTONS ===================================================== */
+.ob-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 10px 18px; border-radius: 12px;
+  font-size: 13px; font-weight: 500; font-family: inherit;
+  border: none; cursor: pointer; white-space: nowrap;
+  transition: background 180ms cubic-bezier(0.25, 0.46, 0.45, 0.94),
+              color 180ms cubic-bezier(0.25, 0.46, 0.45, 0.94),
+              transform 180ms cubic-bezier(0.25, 0.46, 0.45, 0.94),
+              box-shadow 180ms cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+.ob-btn:active { transform: scale(0.97); }
+.ob-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.ob-btn--primary {
+  background: linear-gradient(135deg, var(--accent, #1A73E8) 0%, color-mix(in srgb, var(--accent, #1A73E8) 70%, #fff) 100%);
+  color: #fff;
+  box-shadow: 0 6px 22px rgba(26, 115, 232, 0.35),
+              inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+.ob-btn--primary:not(:disabled):hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 28px rgba(26, 115, 232, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+}
+.ob-btn--ghost {
+  background: transparent; color: rgba(255, 255, 255, 0.50);
+}
+.ob-btn--ghost:hover {
+  background: rgba(255, 255, 255, 0.04); color: rgba(255, 255, 255, 0.80);
+}
+.ob-btn--lg { padding: 12px 22px; font-size: 14px; }
+
+/* ============ SOURCE PICKER =============================================== */
+.ob-sources {
+  display: grid; gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  margin-top: 36px;
+}
+.ob-source {
+  position: relative; overflow: hidden;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 18px;
+  padding: 18px 18px 20px;
+  cursor: pointer; text-align: left;
+  display: flex; flex-direction: column; gap: 8px;
+  transition: background 180ms cubic-bezier(0.25, 0.46, 0.45, 0.94),
+              border-color 180ms cubic-bezier(0.25, 0.46, 0.45, 0.94),
+              transform 180ms cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  font-family: inherit;
+}
+.ob-source::before {
+  content: ""; position: absolute; right: -30px; top: -30px;
+  width: 120px; height: 120px; border-radius: 999px;
+  background: radial-gradient(circle, var(--src-c) 0%, transparent 60%);
+  opacity: 0.10; pointer-events: none;
+  transition: opacity 280ms cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+.ob-source:hover { transform: translateY(-2px); border-color: color-mix(in srgb, var(--src-c) 40%, rgba(255, 255, 255, 0.06)); }
+.ob-source:hover::before { opacity: 0.20; }
+.ob-source--disabled { opacity: 0.55; cursor: default; }
+.ob-source--disabled:hover { transform: none; border-color: rgba(255, 255, 255, 0.06); }
+.ob-source--disabled:hover::before { opacity: 0.10; }
+
+.ob-source__head { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+.ob-source__icon {
+  width: 36px; height: 36px; border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  background: color-mix(in srgb, var(--src-c) 14%, transparent);
+  color: var(--src-c);
+  flex-shrink: 0;
+}
+.ob-source__name { font-size: 14px; font-weight: 500; color: rgba(255, 255, 255, 0.85); }
+.ob-source__badge {
+  margin-left: auto;
+  font-size: 10px; padding: 2px 8px; border-radius: 999px;
+  background: color-mix(in srgb, var(--src-c) 14%, transparent);
+  color: var(--src-c); font-weight: 500;
+}
+.ob-source__badge--soon {
+  margin-left: auto;
+  font-size: 10px; padding: 2px 8px; border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.30); font-weight: 500;
+}
+.ob-source__desc { font-size: 12px; color: rgba(255, 255, 255, 0.45); line-height: 1.5; }
+.ob-source__count {
+  margin-top: auto;
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 11px; color: rgba(255, 255, 255, 0.30);
+}
+.ob-source__count__dot { width: 4px; height: 4px; border-radius: 999px; background: var(--src-c); }
+
+.ob-source-alt {
+  margin-top: 22px;
+  display: flex; align-items: center; gap: 10px;
+  font-size: 12px; color: rgba(255, 255, 255, 0.30);
+}
+.ob-source-alt__line { flex: 1; height: 1px; background: rgba(255, 255, 255, 0.06); }
+.ob-source-alt__btn {
+  background: transparent; border: 1px dashed rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.50); cursor: pointer; font-family: inherit;
+  padding: 7px 14px; border-radius: 999px; font-size: 12px;
+  display: inline-flex; align-items: center; gap: 6px;
+  transition: background 180ms, color 180ms, border-color 180ms;
+}
+.ob-source-alt__btn:hover {
+  background: rgba(255, 255, 255, 0.04); color: rgba(255, 255, 255, 0.80);
+  border-style: solid; border-color: rgba(255, 255, 255, 0.18);
+}
+
+/* ============ PASTE SUB-FLOW ============================================== */
+.ob-paste-card {
+  margin-top: 28px;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 18px;
+  padding: 22px;
+  display: flex; flex-direction: column; gap: 14px;
+}
+.ob-paste-card textarea {
+  width: 100%; min-height: 160px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 12px;
+  padding: 14px 16px;
+  font-size: 13px; color: rgba(255, 255, 255, 0.80);
+  font-family: inherit; line-height: 1.55; resize: vertical;
+  outline: none;
+  transition: border-color 180ms;
+}
+.ob-paste-card textarea:focus { border-color: rgba(255, 255, 255, 0.20); }
+.ob-paste-card textarea::placeholder { color: rgba(255, 255, 255, 0.25); }
+
+/* ============ FOOT ROW ==================================================== */
+.ob-foot-row {
+  display: flex; gap: 12px; align-items: center;
+  margin-top: 32px;
+  flex-wrap: wrap;
+}
+.ob-foot-row__hint {
+  margin-left: auto;
+  font-size: 12px; color: rgba(255, 255, 255, 0.35);
+  display: inline-flex; align-items: center; gap: 6px;
+}

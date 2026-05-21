@@ -4,7 +4,6 @@ import { useState } from "react";
 import useSWR from "swr";
 import { useClone } from "@/lib/hooks/useClone";
 import type { EmailDraft } from "@/lib/types";
-import { cn } from "@/lib/utils";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
@@ -27,26 +26,12 @@ function formatDate(iso: string | null) {
   });
 }
 
-function StatusBadge({ status }: { status: string }) {
-  const styles: Record<string, string> = {
-    pending: "text-amber-300/60 bg-amber-400/[0.08] border-amber-400/15",
-    approved: "text-white/50 bg-white/[0.05] border-white/10",
-    edited: "text-blue-200/60 bg-blue-400/[0.08] border-blue-400/15",
-    rejected: "text-white/25 bg-white/[0.03] border-white/[0.06]",
-    sent: "text-emerald-400/70 bg-emerald-400/[0.08] border-emerald-400/20",
-  };
-  const labels: Record<string, string> = {
-    pending: "needs review",
-    approved: "approved",
-    edited: "edited",
-    rejected: "rejected",
-    sent: "sent",
-  };
-  return (
-    <span className={cn("text-[10px] border rounded-full px-2 py-0.5", styles[status] ?? styles.rejected)}>
-      {labels[status] ?? status}
-    </span>
-  );
+function statusBadge(status: string) {
+  if (status === "sent") return <span className="badge badge--pos"><span className="badge__dot" />sent</span>;
+  if (status === "pending") return <span className="badge badge--warn"><span className="badge__dot" />needs review</span>;
+  if (status === "edited") return <span className="badge badge--neutral">edited</span>;
+  if (status === "rejected") return <span className="badge badge--neg">rejected</span>;
+  return <span className="badge badge--neutral">{status}</span>;
 }
 
 function DraftCard({
@@ -93,126 +78,121 @@ function DraftCard({
   const canSend = draft.status === "approved" || draft.status === "edited";
 
   return (
-    <div className={cn("glass rounded-2xl overflow-hidden transition-all", !isPending && "opacity-60 hover:opacity-80")}>
-      {/* Header */}
-      <button
-        onClick={() => setExpanded((v) => !v)}
-        className="w-full px-5 py-4 flex items-start gap-4 text-left"
-      >
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1">
-            <p className="text-sm font-medium text-white/75 truncate">{draft.subject}</p>
-            <StatusBadge status={draft.status} />
-          </div>
-          <p className="text-xs text-white/35 truncate">
-            From {draft.sender} · {formatDate(draft.received_at)}
-          </p>
-        </div>
-        <svg
-          className={cn("text-white/25 shrink-0 mt-0.5 transition-transform", expanded && "rotate-180")}
-          width="12" height="12" viewBox="0 0 12 12" fill="none"
+    <div style={{ opacity: !isPending ? 0.65 : 1, transition: "opacity 200ms" }}>
+      <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+        {/* Header */}
+        <button
+          onClick={() => setExpanded((v) => !v)}
+          style={{
+            width: "100%", padding: "14px 20px", display: "flex", alignItems: "flex-start", gap: 14,
+            textAlign: "left", background: "transparent", border: "none", cursor: "pointer",
+          }}
         >
-          <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
-        </svg>
-      </button>
-
-      {expanded && (
-        <div className="px-5 pb-5 flex flex-col gap-4 border-t border-white/[0.05]">
-          {/* Original email */}
-          <div className="pt-4">
-            <p className="text-[10px] text-white/25 uppercase tracking-widest mb-2">Original email</p>
-            <div className="glass rounded-xl px-4 py-3">
-              <p className="text-xs text-white/45 leading-relaxed whitespace-pre-wrap line-clamp-4">
-                {draft.body}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+              <p style={{ fontSize: 13, fontWeight: 500, color: "rgba(255,255,255,0.75)", margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {draft.subject}
               </p>
+              {statusBadge(draft.status)}
             </div>
+            <p style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              From {draft.sender} · {formatDate(draft.received_at)}
+            </p>
           </div>
+          <svg
+            width="11" height="11" viewBox="0 0 11 11" fill="none"
+            style={{ color: "rgba(255,255,255,0.25)", flexShrink: 0, marginTop: 2, transform: expanded ? "rotate(180deg)" : "none", transition: "transform 200ms" }}
+          >
+            <path d="M1.5 3.5l4 4 4-4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
 
-          {/* Draft */}
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-[10px] text-white/25 uppercase tracking-widest">
-                Clone draft
+        {expanded && (
+          <div style={{ padding: "0 20px 20px", display: "flex", flexDirection: "column", gap: 16, borderTop: "1px solid rgba(255,255,255,0.05)" }}>
+            {/* Original email */}
+            <div style={{ paddingTop: 16 }}>
+              <p style={{ fontSize: 10, letterSpacing: "0.14em", textTransform: "uppercase", color: "rgba(255,255,255,0.25)", marginBottom: 8 }}>
+                Original email
               </p>
-              {isPending && !editMode && (
-                <button
-                  onClick={() => setEditMode(true)}
-                  className="text-[10px] text-white/35 hover:text-white/55 transition-colors"
-                >
-                  Edit
-                </button>
+              <div style={{
+                background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.05)",
+                borderRadius: 12, padding: "10px 14px",
+              }}>
+                <p style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", lineHeight: 1.6, margin: 0,
+                  display: "-webkit-box", WebkitLineClamp: 4, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+                  {draft.body}
+                </p>
+              </div>
+            </div>
+
+            {/* Draft */}
+            <div>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                <p style={{ fontSize: 10, letterSpacing: "0.14em", textTransform: "uppercase", color: "rgba(255,255,255,0.25)", margin: 0 }}>
+                  Clone draft
+                </p>
+                {isPending && !editMode && (
+                  <button onClick={() => setEditMode(true)} className="btn btn--ghost btn--sm">Edit</button>
+                )}
+              </div>
+
+              {editMode ? (
+                <textarea
+                  value={editedText}
+                  onChange={(e) => setEditedText(e.target.value)}
+                  rows={6}
+                  className="input"
+                  style={{ resize: "none", lineHeight: 1.6 }}
+                />
+              ) : (
+                <div style={{
+                  background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.05)",
+                  borderRadius: 12, padding: "10px 14px",
+                }}>
+                  <p style={{ fontSize: 13, color: "rgba(255,255,255,0.70)", lineHeight: 1.65, margin: 0, whiteSpace: "pre-wrap" }}>
+                    {draft.edited_version ?? draft.draft}
+                  </p>
+                </div>
+              )}
+
+              {draft.reasoning && (
+                <p style={{ fontSize: 10, color: "rgba(255,255,255,0.25)", marginTop: 8, fontStyle: "italic" }}>
+                  {draft.reasoning}
+                </p>
               )}
             </div>
 
-            {editMode ? (
-              <textarea
-                value={editedText}
-                onChange={(e) => setEditedText(e.target.value)}
-                rows={6}
-                className="w-full glass rounded-xl px-4 py-3 text-sm text-white/80 outline-none resize-none leading-relaxed"
-              />
-            ) : (
-              <div className="glass rounded-xl px-4 py-3">
-                <p className="text-sm text-white/70 leading-relaxed whitespace-pre-wrap">
-                  {draft.edited_version ?? draft.draft}
-                </p>
+            {/* Actions */}
+            {(isPending || canSend) && (
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                {isPending && editMode ? (
+                  <>
+                    <button onClick={() => review("edited", editedText)} disabled={saving} className="btn btn--primary">
+                      {saving ? "Saving…" : "Save & approve"}
+                    </button>
+                    <button onClick={() => { setEditMode(false); setEditedText(draft.draft); }} className="btn btn--ghost">
+                      Cancel
+                    </button>
+                  </>
+                ) : isPending ? (
+                  <>
+                    <button onClick={() => review("approved")} disabled={saving} className="btn btn--primary">
+                      {saving ? "…" : "Approve"}
+                    </button>
+                    <button onClick={() => review("rejected")} disabled={saving} className="btn">
+                      Reject
+                    </button>
+                  </>
+                ) : canSend ? (
+                  <button onClick={send} disabled={sending} className="btn btn--primary">
+                    {sending ? "Sending…" : "Send via Gmail →"}
+                  </button>
+                ) : null}
               </div>
             )}
-
-            {draft.reasoning && (
-              <p className="text-[10px] text-white/25 mt-2 italic">{draft.reasoning}</p>
-            )}
           </div>
-
-          {/* Actions */}
-          {(isPending || canSend) && (
-            <div className="flex items-center gap-2">
-              {isPending && editMode ? (
-                <>
-                  <button
-                    onClick={() => review("edited", editedText)}
-                    disabled={saving}
-                    className="glass-md hover:glass-hi rounded-xl px-4 py-2 text-xs text-white/70 hover:text-white/90 transition-all disabled:opacity-40"
-                  >
-                    {saving ? "Saving…" : "Save & approve"}
-                  </button>
-                  <button
-                    onClick={() => { setEditMode(false); setEditedText(draft.draft); }}
-                    className="text-xs text-white/30 hover:text-white/55 transition-colors"
-                  >
-                    Cancel
-                  </button>
-                </>
-              ) : isPending ? (
-                <>
-                  <button
-                    onClick={() => review("approved")}
-                    disabled={saving}
-                    className="glass-md hover:glass-hi rounded-xl px-4 py-2 text-xs text-white/70 hover:text-white/90 transition-all disabled:opacity-40"
-                  >
-                    {saving ? "…" : "Approve"}
-                  </button>
-                  <button
-                    onClick={() => review("rejected")}
-                    disabled={saving}
-                    className="glass rounded-xl px-4 py-2 text-xs text-white/35 hover:text-white/55 transition-all disabled:opacity-40"
-                  >
-                    Reject
-                  </button>
-                </>
-              ) : canSend ? (
-                <button
-                  onClick={send}
-                  disabled={sending}
-                  className="glass-md hover:glass-hi rounded-xl px-4 py-2 text-xs text-white/70 hover:text-white/90 transition-all disabled:opacity-40"
-                >
-                  {sending ? "Sending…" : "Send via Gmail →"}
-                </button>
-              ) : null}
-            </div>
-          )}
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }
@@ -249,53 +229,47 @@ function TestDraftForm({ cloneId, onCreated }: { cloneId: string; onCreated: () 
 
   if (!open) {
     return (
-      <button
-        onClick={() => setOpen(true)}
-        className="glass hover:glass-md rounded-xl px-5 py-2.5 text-sm text-white/50 hover:text-white/70 transition-all"
-      >
+      <button onClick={() => setOpen(true)} className="btn">
         + Test: paste an email
       </button>
     );
   }
 
   return (
-    <div className="glass rounded-2xl p-5">
-      <p className="text-sm font-medium text-white/60 mb-4">Paste an email to generate a draft reply</p>
-      <form onSubmit={handleGenerate} className="flex flex-col gap-3">
+    <div className="card">
+      <p className="card-title">Paste an email to generate a draft reply</p>
+      <form onSubmit={handleGenerate} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         <input
           type="text"
           value={sender}
           onChange={(e) => setSender(e.target.value)}
           placeholder="From: John Smith <john@example.com>"
-          className="glass rounded-xl px-4 py-2.5 text-sm text-white/80 placeholder:text-white/25 outline-none"
+          className="input"
         />
         <input
           type="text"
           value={subject}
           onChange={(e) => setSubject(e.target.value)}
           placeholder="Subject"
-          className="glass rounded-xl px-4 py-2.5 text-sm text-white/80 placeholder:text-white/25 outline-none"
+          className="input"
         />
         <textarea
           value={body}
           onChange={(e) => setBody(e.target.value)}
           placeholder="Email body…"
           rows={5}
-          className="glass rounded-xl px-4 py-3 text-sm text-white/80 placeholder:text-white/25 outline-none resize-none leading-relaxed"
+          className="input"
+          style={{ resize: "none", lineHeight: 1.6 }}
         />
-        <div className="flex gap-2">
+        <div style={{ display: "flex", gap: 8 }}>
           <button
             type="submit"
             disabled={generating || !sender || !subject || !body}
-            className="glass-md hover:glass-hi rounded-xl px-5 py-2.5 text-sm text-white/70 hover:text-white/90 transition-all disabled:opacity-40"
+            className="btn btn--primary"
           >
             {generating ? "Generating…" : "Generate draft →"}
           </button>
-          <button
-            type="button"
-            onClick={() => setOpen(false)}
-            className="text-sm text-white/30 hover:text-white/55 transition-colors px-3"
-          >
+          <button type="button" onClick={() => setOpen(false)} className="btn btn--ghost">
             Cancel
           </button>
         </div>
@@ -332,22 +306,19 @@ function GmailWatchToggle({ cloneId }: { cloneId: string }) {
 
   if (enabled) {
     return (
-      <span className="text-[10px] text-emerald-400/70 bg-emerald-400/[0.08] border border-emerald-400/20 rounded-full px-2.5 py-0.5">
+      <span className="badge badge--pos">
+        <span className="badge__dot" />
         Auto-receive on{expiresAt ? ` · expires ${new Date(expiresAt).toLocaleDateString()}` : ""}
       </span>
     );
   }
 
   return (
-    <div className="flex items-center gap-2">
-      <button
-        onClick={enable}
-        disabled={enabling}
-        className="text-[10px] text-white/45 hover:text-white/65 underline underline-offset-2 transition-colors disabled:opacity-50"
-      >
+    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      <button onClick={enable} disabled={enabling} className="btn btn--sm">
         {enabling ? "Enabling…" : "Enable auto-receive →"}
       </button>
-      {error && <span className="text-[10px] text-red-400/60">{error}</span>}
+      {error && <span style={{ fontSize: 11, color: "rgba(248,113,113,0.60)" }}>{error}</span>}
     </div>
   );
 }
@@ -368,10 +339,10 @@ export default function EmailPage() {
   if (isLoading) return <LoadingSpinner />;
   if (!clone) {
     return (
-      <div className="p-8">
-        <p className="text-sm text-white/40">
+      <div style={{ padding: 32 }}>
+        <p style={{ fontSize: 13, color: "rgba(255,255,255,0.40)" }}>
           Create your clone first.{" "}
-          <a href="/dashboard" className="text-white/60 underline underline-offset-2">Overview →</a>
+          <a href="/onboarding" style={{ color: "rgba(255,255,255,0.60)", textDecoration: "underline" }}>Get started →</a>
         </p>
       </div>
     );
@@ -381,27 +352,32 @@ export default function EmailPage() {
   const total = data?.total ?? 0;
 
   return (
-    <div className="p-8 max-w-4xl flex flex-col gap-5">
-      <div className="mb-2">
-        <div className="flex items-center gap-3 mb-1">
-          <h1 className="text-2xl font-light text-white/85">Email drafts</h1>
-          <GmailWatchToggle cloneId={clone.clone_id} />
+    <div className="db-page" style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+      <div className="db-page-head">
+        <div>
+          <p className="db-eyebrow">Automation</p>
+          <h1 className="db-h1">Email drafts</h1>
         </div>
-        <p className="text-sm text-white/35">
-          Review draft replies your clone wrote for incoming emails.
-        </p>
+        <GmailWatchToggle cloneId={clone.clone_id} />
       </div>
 
       {/* Filter tabs */}
-      <div className="flex gap-1 glass rounded-xl p-1 w-fit">
+      <div style={{
+        display: "inline-flex", gap: 4, padding: 4, borderRadius: 12,
+        background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)",
+        alignSelf: "flex-start",
+      }}>
         {FILTERS.map(({ value, label }) => (
           <button
             key={value}
             onClick={() => setFilter(value)}
-            className={cn(
-              "px-3 py-1.5 rounded-lg text-xs transition-all",
-              filter === value ? "glass-md text-white/80" : "text-white/35 hover:text-white/55"
-            )}
+            style={{
+              padding: "6px 14px", borderRadius: 9, fontSize: 12, fontWeight: 500,
+              cursor: "pointer", border: "none", fontFamily: "inherit",
+              background: filter === value ? "rgba(255,255,255,0.09)" : "transparent",
+              color: filter === value ? "rgba(255,255,255,0.85)" : "rgba(255,255,255,0.40)",
+              transition: "all 180ms",
+            }}
           >
             {label}
           </button>
@@ -411,12 +387,14 @@ export default function EmailPage() {
       {/* Test form */}
       <TestDraftForm cloneId={clone.clone_id} onCreated={mutate} />
 
-      {/* Draft list */}
-      {draftsLoading && <p className="text-sm text-white/30">Loading…</p>}
+      {/* Loading / empty */}
+      {draftsLoading && (
+        <p style={{ fontSize: 13, color: "rgba(255,255,255,0.30)" }}>Loading…</p>
+      )}
 
       {!draftsLoading && drafts.length === 0 && (
-        <div className="glass rounded-2xl p-8 text-center">
-          <p className="text-sm text-white/30">
+        <div className="card" style={{ textAlign: "center" }}>
+          <p style={{ fontSize: 13, color: "rgba(255,255,255,0.30)", margin: 0 }}>
             {filter === "pending"
               ? "No pending drafts. Use the test form above, or connect Gmail Push to auto-generate drafts."
               : "No drafts found."}
@@ -424,6 +402,7 @@ export default function EmailPage() {
         </div>
       )}
 
+      {/* Draft list */}
       {drafts.map((draft) => (
         <DraftCard
           key={draft.id}
@@ -434,11 +413,10 @@ export default function EmailPage() {
       ))}
 
       {total > drafts.length && (
-        <p className="text-xs text-white/25 text-center">
+        <p style={{ fontSize: 12, color: "rgba(255,255,255,0.25)", textAlign: "center" }}>
           Showing {drafts.length} of {total}
         </p>
       )}
     </div>
   );
 }
-

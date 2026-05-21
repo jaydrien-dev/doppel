@@ -2,10 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
-import { useClone } from "@/lib/hooks/useClone";
+import { useClones } from "@/lib/hooks/useClones";
 import { updateClone } from "@/lib/api";
 import type { CloneOwnerInfo } from "@/lib/types";
-import { cn } from "@/lib/utils";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 
 type EmbedTab = "widget" | "iframe";
@@ -18,8 +17,59 @@ const ACCESS_MODES: { value: AccessMode; label: string; desc: string }[] = [
   { value: "private", label: "Private", desc: "Only you can access" },
 ];
 
+const PALETTE = ["#7C3AED","#2563EB","#0891B2","#059669","#D97706","#DC2626","#BE185D","#0E7490"];
+function deriveColor(name: string) {
+  let h = 0; for (const c of name) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return PALETTE[h % PALETTE.length];
+}
+
+function ClonePicker({ clones, selected, onSelect }: {
+  clones: CloneOwnerInfo[];
+  selected: CloneOwnerInfo;
+  onSelect: (c: CloneOwnerInfo) => void;
+}) {
+  if (clones.length <= 1) return null;
+  return (
+    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 12 }}>
+      {clones.map((c) => {
+        const col = deriveColor(c.display_name);
+        const active = c.clone_id === selected.clone_id;
+        return (
+          <button
+            key={c.clone_id}
+            onClick={() => onSelect(c)}
+            style={{
+              display: "flex", alignItems: "center", gap: 8,
+              padding: "6px 12px 6px 8px", borderRadius: 10,
+              border: `1px solid ${active ? "rgba(255,255,255,0.14)" : "rgba(255,255,255,0.06)"}`,
+              background: active ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.03)",
+              cursor: "pointer", fontFamily: "inherit", transition: "all 120ms",
+            }}
+            onMouseEnter={e => { if (!active) e.currentTarget.style.background = "rgba(255,255,255,0.05)"; }}
+            onMouseLeave={e => { if (!active) e.currentTarget.style.background = "rgba(255,255,255,0.03)"; }}
+          >
+            <div style={{
+              width: 20, height: 20, borderRadius: "50%", background: col, flexShrink: 0,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              fontSize: 10, fontWeight: 500, color: "#fff", overflow: "hidden",
+            }}>
+              {c.avatar_url
+                ? <img src={c.avatar_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={e => { (e.currentTarget as HTMLImageElement).style.display = "none"; }} />
+                : c.display_name[0]?.toUpperCase()}
+            </div>
+            <span style={{ fontSize: 12, fontWeight: 500, color: active ? "rgba(255,255,255,0.80)" : "rgba(255,255,255,0.45)" }}>
+              {c.listing_title || c.display_name}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function DeployPage() {
-  const { clone, isLoading, mutate } = useClone();
+  const { clones, isLoading, mutate } = useClones();
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [updatingMode, setUpdatingMode] = useState(false);
   const [modeError, setModeError] = useState<string | null>(null);
@@ -32,19 +82,21 @@ export default function DeployPage() {
   const [savingEmails, setSavingEmails] = useState(false);
 
   if (isLoading) return <LoadingSpinner />;
-  if (!clone) {
+  if (clones.length === 0) {
     return (
-      <div className="p-8">
-        <p className="text-sm text-white/40">
+      <div style={{ padding: 32 }}>
+        <p style={{ fontSize: 13, color: "rgba(255,255,255,0.40)" }}>
           Create your clone first.{" "}
-          <a href="/dashboard" className="text-white/60 underline underline-offset-2">Overview →</a>
+          <a href="/onboarding" style={{ color: "rgba(255,255,255,0.60)", textDecoration: "underline", textUnderlineOffset: 2 }}>Get started →</a>
         </p>
       </div>
     );
   }
 
+  const clone = clones.find(c => c.clone_id === selectedId) ?? clones[0];
+
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://doppel-pi.vercel.app";
-  const publicUrl = `${appUrl}/c/${clone.handle}`;
+  const publicUrl = `${appUrl}/add/${clone.handle}`;
   const widgetSnippet = `<script src="${appUrl}/api/widget?handle=${clone.handle}" async></script>`;
   const iframeSnippet = `<iframe\n  src="${appUrl}/embed/${clone.handle}"\n  width="400" height="560"\n  style="border:none;border-radius:16px"\n  allow="clipboard-write"\n/>`;
   const activeSnippet = embedTab === "widget" ? widgetSnippet : iframeSnippet;
@@ -112,24 +164,28 @@ export default function DeployPage() {
   }
 
   return (
-    <div className="p-8 max-w-5xl flex flex-col gap-6">
-      <div className="mb-2">
-        <h1 className="text-2xl font-light text-white/85">Deploy</h1>
-        <p className="text-sm text-white/35 mt-1">Share your clone with the world.</p>
+    <div className="db-page" style={{ display: "flex", flexDirection: "column", gap: 24, "--page-accent": "#1A73E8" } as React.CSSProperties}>
+      <div className="db-page-head">
+        <div>
+          <p className="db-eyebrow">Clone</p>
+          <h1 className="db-h1">Deploy</h1>
+          <ClonePicker clones={clones} selected={clone} onSelect={(c) => setSelectedId(c.clone_id)} />
+        </div>
       </div>
 
       {/* Shareable link + QR */}
-      <div className="glass rounded-2xl p-6">
-        <h3 className="text-sm font-medium text-white/60 mb-1">Your clone link</h3>
-        <p className="text-xs text-white/35 mb-4">Share this link — anyone can chat with your clone.</p>
+      <div className="card">
+        <p className="card-title" style={{ marginBottom: 4 }}>Your clone link</p>
+        <p style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", marginBottom: 16 }}>Share this link — anyone can chat with your clone.</p>
 
-        <div className="flex items-center gap-2 mb-4">
-          <div className="flex-1 glass rounded-xl px-4 py-2.5">
-            <p className="text-sm text-white/60 font-mono truncate">{publicUrl}</p>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
+          <div style={{ flex: 1, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, padding: "10px 16px" }}>
+            <p style={{ fontSize: 13, color: "rgba(255,255,255,0.60)", fontFamily: "ui-monospace, monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{publicUrl}</p>
           </div>
           <button
             onClick={() => copyToClipboard(publicUrl, "link")}
-            className="glass-md hover:glass-hi rounded-xl px-4 py-2.5 text-sm text-white/60 hover:text-white/80 transition-all shrink-0"
+            className="btn btn--primary"
+            style={{ flexShrink: 0 }}
           >
             {copied ? "Copied!" : "Copy"}
           </button>
@@ -137,16 +193,19 @@ export default function DeployPage() {
             href={publicUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="glass hover:glass-md rounded-xl px-4 py-2.5 text-sm text-white/50 hover:text-white/70 transition-all shrink-0"
+            className="btn btn--ghost"
+            style={{ flexShrink: 0 }}
           >
             Open ↗
           </a>
           <button
             onClick={() => setShowQR((v) => !v)}
-            className={cn(
-              "glass hover:glass-md rounded-xl px-4 py-2.5 text-sm transition-all shrink-0",
-              showQR ? "text-white/70 glass-md" : "text-white/40 hover:text-white/60"
-            )}
+            className="btn btn--ghost"
+            style={{
+              flexShrink: 0,
+              color: showQR ? "rgba(255,255,255,0.70)" : "rgba(255,255,255,0.40)",
+              background: showQR ? "rgba(255,255,255,0.07)" : "transparent",
+            }}
             title="Show QR code"
           >
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
@@ -162,8 +221,8 @@ export default function DeployPage() {
         </div>
 
         {showQR && (
-          <div className="flex justify-center py-4">
-            <div className="glass rounded-2xl p-5 inline-flex flex-col items-center gap-3">
+          <div style={{ display: "flex", justifyContent: "center", padding: "16px 0" }}>
+            <div className="card" style={{ display: "inline-flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
               <QRCodeSVG
                 value={publicUrl}
                 size={140}
@@ -171,22 +230,22 @@ export default function DeployPage() {
                 fgColor="rgba(255,255,255,0.7)"
                 level="M"
               />
-              <p className="text-[10px] text-white/25">Scan to open clone</p>
+              <p style={{ fontSize: 10, color: "rgba(255,255,255,0.25)" }}>Scan to open clone</p>
             </div>
           </div>
         )}
       </div>
 
-      {/* 2-col grid: left = access control + rate limiting, right = team access + embed */}
-      <div className="grid grid-cols-2 gap-6 items-start">
+      {/* 2-col grid: left = access control + rate limiting, right = shared access + embed */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24, alignItems: "start" }}>
         {/* Left column */}
-        <div className="flex flex-col gap-6">
+        <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
           {/* Access mode */}
-          <div className="glass rounded-2xl p-6">
-            <h3 className="text-sm font-medium text-white/60 mb-1">Access control</h3>
-            <p className="text-xs text-white/35 mb-4">Who can chat with your clone?</p>
+          <div className="card">
+            <p className="card-title" style={{ marginBottom: 4 }}>Access control</p>
+            <p style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", marginBottom: 16 }}>Who can chat with your clone?</p>
 
-            <div className="flex flex-col gap-2">
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {ACCESS_MODES.map(({ value, label, desc }) => {
                 const active = clone.access_mode === value;
                 return (
@@ -194,20 +253,24 @@ export default function DeployPage() {
                     key={value}
                     onClick={() => setAccessMode(value)}
                     disabled={updatingMode}
-                    className={`flex items-center gap-4 rounded-xl px-4 py-3 text-left transition-all border ${
-                      active
-                        ? "glass-md border-white/[0.12]"
-                        : "glass border-transparent hover:glass"
-                    }`}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 16,
+                      borderRadius: 12, padding: "12px 16px", textAlign: "left",
+                      border: `1px solid ${active ? "rgba(255,255,255,0.12)" : "transparent"}`,
+                      background: active ? "rgba(255,255,255,0.07)" : "rgba(255,255,255,0.04)",
+                      cursor: updatingMode ? "not-allowed" : "pointer",
+                      transition: "all 0.15s",
+                    }}
                   >
-                    <div
-                      className={`w-3 h-3 rounded-full border transition-all ${
-                        active ? "border-white/60 bg-white/30" : "border-white/20"
-                      }`}
-                    />
+                    <div style={{
+                      width: 12, height: 12, borderRadius: "50%",
+                      border: `1px solid ${active ? "rgba(255,255,255,0.60)" : "rgba(255,255,255,0.20)"}`,
+                      background: active ? "rgba(255,255,255,0.30)" : "transparent",
+                      flexShrink: 0, transition: "all 0.15s",
+                    }} />
                     <div>
-                      <p className={`text-sm ${active ? "text-white/80" : "text-white/45"}`}>{label}</p>
-                      <p className="text-xs text-white/30">{desc}</p>
+                      <p style={{ fontSize: 13, color: active ? "rgba(255,255,255,0.80)" : "rgba(255,255,255,0.45)" }}>{label}</p>
+                      <p style={{ fontSize: 11, color: "rgba(255,255,255,0.30)" }}>{desc}</p>
                     </div>
                   </button>
                 );
@@ -215,26 +278,27 @@ export default function DeployPage() {
             </div>
 
             {modeError && (
-              <p className="mt-3 text-xs text-red-400/60 font-mono">{modeError}</p>
+              <p style={{ marginTop: 12, fontSize: 12, color: "rgba(248,113,113,0.60)", fontFamily: "ui-monospace, monospace" }}>{modeError}</p>
             )}
 
             {/* Allowlist email manager */}
             {clone.access_mode === "allowlist" && (
-              <div className="mt-5 pt-5 border-t border-white/[0.06]">
-                <p className="text-xs text-white/40 mb-3">Allowed emails</p>
+              <div style={{ marginTop: 20, paddingTop: 20, borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+                <p style={{ fontSize: 12, color: "rgba(255,255,255,0.40)", marginBottom: 12 }}>Allowed emails</p>
 
                 {allowedEmails.length > 0 && (
-                  <div className="flex flex-wrap gap-2 mb-3">
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
                     {allowedEmails.map((email) => (
                       <span
                         key={email}
-                        className="flex items-center gap-1.5 glass rounded-xl px-3 py-1.5 text-xs text-white/60"
+                        className="badge badge--neutral"
+                        style={{ borderRadius: 10 }}
                       >
                         {email}
                         <button
                           onClick={() => removeEmail(email)}
                           disabled={savingEmails}
-                          className="text-white/25 hover:text-white/60 transition-colors ml-1 disabled:opacity-40"
+                          style={{ background: "none", border: "none", color: "rgba(255,255,255,0.30)", cursor: savingEmails ? "not-allowed" : "pointer", fontSize: 12, marginLeft: 4, padding: 0, opacity: savingEmails ? 0.4 : 1 }}
                         >
                           ×
                         </button>
@@ -244,21 +308,22 @@ export default function DeployPage() {
                 )}
 
                 {allowedEmails.length === 0 && (
-                  <p className="text-xs text-white/25 mb-3">No emails yet — add some below.</p>
+                  <p style={{ fontSize: 12, color: "rgba(255,255,255,0.25)", marginBottom: 12 }}>No emails yet — add some below.</p>
                 )}
 
-                <form onSubmit={addEmail} className="flex gap-2">
+                <form onSubmit={addEmail} style={{ display: "flex", gap: 8 }}>
                   <input
                     type="email"
                     value={emailInput}
                     onChange={(e) => setEmailInput(e.target.value)}
                     placeholder="colleague@example.com"
-                    className="flex-1 glass rounded-xl px-4 py-2.5 text-sm text-white/80 placeholder:text-white/25 outline-none"
+                    className="input"
                   />
                   <button
                     type="submit"
                     disabled={savingEmails || !emailInput.trim()}
-                    className="glass-md hover:glass-hi rounded-xl px-4 py-2.5 text-sm text-white/60 hover:text-white/80 transition-all disabled:opacity-40"
+                    className="btn btn--primary"
+                    style={{ flexShrink: 0 }}
                   >
                     Add
                   </button>
@@ -272,57 +337,62 @@ export default function DeployPage() {
         </div>
 
         {/* Right column */}
-        <div className="flex flex-col gap-6">
+        <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
           {/* Team access */}
           <TeamAccessSection cloneHandle={clone.handle} />
 
           {/* Embed widget */}
-          <div className="glass rounded-2xl p-6">
-            <div className="flex items-start justify-between mb-4">
+          <div className="card">
+            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 16 }}>
               <div>
-                <h3 className="text-sm font-medium text-white/60 mb-1">Embed widget</h3>
-                <p className="text-xs text-white/35">
+                <p className="card-title" style={{ marginBottom: 4 }}>Embed widget</p>
+                <p style={{ fontSize: 12, color: "rgba(255,255,255,0.35)" }}>
                   Add a floating chat button to any website — one line of code.
                 </p>
               </div>
               {clone.access_mode !== "public" && (
-                <span className="text-[10px] text-amber-300/60 bg-amber-400/10 px-2 py-1 rounded-lg shrink-0 ml-3">
+                <span className="badge badge--warn" style={{ flexShrink: 0, marginLeft: 12 }}>
                   Set to Public first
                 </span>
               )}
             </div>
 
-            <div className="flex gap-1 glass rounded-xl p-1 mb-4 w-fit">
-              {(["widget", "iframe"] as const).map((tab) => (
+            {/* Widget / iframe tab toggle */}
+            <div style={{ display: "flex", gap: 4, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, padding: 4, marginBottom: 16, width: "fit-content" }}>
+              {(["widget", "iframe"] as const).map((t) => (
                 <button
-                  key={tab}
-                  onClick={() => setEmbedTab(tab)}
-                  className={cn(
-                    "px-3 py-1.5 rounded-lg text-xs transition-all capitalize",
-                    embedTab === tab ? "glass-md text-white/80" : "text-white/35 hover:text-white/55"
-                  )}
+                  key={t}
+                  onClick={() => setEmbedTab(t)}
+                  style={{
+                    padding: "6px 14px", borderRadius: 9, border: "none",
+                    background: embedTab === t ? "rgba(255,255,255,0.07)" : "transparent",
+                    color: embedTab === t ? "rgba(255,255,255,0.80)" : "rgba(255,255,255,0.35)",
+                    fontFamily: "inherit", fontSize: 12, fontWeight: 500, cursor: "pointer",
+                    textTransform: "capitalize",
+                  }}
                 >
-                  {tab === "widget" ? "Floating button" : "iFrame"}
+                  {t === "widget" ? "Floating button" : "iFrame"}
                 </button>
               ))}
             </div>
 
-            <p className="text-[11px] text-white/25 mb-3">
+            <p style={{ fontSize: 11, color: "rgba(255,255,255,0.25)", marginBottom: 12 }}>
               {embedTab === "widget"
                 ? "Creates a floating chat bubble in the bottom-right corner of your page."
                 : "Embeds the chat inline at a fixed size — good for dedicated contact pages."}
             </p>
 
-            <div className="glass rounded-xl px-4 py-3 mb-3">
-              <pre className="text-xs text-white/50 font-mono whitespace-pre-wrap break-all leading-relaxed">
+            <div style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, padding: "12px 16px", marginBottom: 12 }}>
+              <pre style={{ fontSize: 12, color: "rgba(255,255,255,0.50)", fontFamily: "ui-monospace, monospace", whiteSpace: "pre-wrap", wordBreak: "break-all", lineHeight: 1.6, margin: 0 }}>
                 {activeSnippet}
               </pre>
             </div>
 
-            <div className="flex items-center gap-3">
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
               <button
                 onClick={() => copyToClipboard(activeSnippet, "embed")}
-                className="glass-md hover:glass-hi rounded-xl px-4 py-2.5 text-sm text-white/60 hover:text-white/80 transition-all flex items-center gap-2"
+                className="btn btn--primary"
+                style={{ display: "inline-flex", alignItems: "center", gap: 8 }}
               >
                 {embedCopied ? (
                   <>
@@ -340,7 +410,9 @@ export default function DeployPage() {
                   href={`/embed/${clone.handle}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-xs text-white/30 hover:text-white/55 transition-colors"
+                  style={{ fontSize: 12, color: "rgba(255,255,255,0.30)", textDecoration: "none", transition: "color 0.15s" }}
+                  onMouseEnter={(e) => (e.currentTarget.style.color = "rgba(255,255,255,0.55)")}
+                  onMouseLeave={(e) => (e.currentTarget.style.color = "rgba(255,255,255,0.30)")}
                 >
                   Preview embed →
                 </a>
@@ -404,28 +476,28 @@ function TeamAccessSection({ cloneHandle }: { cloneHandle: string }) {
   }
 
   return (
-    <div className="glass rounded-2xl p-6">
-      <h3 className="text-sm font-medium text-white/60 mb-1">Team access</h3>
-      <p className="text-xs text-white/35 mb-5 leading-relaxed">
-        Grant specific users access to this clone with a defined role.
+    <div className="card">
+      <p className="card-title" style={{ marginBottom: 4 }}>Shared access</p>
+      <p style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", marginBottom: 20, lineHeight: 1.6 }}>
+        Share your clone with other accounts. They can chat with it based on their assigned role.
       </p>
 
       {loading ? (
-        <p className="text-xs text-white/25">Loading…</p>
+        <p style={{ fontSize: 12, color: "rgba(255,255,255,0.25)" }}>Loading…</p>
       ) : perms.length === 0 ? (
-        <p className="text-xs text-white/25 mb-4">No team members yet.</p>
+        <p style={{ fontSize: 12, color: "rgba(255,255,255,0.25)", marginBottom: 16 }}>No team members yet.</p>
       ) : (
-        <div className="space-y-2 mb-5">
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 20 }}>
           {perms.map((p) => (
-            <div key={p.user_id} className="flex items-center justify-between glass rounded-xl px-4 py-2.5">
-              <div>
-                <p className="text-xs text-white/60 font-mono">{p.user_id}</p>
-              </div>
-              <div className="flex items-center gap-3">
-                <span className="text-[11px] text-white/40 capitalize">{p.role}</span>
+            <div key={p.user_id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, padding: "10px 16px" }}>
+              <p style={{ fontSize: 12, color: "rgba(255,255,255,0.60)", fontFamily: "ui-monospace, monospace" }}>{p.user_id}</p>
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <span style={{ fontSize: 11, color: "rgba(255,255,255,0.40)", textTransform: "capitalize" }}>{p.role}</span>
                 <button
                   onClick={() => revoke(p.user_id)}
-                  className="text-[11px] text-white/25 hover:text-red-400/70 transition-colors"
+                  style={{ background: "none", border: "none", cursor: "pointer", fontSize: 11, color: "rgba(255,255,255,0.25)", transition: "color 0.15s" }}
+                  onMouseEnter={(e) => (e.currentTarget.style.color = "rgba(248,113,113,0.70)")}
+                  onMouseLeave={(e) => (e.currentTarget.style.color = "rgba(255,255,255,0.25)")}
                 >
                   Remove
                 </button>
@@ -435,27 +507,30 @@ function TeamAccessSection({ cloneHandle }: { cloneHandle: string }) {
         </div>
       )}
 
-      <form onSubmit={grant} className="flex gap-2">
+      <form onSubmit={grant} style={{ display: "flex", gap: 8 }}>
         <input
           type="text"
           value={newUserId}
           onChange={(e) => setNewUserId(e.target.value)}
           placeholder="User ID"
-          className="flex-1 glass rounded-xl px-3 py-2 text-xs text-white/60 placeholder:text-white/20 outline-none focus:border-white/15"
+          className="input"
+          style={{ fontSize: 12 }}
         />
         <select
           value={newRole}
           onChange={(e) => setNewRole(e.target.value as typeof newRole)}
-          className="glass rounded-xl px-2 py-2 text-xs text-white/60 outline-none"
+          className="input"
+          style={{ width: "auto", appearance: "none", fontSize: 12 }}
         >
           {ROLES.map((r) => (
-            <option key={r} value={r} className="bg-neutral-900 capitalize">{r}</option>
+            <option key={r} value={r} style={{ background: "#111" }}>{r}</option>
           ))}
         </select>
         <button
           type="submit"
           disabled={!newUserId.trim() || granting}
-          className="glass-md hover:glass-hi rounded-xl px-4 py-2 text-xs text-white/60 hover:text-white/80 transition-all disabled:opacity-40"
+          className="btn btn--primary btn--sm"
+          style={{ flexShrink: 0 }}
         >
           {granting ? "…" : "Add"}
         </button>
@@ -463,7 +538,6 @@ function TeamAccessSection({ cloneHandle }: { cloneHandle: string }) {
     </div>
   );
 }
-
 
 function RateLimitSection({
   clone,
@@ -495,43 +569,40 @@ function RateLimitSection({
   const PRESETS = [0, 5, 10, 25, 50, 100];
 
   return (
-    <div className="glass rounded-2xl p-6">
-      <h3 className="text-sm font-medium text-white/60 mb-1">Rate limiting</h3>
-      <p className="text-xs text-white/35 mb-5 leading-relaxed">
+    <div className="card">
+      <p className="card-title" style={{ marginBottom: 4 }}>Rate limiting</p>
+      <p style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", marginBottom: 20, lineHeight: 1.6 }}>
         Limit how many messages each visitor can send per day. 0 = unlimited.
       </p>
 
-      <div className="flex flex-wrap gap-2 mb-4">
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
         {PRESETS.map((v) => (
           <button
             key={v}
             onClick={() => setLimit(v)}
-            className={cn(
-              "px-3 py-1.5 rounded-xl text-xs transition-all border",
-              limit === v
-                ? "glass-md text-white/80 border-white/[0.12]"
-                : "glass text-white/40 border-transparent hover:text-white/60"
-            )}
+            className={limit === v ? "btn btn--primary btn--sm" : "btn btn--ghost btn--sm"}
           >
             {v === 0 ? "Unlimited" : `${v}/day`}
           </button>
         ))}
       </div>
 
-      <div className="flex items-center gap-3">
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
         <input
           type="number"
           min={0}
           max={1000}
           value={limit}
           onChange={(e) => setLimit(Math.max(0, parseInt(e.target.value) || 0))}
-          className="w-24 glass rounded-xl px-3 py-2 text-sm text-white/80 outline-none text-center"
+          className="input"
+          style={{ width: 80, textAlign: "center" }}
         />
-        <span className="text-xs text-white/35">messages per visitor per day</span>
+        <span style={{ fontSize: 12, color: "rgba(255,255,255,0.35)" }}>messages per visitor per day</span>
         <button
           onClick={handleSave}
           disabled={saving || limit === (clone.rate_limit_per_day ?? 0)}
-          className="glass-md hover:glass-hi rounded-xl px-4 py-2 text-sm text-white/60 hover:text-white/80 transition-all disabled:opacity-40 ml-auto"
+          className="btn btn--primary btn--sm"
+          style={{ marginLeft: "auto" }}
         >
           {saving ? "Saving…" : saved ? "Saved!" : "Save"}
         </button>
@@ -539,4 +610,3 @@ function RateLimitSection({
     </div>
   );
 }
-

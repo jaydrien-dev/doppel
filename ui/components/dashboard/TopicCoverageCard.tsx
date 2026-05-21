@@ -1,7 +1,6 @@
 "use client";
 
 import useSWR from "swr";
-import { cn } from "@/lib/utils";
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
@@ -23,11 +22,27 @@ interface TopicsData {
   total_memories: number;
 }
 
-function strengthColor(count: number, max: number): string {
+function strengthStyle(count: number, max: number): React.CSSProperties {
   const ratio = count / Math.max(max, 1);
-  if (ratio >= 0.5) return "text-white/75 bg-white/[0.08] border-white/[0.12]";
-  if (ratio >= 0.2) return "text-white/55 bg-white/[0.05] border-white/[0.08]";
-  return "text-white/35 bg-white/[0.03] border-white/[0.05]";
+  if (ratio >= 0.5) {
+    return {
+      color: "rgba(255,255,255,0.75)",
+      background: "rgba(255,255,255,0.08)",
+      border: "1px solid rgba(255,255,255,0.12)",
+    };
+  }
+  if (ratio >= 0.2) {
+    return {
+      color: "rgba(255,255,255,0.55)",
+      background: "rgba(255,255,255,0.05)",
+      border: "1px solid rgba(255,255,255,0.08)",
+    };
+  }
+  return {
+    color: "rgba(255,255,255,0.35)",
+    background: "rgba(255,255,255,0.03)",
+    border: "1px solid rgba(255,255,255,0.05)",
+  };
 }
 
 export function TopicCoverageCard({ cloneId }: { cloneId: string }) {
@@ -43,11 +58,11 @@ export function TopicCoverageCard({ cloneId }: { cloneId: string }) {
 
   if (isLoading) {
     return (
-      <div className="glass rounded-2xl p-6">
-        <div className="h-4 w-32 bg-white/[0.05] rounded animate-pulse mb-3" />
-        <div className="flex flex-wrap gap-2">
+      <div className="card">
+        <div style={{ height: 14, width: 128, background: "rgba(255,255,255,0.05)", borderRadius: 6, marginBottom: 12 }} />
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
           {[...Array(8)].map((_, i) => (
-            <div key={i} className="h-6 w-16 bg-white/[0.04] rounded-full animate-pulse" />
+            <div key={i} style={{ height: 24, width: 64, background: "rgba(255,255,255,0.04)", borderRadius: 9999 }} />
           ))}
         </div>
       </div>
@@ -56,9 +71,9 @@ export function TopicCoverageCard({ cloneId }: { cloneId: string }) {
 
   if (topics.length === 0) {
     return (
-      <div className="glass rounded-2xl p-6">
-        <h3 className="text-sm font-medium text-white/60 mb-1">Topic coverage</h3>
-        <p className="text-xs text-white/30">
+      <div className="card">
+        <p className="card-title">Topic coverage</p>
+        <p style={{ fontSize: 12, color: "rgba(255,255,255,0.30)" }}>
           No topics detected yet. Add more memories to build your coverage map.
         </p>
       </div>
@@ -66,51 +81,67 @@ export function TopicCoverageCard({ cloneId }: { cloneId: string }) {
   }
 
   return (
-    <div className="glass rounded-2xl p-6">
-      <div className="flex items-start justify-between mb-4">
+    <div className="card">
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 14 }}>
         <div>
-          <h3 className="text-sm font-medium text-white/60 mb-1">Topic coverage</h3>
-          <p className="text-xs text-white/30">
+          <p className="card-title">Topic coverage</p>
+          <p style={{ fontSize: 12, color: "rgba(255,255,255,0.30)" }}>
             {topics.length} topics across {(data?.total_memories ?? 0).toLocaleString()} memories
           </p>
         </div>
       </div>
 
       {/* Topic pills */}
-      <div className="flex flex-wrap gap-1.5 mb-4">
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 14 }}>
         {topics.map((t) => (
           <span
             key={t.name}
             title={`${t.count} memories`}
-            className={cn(
-              "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs border transition-all",
-              strengthColor(t.count, max)
-            )}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "3px 10px",
+              borderRadius: 9999,
+              fontSize: 12,
+              transition: "opacity 0.15s",
+              ...strengthStyle(t.count, max),
+            }}
           >
             {t.name}
-            <span className="text-[10px] opacity-60">{t.count}</span>
+            <span style={{ fontSize: 10, opacity: 0.6 }}>{t.count}</span>
           </span>
         ))}
       </div>
 
       {/* Knowledge gaps */}
       {gaps.length > 0 && (
-        <div className="pt-4 border-t border-white/[0.06]">
-          <p className="text-[11px] text-white/35 mb-2 flex items-center gap-1.5">
+        <div style={{ paddingTop: 14, borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+          <p style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
             <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
               <circle cx="5" cy="5" r="4" stroke="currentColor" strokeWidth="1.2"/>
               <path d="M5 3v2.5M5 7h.01" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
             </svg>
-            Knowledge gaps — add content to strengthen these areas
+            Knowledge gaps &mdash; add content to strengthen these areas
           </p>
-          <div className="flex flex-wrap gap-1.5">
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
             {gaps.map((g) => (
               <span
                 key={g.domain}
-                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs text-amber-300/50 bg-amber-400/[0.06] border border-amber-400/[0.1]"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 4,
+                  padding: "3px 10px",
+                  borderRadius: 9999,
+                  fontSize: 12,
+                  color: "rgba(251,191,36,0.50)",
+                  background: "rgba(251,191,36,0.06)",
+                  border: "1px solid rgba(251,191,36,0.10)",
+                }}
               >
                 {g.domain}
-                <span className="text-[10px] opacity-70">{g.facts} facts</span>
+                <span style={{ fontSize: 10, opacity: 0.7 }}>{g.facts} facts</span>
               </span>
             ))}
           </div>
