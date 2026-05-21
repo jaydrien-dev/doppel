@@ -1064,7 +1064,7 @@ export function ChatInterface({
 
   useEffect(() => {
     if (!voiceEnabled || isLoading || convMode) return;
-    const lastMsg = [...messages].reverse().find((m) => m.role === "assistant");
+    const lastMsg = [...messages].reverse().find((m) => m.role === "clone");
     if (!lastMsg?.content || lastMsg.id === lastSpokenMsgId.current) return;
     lastSpokenMsgId.current = lastMsg.id;
     playVoice(lastMsg.content);
@@ -1129,7 +1129,7 @@ export function ChatInterface({
     if (!convIsLoading.current) return; // wasn't loading, skip
     convIsLoading.current = false;
 
-    const lastMsg = [...messages].reverse().find((m) => m.role === "assistant");
+    const lastMsg = [...messages].reverse().find((m) => m.role === "clone");
     if (!lastMsg?.content || lastMsg.id === convLastMsgId.current) {
       setConvState("idle");
       return;
