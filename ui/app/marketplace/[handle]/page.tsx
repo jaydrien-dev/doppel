@@ -449,13 +449,10 @@ export default function MarketplaceClonePage() {
       {/* Hero */}
       <div className={`dtl-hero${clone.listing_banner_url ? " dtl-hero--has-banner" : ""}`} style={{
         "--clone-color": cat.color,
-        ...(clone.listing_banner_url ? {
-          backgroundImage: `linear-gradient(rgba(0,0,0,0.38), rgba(0,0,0,0.50)), url(${clone.listing_banner_url})`,
-          backgroundSize: "cover",
-          backgroundPosition: "center",
-        } : {
-          backgroundImage: `linear-gradient(135deg, ${cat.color}14 0%, #ffffff 60%)`,
-        }),
+        backgroundImage: clone.listing_banner_url
+          ? `linear-gradient(rgba(0,0,0,0.38), rgba(0,0,0,0.50)), url(${clone.listing_banner_url})`
+          : `linear-gradient(135deg, ${cat.color}14 0%, #ffffff 60%)`,
+        ...(clone.listing_banner_url ? { backgroundSize: "cover", backgroundPosition: "center" } : {}),
       } as React.CSSProperties}>
         <div className="dtl-hero__share">
           <button className="dtl-hero__share-btn" aria-label="Save">{I.heart}</button>
