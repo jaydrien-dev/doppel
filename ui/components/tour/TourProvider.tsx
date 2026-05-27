@@ -94,64 +94,6 @@ export const TOURS = {
     },
   ] as TourStep[],
 
-  company: [
-    {
-      target: 'a[href="/dashboard/roles"]',
-      title: "Company Brain",
-      description:
-        "Aggregate knowledge across all team clones into role-based layers. Query the whole org as if it were a single mind.",
-      position: "right",
-    },
-    {
-      target: 'a[href="/dashboard/goals"]',
-      title: "Goals & Strategy",
-      description:
-        "OKRs you define here are injected as context into every Company Brain query — keeping answers anchored to your current strategy.",
-      position: "right",
-    },
-    {
-      target: 'a[href="/dashboard/feed"]',
-      title: "Intelligence Feed",
-      description:
-        "Every signal across your team — decisions, escalations, code, meetings — in one real-time stream.",
-      position: "right",
-    },
-    {
-      target: 'a[href="/dashboard/alerts"]',
-      title: "Drift detection",
-      description:
-        "Alerts fire when team behavior diverges from stated goals, knowledge gaps appear, or escalation rates spike.",
-      position: "right",
-    },
-    {
-      target: 'a[href="/dashboard/skills"]',
-      title: "Skills",
-      description:
-        "Generate Markdown files from your company brain — CLAUDE.md, system prompts, knowledge bases. Drop them into any agent to ground it in your company's actual procedures.",
-      position: "right",
-    },
-    {
-      target: 'a[href="/dashboard/org"]',
-      title: "Team workspace",
-      description:
-        "Invite members, manage roles, and control which clones are visible org-wide. Cross-clone search lets you query the whole company at once.",
-      position: "right",
-    },
-    {
-      target: 'a[href="/dashboard/team-knowledge"]',
-      title: "Team Knowledge",
-      description:
-        "New hires can query any team member's clone directly. Mark clones as onboarding resources so they show up here.",
-      position: "right",
-    },
-    {
-      target: 'a[href="/dashboard/handoff"]',
-      title: "Knowledge Handoff",
-      description:
-        "When someone leaves, trigger a full handoff capture. Generates a structured report and preserves the clone indefinitely.",
-      position: "right",
-    },
-  ] as TourStep[],
 } as const;
 
 // ---------------------------------------------------------------------------

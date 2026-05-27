@@ -8,7 +8,7 @@ import json
 
 import anthropic
 
-from doppel.brain.context import get_anthropic_key
+from doppel.brain.context import get_anthropic_key, get_anthropic_client
 from doppel.brain.models.types import PerceivedInput
 from doppel.config import settings
 
@@ -45,7 +45,7 @@ async def classify(message: str) -> PerceivedInput:
     Classify a user message using the fast model.
     Returns a PerceivedInput with all dimensions filled.
     """
-    response = await anthropic.AsyncAnthropic(api_key=get_anthropic_key()).messages.create(
+    response = await get_anthropic_client().messages.create(
         model=settings.classification_model,
         max_tokens=512,
         messages=[

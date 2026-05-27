@@ -8,7 +8,7 @@ from __future__ import annotations
 import anthropic
 from typing import AsyncGenerator
 
-from doppel.brain.context import get_anthropic_key
+from doppel.brain.context import get_anthropic_key, get_anthropic_client
 from doppel.brain.models.types import (
     BrainInput,
     MemoryContext,
@@ -85,7 +85,7 @@ async def run_stream(
     else:
         _user_msg_content = user_content
 
-    async with anthropic.AsyncAnthropic(api_key=get_anthropic_key()).messages.stream(
+    async with get_anthropic_client().messages.stream(
         model=settings.reasoning_model,
         max_tokens=1024,
         system=system_prompt,
@@ -147,7 +147,7 @@ async def run(
     else:
         _user_msg_content = user_content
 
-    response = await anthropic.AsyncAnthropic(api_key=get_anthropic_key()).messages.create(
+    response = await get_anthropic_client().messages.create(
         model=settings.reasoning_model,
         max_tokens=1024,
         system=system_prompt,

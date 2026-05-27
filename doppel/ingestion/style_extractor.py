@@ -14,7 +14,7 @@ from uuid import UUID
 import anthropic
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from doppel.brain.context import get_anthropic_key
+from doppel.brain.context import get_anthropic_key, get_anthropic_client
 from doppel.brain.identity.style import save_style
 from doppel.brain.models.types import StyleFingerprint
 from doppel.config import settings
@@ -80,7 +80,7 @@ async def extract_style_fingerprint(
 
     prompt = _PROMPT.format(n=len(samples), samples=formatted)
 
-    response = await anthropic.AsyncAnthropic(api_key=get_anthropic_key()).messages.create(
+    response = await get_anthropic_client().messages.create(
         model=settings.reasoning_model,
         max_tokens=1024,
         messages=[{"role": "user", "content": prompt}],

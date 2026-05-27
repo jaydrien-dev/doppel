@@ -14,7 +14,7 @@ from typing import AsyncGenerator
 
 import anthropic
 
-from doppel.brain.context import get_anthropic_key
+from doppel.brain.context import get_anthropic_key, get_anthropic_client
 from doppel.brain.models.types import (
     BrainInput,
     MemoryContext,
@@ -126,7 +126,7 @@ async def run_stream(
         }]
 
     full_text = ""
-    client = anthropic.AsyncAnthropic(api_key=get_anthropic_key())
+    client = get_anthropic_client()
 
     if extended_thinking:
         # Claude extended thinking: budget_tokens=10000, max_tokens must exceed budget
@@ -255,7 +255,7 @@ async def _run_scratchpad(
     else:
         scratchpad_content = scratchpad_prompt
 
-    response = await anthropic.AsyncAnthropic(api_key=get_anthropic_key()).messages.create(
+    response = await get_anthropic_client().messages.create(
         model=settings.reasoning_model,
         max_tokens=max_tokens,
         messages=[{"role": "user", "content": scratchpad_content}],
@@ -304,7 +304,7 @@ async def _generate_response(
             f"({scratchpad.get('escalation_reason', 'requires my direct attention')})"
         )
 
-    response = await anthropic.AsyncAnthropic(api_key=get_anthropic_key()).messages.create(
+    response = await get_anthropic_client().messages.create(
         model=settings.reasoning_model,
         max_tokens=1500,
         system=identity.render_persona_block(),

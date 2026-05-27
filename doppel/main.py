@@ -854,9 +854,8 @@ async def consumer_interview_questions(
         raise HTTPException(status_code=404, detail="Clone not found")
 
     await load_clone_keys(session, clone_id)
-    import anthropic as _anth
-    from doppel.brain.context import get_anthropic_key
-    client = _anth.AsyncAnthropic(api_key=get_anthropic_key())
+    from doppel.brain.context import get_anthropic_client
+    client = get_anthropic_client()
 
     domain_hint = " ".join(filter(None, [clone.get("category"), clone.get("listing_description")]))
     if not domain_hint:
@@ -981,9 +980,8 @@ async def consumer_teaching_plan(
     consumer_profile = "\n".join(consumer_mems) if consumer_mems else "No background known yet."
 
     await load_clone_keys(session, clone_id)
-    import anthropic as _anth
-    from doppel.brain.context import get_anthropic_key
-    client = _anth.AsyncAnthropic(api_key=get_anthropic_key())
+    from doppel.brain.context import get_anthropic_client
+    client = get_anthropic_client()
 
     domain = " — ".join(filter(None, [clone.get("category"), clone.get("listing_description")])) or "their expertise"
     knowledge_section = "\n".join(clone_knowledge) if clone_knowledge else f"Specialist in: {domain}"
@@ -2328,9 +2326,8 @@ async def _maybe_update_consumer_profile(clone_id: str, consumer_user_id: str, s
             convo = "\n".join(f"User: {t['msg']}\nClone: {t['response']}" for t in reversed(traces) if t.get("msg"))
             if not convo:
                 return
-            import anthropic as _anth
-            from doppel.brain.context import get_anthropic_key
-            client = _anth.AsyncAnthropic(api_key=get_anthropic_key())
+            from doppel.brain.context import get_anthropic_client
+            client = get_anthropic_client()
             resp = await client.messages.create(
                 model=settings.classification_model,
                 max_tokens=200,
@@ -2575,9 +2572,8 @@ async def brain_summary(
         if t.get("user_msg")
     )
 
-    import anthropic as _anth
-    from doppel.brain.context import get_anthropic_key
-    client = _anth.AsyncAnthropic(api_key=get_anthropic_key())
+    from doppel.brain.context import get_anthropic_client
+    client = get_anthropic_client()
     resp = await client.messages.create(
         model=settings.reasoning_model,
         max_tokens=800,
@@ -2638,9 +2634,8 @@ async def brain_training_save(
     if not traces:
         raise HTTPException(status_code=404, detail="No conversation found for this session")
 
-    import anthropic as _anth
-    from doppel.brain.context import get_anthropic_key
-    client = _anth.AsyncAnthropic(api_key=get_anthropic_key())
+    from doppel.brain.context import get_anthropic_client
+    client = get_anthropic_client()
 
     if is_owner:
         # Embed each Q&A turn as a knowledge chunk in the clone's memory
@@ -2773,9 +2768,8 @@ async def synthesis_query(body: dict, request: Request) -> dict:
             )
             await db.commit()
 
-    import anthropic as _anth
-    from doppel.brain.context import get_anthropic_key
-    client = _anth.AsyncAnthropic(api_key=get_anthropic_key())
+    from doppel.brain.context import get_anthropic_client
+    client = get_anthropic_client()
     persp_text = "\n\n".join(f"**{p['name']}:** {p['response']}" for p in valid)
     resp = await client.messages.create(
         model=settings.reasoning_model,
@@ -2861,9 +2855,8 @@ async def synthesis_deliberate(body: dict, request: Request) -> dict:
         )
         await db.commit()
 
-    import anthropic as _anth
-    from doppel.brain.context import get_anthropic_key
-    client = _anth.AsyncAnthropic(api_key=get_anthropic_key())
+    from doppel.brain.context import get_anthropic_client
+    client = get_anthropic_client()
     transcript = "\n".join(f"{t['name']} (round {t['round']}): {t['message']}" for t in turns)
     resp = await client.messages.create(
         model=settings.reasoning_model,

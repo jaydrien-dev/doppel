@@ -6,7 +6,7 @@ Use this document to understand what Doppel is, what has been built, how the cod
 
 ## What Doppel is
 
-Doppel lets people build a persistent AI clone of themselves — a "digital consciousness" trained on their real knowledge, writing, and thinking. The clone can then be deployed to answer questions, handle emails, participate in meetings, and be sold as a knowledge product on a marketplace.
+Doppel is a **knowledge commerce platform**. Creators build a persistent AI clone of themselves — trained on their real knowledge, writing, and thinking — and sell access to it. Consumers buy that access to get answers sourced from genuine human expertise, not generic AI.
 
 **Tagline:** Knowledge shouldn't have a lifespan.
 
@@ -14,9 +14,22 @@ Doppel lets people build a persistent AI clone of themselves — a "digital cons
 
 **Core product framing:**
 - The clone IS the product. Not the email agent. Not the meeting bot.
-- The "wow moment" is: talk to a chatbot that thinks and sounds exactly like you.
-- Email drafting and meeting participation are secondary deployment surfaces on top of the same brain.
-- The business model is a knowledge marketplace: consumers pay per query, creators keep 80%.
+- The "wow moment" is: talk to a chatbot that thinks and sounds exactly like a real expert.
+- The marketplace is the distribution layer. Creators list, consumers discover and buy.
+- Doppel's moat against commodity AI: verified real-world expertise, persistent cross-session memory, multi-expert synthesis, and packaged knowledge products — none of which ChatGPT can replicate.
+
+**What makes this a marketplace, not just a chatbot:**
+- **Verified clones** — admin-granted signal that the clone was trained on the creator's actual data. Trust signal for consumers.
+- **Knowledge bundles** — creators package 3–10 deep briefings into a one-time-purchase product. Converts expertise into a durable, resaleable asset.
+- **Persistent consumer memory** — the clone builds a profile of each consumer across sessions. Relationships compound over time.
+- **Multi-clone synthesis** — consumers can query 2–5 clones simultaneously and get a synthesized answer. Uniquely possible only on a multi-creator platform.
+- **Session summaries** — structured, exportable takeaways from every conversation. Knowledge persists beyond the chat window.
+
+**Business model:**
+- Per-query credits: consumer buys credit packs. 1 credit = 1 message to a paid clone. 80% to creator, 20% platform.
+- Knowledge bundles: one-time purchase via Stripe. Same 80/20 split.
+- Free clones: no credits charged. Creator earns nothing but builds audience and can upsell.
+- Session summary: 2 credits (paid clones). Platform only.
 
 ---
 
@@ -30,6 +43,7 @@ Doppel lets people build a persistent AI clone of themselves — a "digital cons
 | Auth | Clerk (userId injected as `X-User-Id` header from Next.js → FastAPI) |
 | Payments | Stripe (checkout sessions, webhooks) |
 | Deployment | Vercel (frontend), Railway/similar (FastAPI) |
+| Desktop | Electron (`desktop/`) — wraps deployed web UI in a native shell with system tray + global hotkey + overlay mode |
 | Memory | Custom 4-layer cognitive architecture (see Brain section) |
 
 ---
@@ -60,6 +74,8 @@ BrainInput → IdentityLayer → MemoryLayer → ReasoningLayer → BrainOutput
 if consumer_ctx:
     system_prompt += f"\n\n## About the person you're talking to\n{consumer_ctx}"
 ```
+
+**`owner_mode` flag** — `BrainInput.owner_mode: bool` (default `True`). When `True`, the creator testing their own clone is not charged and earnings are not attributed (training mode). When `False`, full credit deduction and earnings logic applies (consumer preview or real consumer).
 
 **Orchestrator** — `doppel/brain/orchestrator.py`, `DoppelBrain.process(BrainInput) → BrainOutput`
 
@@ -157,9 +173,10 @@ stripe_credit_sessions  -- pending/complete Stripe checkout sessions for credits
 | Route | Description |
 |---|---|
 | `/` | Landing page |
+| `/home` | Consumer hub: conversation list sidebar + chat panel. Main authenticated consumer surface. Supports `?clone=handle` to auto-open a clone. |
 | `/marketplace` | Browse all listed clones |
-| `/marketplace/[handle]` | Clone detail: stats, sample questions, ratings, buy credits |
-| `/c/[handle]` | Public chat interface with the clone |
+| `/marketplace/[handle]` | Clone detail: stats, sample questions, ratings, buy credits, bundle cards |
+| `/c/[handle]` | Public (unauthenticated) chat interface |
 | `/synthesis` | Multi-clone synthesis tool (query all + deliberation mode) |
 | `/marketplace/bundles/[bundleId]` | Bundle reader: buy + read briefings |
 
@@ -174,17 +191,34 @@ stripe_credit_sessions  -- pending/complete Stripe checkout sessions for credits
 | `/dashboard/bundles` | Create and manage knowledge bundles |
 | `/dashboard/earnings` | Revenue breakdown |
 | `/dashboard/credits` | Consumer credit balance + purchase |
+| `/dashboard/test` | Creator-only: test clone in training mode or consumer preview mode |
 | `/dashboard/email` | Email drafting surface |
 | `/dashboard/deploy` | Deploy config: embeddable widget, API access |
-| `/dashboard/admin` | Admin panel: verify clones, grant credits |
+| `/dashboard/admin` | Admin panel: verify clones, grant credits, user table with credit balances |
 
 ### Key components
 | Component | Location |
 |---|---|
-| `ChatInterface` | `ui/components/chat/ChatInterface.tsx` — full chat UI with export summary button (shows after 4+ messages), `SummaryModal` |
-| `useChat` | `ui/lib/hooks/useChat.ts` — SSE stream handler, exposes `sessionId` |
+| `ChatInterface` | `ui/components/chat/ChatInterface.tsx` — full chat UI with export summary button (shows after 4+ messages), `SummaryModal`, overlay toggle (Electron only) |
+| `useChat` | `ui/lib/hooks/useChat.ts` — SSE stream handler, exposes `sessionId`, sends `owner_mode` flag |
 | `PublicChatClient` | `ui/app/c/[handle]/PublicChatClient.tsx` — wraps ChatInterface, shows "remembered from N sessions" banner for returning consumers |
 | `Sidebar` | `ui/components/layout/Sidebar.tsx` — dashboard nav, includes Synthesis + Bundles links |
+
+---
+
+## Desktop app (`desktop/`)
+
+Electron shell around the deployed web UI. Not a rebuilt frontend — loads the live URL in a native window.
+
+**Additional value over browser:**
+- System tray icon — app always accessible, `click` to show/hide
+- Global hotkey `Ctrl+Shift+Space` — toggle overlay from anywhere
+- Overlay mode — `400×680px`, `alwaysOnTop`, frameless, bottom-right of screen. Floats over other apps. Opacity `0.97` focused / `0.88` unfocused.
+- Normal mode — `1280×820px`, resizable, no browser chrome
+
+**Overlay toggle:** global hotkey, system tray menu, or button inside `ChatInterface` (only rendered when `window.electronAPI?.isElectron === true`).
+
+**Build:** `cd desktop && npm install && npm run build` → produces `release/doppel Setup 1.0.0.exe` (Win) and `release/doppel-1.0.0.dmg` (Mac).
 
 ---
 
@@ -194,59 +228,78 @@ stripe_credit_sessions  -- pending/complete Stripe checkout sessions for credits
 4-layer cognitive pipeline with fast/slow path routing, per-clone memory, style fingerprint, identity layer.
 
 ### 2. Marketplace
-Consumer-facing browse + detail pages. Pay-per-query credit system. Stripe checkout for credit packs. 80/20 revenue split (creator keeps 80%).
+Consumer-facing browse + detail pages. Pay-per-query credit system. Stripe checkout for credit packs. 80/20 revenue split.
 
 ### 3. Verified clone badge
-Admin grants `is_verified` to clones with real training data. Shown as a teal checkmark badge on marketplace cards and detail pages.
+Admin grants `is_verified` to clones with real training data. Shown as an emerald checkmark badge on marketplace cards and detail pages. Revocable. Admin panel in dashboard.
 
 ### 4. Session summary export
-After 4+ messages, an "Export summary" button appears in chat. Calls `POST /brain/summary`, generates structured markdown (Key Insights / Recommendations / Action Items). Copy + download as .md. Costs 2 credits for paid clones.
+After 4+ messages, "Export summary" button appears in chat. Calls `POST /brain/summary`, generates structured markdown (Key Insights / Recommendations / Action Items). Copy + download as .md. 2 credits for paid clones.
 
 ### 5. Persistent consumer memory
-After each chat session, a background task updates `consumer_profiles` with a 2–3 sentence LLM summary of what the clone should remember about this person. Injected into the system prompt on subsequent sessions. Returning consumers see a "X remembers you from N previous conversations" banner.
+After each chat session, a background task updates `consumer_profiles` with a 2–3 sentence LLM summary of what the clone should remember about this person. Injected into system prompt on subsequent sessions. Returning consumers see a banner: "{Clone} remembers you from N previous conversations."
 
 ### 6. Multi-clone synthesis
-Consumer selects 2–5 clones, asks one question. Responses generated in parallel. Returns per-clone perspectives + synthesized answer. Separate "Deliberate" mode: 2 clones debate a topic for N rounds. Credits charged per query/turn.
+Consumer selects 2–5 clones, asks one question. Responses in parallel. Returns per-clone perspectives + synthesized answer. Deliberate mode: 2 clones debate a topic for N rounds. Credits per query/turn.
 
 ### 7. Knowledge bundles
-Creators package 3–10 deep briefings into a one-time-purchase product. Creator adds topics, triggers generation (brain produces briefing content per topic), sets price, publishes. Consumers buy via Stripe. Creator earnings credited at 80%. Bundle reader page shows accordion of full briefings post-purchase.
+Creators package 3–10 deep briefings as a one-time-purchase product. Topics → generated briefing content → published → Stripe checkout. Bundle reader page with accordion post-purchase. Creator earnings at 80%.
+
+### 8. Consumer home (`/home`)
+Authenticated consumer hub. Left sidebar: conversation list (all clones chatted with), search, credit balance, "My Brain" shortcut, profile footer. Right panel: active chat or empty state with featured clones from marketplace. Supports `?clone=handle` deep-link for direct-open from elsewhere in the app.
+
+### 9. Desktop app
+Electron wrapper. System tray, global hotkey, overlay mode. Windows (NSIS installer) and Mac (DMG). `desktop/` directory at repo root.
+
+### 10. Creator test page (training vs consumer preview)
+`/dashboard/test` is creator-only. Explicit toggle: **Training mode** (owner_mode=true, no credits deducted, earnings not attributed) vs **Consumer preview** (owner_mode=false, full credit logic applies — tests real consumer experience).
 
 ---
 
 ## Design system
 
-**Theme:** Light for consumer/marketplace surfaces. Dark (near-black `#080808`) for the creator dashboard and chat UI.
+**Theme:** Dark only. No light mode. No system preference detection.
 
-**Consumer surfaces (marketplace, synthesis, bundles):**
-- Background: `#F8F9FA`
-- Cards: `bg-white` with `border border-neutral-200`
-- Text: `text-neutral-800` (primary), `text-neutral-500` (secondary), `text-neutral-400` (hint)
-- Accent: `#1A73E8` (Google Blue) — used for primary CTAs, active states, category colors
-- No gradients. Flat category colors only (single solid hex per category).
-- Contrasting badges: colored background + white text (never tinted bg + same-color text)
+**Background:** `#080808` — near-black, never pure black.
 
-**Creator dashboard:**
-- Background: `#080808`
-- Glass layers: `.glass` / `.glass-md` / `.glass-hi` (defined in `globals.css`)
-- Typography: Manrope, max weight 600
-- Text opacity scale: `/85` primary, `/60` secondary, `/40` tertiary, `/25` placeholder
-- No emoji in product UI
+**Color palette:** Monochrome. No color accents in product UI except:
+- `emerald-400` — positive/connected status, verified badge (kept at low opacity, e.g. `/60`)
+- `red-400` — destructive actions / warnings (low opacity)
+- `violet-400` — enterprise badges (low opacity)
 
-**Typography:**
-- Font: Plus Jakarta Sans (`var(--font-sans)`) — applied globally, used everywhere
+**Glass system** (defined in `globals.css`):
+```
+.glass     → surface (rgba 255/255/255 / 0.04) + border 0.08
+.glass-md  → surface-md (0.07) + border 0.08
+.glass-hi  → surface-hi (0.11) + border-hi 0.14
+```
+All glass uses `backdrop-filter: blur(20px)`.
+
+**Typography:** Plus Jakarta Sans (`var(--font-sans)`) — applied globally. Max weight 600. No bold above 600.
+
+**Text opacity scale:** `/85` primary, `/60` secondary, `/40` tertiary, `/25` placeholder/hint.
 
 **Voice:** Direct, precise, no fluff. Short sentences. Never cheerful or salesy. Treat the user as an intelligent adult.
 
 ---
 
-## Business model
+## Auth pattern
 
-| Source | Mechanic | Split |
-|---|---|---|
-| Per-query credits | Consumer buys credit packs (100/$5, 500/$20, 1000/$35). 1 credit = 1 query on a paid clone. | 80% creator / 20% platform |
-| Knowledge bundles | One-time payment for packaged briefings. | 80% creator / 20% platform |
-| Free clones | No credits deducted. Creator earns nothing but builds audience. | — |
-| Session summary | 2 credits for paid clones. | Platform only |
+Clerk handles auth in Next.js. Every API proxy route extracts `userId` from `auth()` and injects it as `X-User-Id` header to FastAPI. FastAPI reads it from `request.headers.get("X-User-Id")`. No JWT verification on the FastAPI side — it trusts the header from the internal Next.js layer.
+
+Admin is identified by `NEXT_PUBLIC_ADMIN_USER_ID` env var (frontend) and `_require_admin()` helper (backend).
+
+---
+
+## Credit deduction logic
+
+Credits deduct when: `price_per_query > 0` AND NOT `(caller_is_owner AND owner_mode=True)`.
+
+This means:
+- Owner testing in training mode → no charge, no earnings attributed
+- Owner testing in consumer preview mode → charged like a real consumer, earnings not attributed (prevents self-earning)
+- Any other authenticated consumer → charged, earnings attributed to creator
+- Unauthenticated public chat → only works on public/free clones; no credits
 
 ---
 
@@ -259,27 +312,20 @@ Creators package 3–10 deep briefings into a one-time-purchase product. Creator
 **Phase 3 (weeks 5–8):** Synthesis as the consumer hook — publish "I asked 4 VCs the same question" content. ProductHunt launch once 10+ quality clones are live.
 
 **Retention hooks:**
-- Persistent memory email: "X now remembers you. Your next conversation picks up where you left off."
+- Persistent memory: "X now remembers you. Your next conversation picks up where you left off."
 - Session summary as shareable — one-click tweet/share of key insights
 - Bundle sales give creators recurring income → stronger evangelist incentive
 
-**What not to do:** No paid ads until conversion is understood. No PH launch before 10+ real clones. No new features for 8 weeks — distribution only.
+**What not to do:** No paid ads until conversion is understood. No PH launch before 10+ real clones.
 
 ---
 
-## Auth pattern
-
-Clerk handles auth in Next.js. Every API proxy route extracts `userId` from `auth()` and injects it as `X-User-Id` header to FastAPI. FastAPI reads it from `request.headers.get("X-User-Id")`. No JWT verification on the FastAPI side — it trusts the header from the internal Next.js layer.
-
-Admin is identified by `NEXT_PUBLIC_ADMIN_USER_ID` env var (frontend) and `_require_admin()` helper (backend).
-
----
-
-## What doesn't exist yet (known gaps)
+## Known gaps
 
 - **Clone subscriptions** — recurring revenue model (discussed, not built)
 - **Synthesis streaming** — synthesis endpoint is non-streaming; deliberation in particular would benefit from SSE
 - **Bundle discovery** — no dedicated browse page for bundles; currently only accessible from a clone's detail page
-- **Consumer onboarding flow** — no guided first-use experience; consumers arrive on marketplace with no context
-- **Mobile** — not optimised; chat interface works but marketplace layout needs responsive work
+- **Consumer onboarding** — no guided first-use experience; consumers arrive on marketplace with no context
+- **Mobile** — not optimised; chat works but marketplace layout needs responsive work
 - **Creator analytics** — earnings dashboard is basic; no per-clone query breakdown, no consumer retention data
+- **Embeddable widget** — deploy page exists but widget script is not built

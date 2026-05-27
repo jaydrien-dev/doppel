@@ -18,7 +18,7 @@ import anthropic
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from doppel.brain.context import get_anthropic_key
+from doppel.brain.context import get_anthropic_key, get_anthropic_client
 from doppel.config import settings
 
 _log = logging.getLogger(__name__)
@@ -106,7 +106,7 @@ async def extract_skills_from_role(
         knowledge_summary=json.dumps(knowledge_summary, indent=2),
     )
 
-    response = await anthropic.AsyncAnthropic(api_key=get_anthropic_key()).messages.create(
+    response = await get_anthropic_client().messages.create(
         model=settings.reasoning_model,
         max_tokens=8000,
         messages=[{"role": "user", "content": prompt}],
@@ -273,7 +273,7 @@ Output ONLY JSON:
 }}
 """
 
-    response = await anthropic.AsyncAnthropic(api_key=get_anthropic_key()).messages.create(
+    response = await get_anthropic_client().messages.create(
         model=settings.reasoning_model,
         max_tokens=1500,
         messages=[{"role": "user", "content": query_prompt}],
@@ -351,7 +351,7 @@ Output ONLY JSON:
 }}
 """
 
-    response = await anthropic.AsyncAnthropic(api_key=get_anthropic_key()).messages.create(
+    response = await get_anthropic_client().messages.create(
         model=settings.reasoning_model,
         max_tokens=800,
         messages=[{"role": "user", "content": prompt}],

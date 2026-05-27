@@ -14,6 +14,8 @@ from __future__ import annotations
 from contextvars import ContextVar
 from uuid import UUID
 
+import anthropic as _anthropic
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from doppel.config import settings
@@ -38,6 +40,11 @@ _elevenlabs_key: ContextVar[str | None] = ContextVar("elevenlabs_key", default=N
 
 def get_anthropic_key() -> str:
     return _anthropic_key.get() or settings.anthropic_api_key
+
+
+def get_anthropic_client() -> _anthropic.AsyncAnthropic:
+    """Return an AsyncAnthropic client with retry logic for overloaded/rate-limit errors."""
+    return _anthropic.AsyncAnthropic(api_key=get_anthropic_key(), max_retries=3)
 
 
 def get_openai_key() -> str:
