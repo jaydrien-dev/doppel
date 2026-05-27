@@ -439,44 +439,6 @@ export default function TrainPage() {
       {/* Full-width: Memory Inspector */}
       <MemoryInspector cloneId={clone.clone_id} />
 
-      {/* Full-width: Enterprise sources */}
-      <div className="card">
-        <p className="card-title">Enterprise sources</p>
-        {[
-          {
-            title: "Google Drive",
-            sub: "Index Docs, Sheets, and Slides from your Drive.",
-            icon: "G",
-          },
-          {
-            title: "Confluence",
-            sub: "Import team documentation and knowledge base articles.",
-            icon: "C",
-          },
-          {
-            title: "JIRA / Linear",
-            sub: "Ingest ticket descriptions, comments, and resolution notes.",
-            icon: "J",
-          },
-        ].map(({ title, sub, icon }) => (
-          <div key={title} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 0", borderTop: "1px solid rgba(255,255,255,0.04)" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <div style={{ width: 28, height: 28, borderRadius: 8, background: "rgba(255,255,255,0.06)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, color: "rgba(255,255,255,0.4)", fontWeight: 600 }}>{icon}</div>
-              <div>
-                <div style={{ fontSize: 13, color: "rgba(255,255,255,0.7)", fontWeight: 500 }}>{title}</div>
-                <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", marginTop: 1 }}>{sub}</div>
-              </div>
-            </div>
-            <span className="badge badge--ent">enterprise</span>
-          </div>
-        ))}
-        <p style={{ fontSize: 12, color: "rgba(255,255,255,0.25)", marginTop: 16 }}>
-          Upgrade to Team to unlock enterprise connectors →{" "}
-          <a href="/dashboard/billing" style={{ color: "rgba(255,255,255,0.45)", textDecoration: "underline", textUnderlineOffset: 2 }}>
-            View plans
-          </a>
-        </p>
-      </div>
     </div>
   );
 }

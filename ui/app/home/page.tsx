@@ -35,6 +35,15 @@ interface MarketplaceClone {
   listing_description: string | null;
 }
 
+interface OrgClone {
+  clone_id: string;
+  display_name: string;
+  handle: string;
+  avatar_url: string | null;
+  category: string | null;
+  price_per_query: number;
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -438,6 +447,9 @@ function ConvSidebar({
   selectedId,
   onSelect,
   creditBalance,
+  orgCreditBalance,
+  orgClones,
+  onSelectOrgClone,
   searchQuery,
   onSearchChange,
 }: {
@@ -445,6 +457,9 @@ function ConvSidebar({
   selectedId: string | null;
   onSelect: (c: Conversation) => void;
   creditBalance: number | null;
+  orgCreditBalance: number | null;
+  orgClones: OrgClone[];
+  onSelectOrgClone: (c: OrgClone) => void;
   searchQuery: string;
   onSearchChange: (v: string) => void;
 }) {
@@ -519,23 +534,17 @@ function ConvSidebar({
         </div>
       </div>
 
-      {/* My Brain shortcut */}
-      <div style={{ padding: "0 8px 6px" }}>
+      {/* My Brain + Org shortcuts */}
+      <div style={{ padding: "0 8px 6px", display: "flex", flexDirection: "column", gap: 3 }}>
         <Link href="/consumer/brain" style={{
           display: "flex", alignItems: "center", gap: 8,
-          padding: "8px 14px", borderRadius: 10, marginBottom: 4,
+          padding: "8px 14px", borderRadius: 10,
           background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)",
           color: "rgba(255,255,255,0.55)", fontSize: 12, fontWeight: 500,
           textDecoration: "none", transition: "all 150ms",
         }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = "rgba(255,255,255,0.08)";
-            e.currentTarget.style.color = "rgba(255,255,255,0.80)";
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = "rgba(255,255,255,0.04)";
-            e.currentTarget.style.color = "rgba(255,255,255,0.55)";
-          }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.08)"; e.currentTarget.style.color = "rgba(255,255,255,0.80)"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.04)"; e.currentTarget.style.color = "rgba(255,255,255,0.55)"; }}
         >
           <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
             <path d="M8 2C5.2 2 3 4.2 3 7c0 1.7.8 3.2 2 4.1V13h6v-1.9c1.2-.9 2-2.4 2-4.1 0-2.8-2.2-5-5-5z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"/>
@@ -543,10 +552,28 @@ function ConvSidebar({
           </svg>
           My Brain
         </Link>
+        <Link href="/org" style={{
+          display: "flex", alignItems: "center", gap: 8,
+          padding: "8px 14px", borderRadius: 10,
+          background: "rgba(26,115,232,0.06)", border: "1px solid rgba(26,115,232,0.14)",
+          color: "rgba(107,174,255,0.65)", fontSize: 12, fontWeight: 500,
+          textDecoration: "none", transition: "all 150ms",
+        }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(26,115,232,0.12)"; e.currentTarget.style.color = "rgba(107,174,255,0.95)"; e.currentTarget.style.borderColor = "rgba(26,115,232,0.30)"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(26,115,232,0.06)"; e.currentTarget.style.color = "rgba(107,174,255,0.65)"; e.currentTarget.style.borderColor = "rgba(26,115,232,0.14)"; }}
+        >
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+            <circle cx="6" cy="5.5" r="2" stroke="currentColor" strokeWidth="1.3"/>
+            <circle cx="11.5" cy="5" r="1.6" stroke="currentColor" strokeWidth="1.2" opacity="0.6"/>
+            <path d="M1.5 13.5c0-2.5 2-4.5 4.5-4.5s4.5 2 4.5 4.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+            <path d="M11.5 8.5c1.9.3 3 1.7 3 3.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" opacity="0.6"/>
+          </svg>
+          My Organisation
+        </Link>
       </div>
 
       {/* Conversation list */}
-      <div style={{ flex: 1, overflowY: "auto", padding: "0 8px" }}>
+      <div style={{ flex: 1, overflowY: "auto", padding: "0 8px", display: "flex", flexDirection: "column" }}>
         {conversations.length === 0 && !searchQuery && (
           <motion.div
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.3 }}
@@ -578,6 +605,58 @@ function ConvSidebar({
             index={i}
           />
         ))}
+
+        {/* Org clones section */}
+        {orgClones.length > 0 && (
+          <div style={{ marginTop: "auto", paddingTop: 12, borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+            <p style={{
+              fontSize: 10, textTransform: "uppercase", letterSpacing: "0.12em",
+              color: "rgba(107,174,255,0.40)", padding: "8px 14px 4px", margin: 0,
+            }}>
+              Org Clones
+            </p>
+            {orgClones.map((c) => {
+              const active = c.clone_id === selectedId;
+              const color = catColor(c.category);
+              const initial = c.display_name[0]?.toUpperCase() ?? "?";
+              return (
+                <button
+                  key={c.clone_id}
+                  onClick={() => onSelectOrgClone(c)}
+                  style={{
+                    width: "100%", display: "flex", alignItems: "center", gap: 10,
+                    padding: "8px 14px", borderRadius: 12, border: "none",
+                    background: active ? hexToRgba("#6BAEFF", 0.12) : "transparent",
+                    cursor: "pointer", textAlign: "left", fontFamily: "inherit",
+                    transition: "background 150ms",
+                  }}
+                  onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = "rgba(107,174,255,0.06)"; }}
+                  onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = "transparent"; }}
+                >
+                  <div style={{
+                    width: 32, height: 32, borderRadius: 10, flexShrink: 0,
+                    background: c.avatar_url ? "transparent" : hexToRgba(color, 0.20),
+                    border: `1px solid ${hexToRgba(color, 0.30)}`,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    fontSize: 12, fontWeight: 500, color, overflow: "hidden",
+                  }}>
+                    {c.avatar_url
+                      ? <img src={c.avatar_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                      : initial}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{ fontSize: 12, fontWeight: 500, color: "rgba(255,255,255,0.75)", margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {c.display_name}
+                    </p>
+                    <p style={{ fontSize: 10, color: "rgba(255,255,255,0.30)", margin: "1px 0 0" }}>
+                      {c.price_per_query > 0 ? `${c.price_per_query} cr` : "Free"} · org
+                    </p>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* User footer */}
@@ -592,9 +671,19 @@ function ConvSidebar({
             <p style={{ fontSize: 12, fontWeight: 500, color: "rgba(255,255,255,0.65)", margin: 0 }}>
               {user?.firstName ?? "You"}
             </p>
-            {creditBalance !== null && (
+            {(creditBalance !== null || orgCreditBalance !== null) && (
               <p style={{ fontSize: 10, color: "rgba(255,255,255,0.28)", margin: "1px 0 0" }}>
-                {creditBalance} credits
+                {creditBalance !== null ? `${creditBalance} cr` : ""}
+                {orgCreditBalance !== null && orgCreditBalance > 0 && (
+                  <span style={{ color: "rgba(107,174,255,0.55)", marginLeft: creditBalance !== null ? 5 : 0 }}>
+                    {creditBalance !== null ? "· " : ""}{orgCreditBalance} org
+                  </span>
+                )}
+                {(creditBalance === 0 && (orgCreditBalance === null || orgCreditBalance === 0)) && (
+                  <Link href="/dashboard/credits" style={{ color: "rgba(255,255,255,0.22)", textDecoration: "none", marginLeft: 4 }}>
+                    buy credits
+                  </Link>
+                )}
               </p>
             )}
           </div>
@@ -748,6 +837,8 @@ function HomeContent() {
   const [featured, setFeatured] = useState<MarketplaceClone[]>([]);
   const [selected, setSelected] = useState<Conversation | null>(null);
   const [creditBalance, setCreditBalance] = useState<number | null>(null);
+  const [orgCreditBalance, setOrgCreditBalance] = useState<number | null>(null);
+  const [orgClones, setOrgClones] = useState<OrgClone[]>([]);
   const [search, setSearch] = useState("");
 
   useEffect(() => {
@@ -767,6 +858,14 @@ function HomeContent() {
     fetch("/api/credits/balance")
       .then((r) => r.json())
       .then((d) => setCreditBalance(d.balance ?? 0))
+      .catch(() => {});
+    fetch("/api/org/credits")
+      .then((r) => r.json())
+      .then((d) => { if (d.org_id) setOrgCreditBalance(d.credits ?? 0); })
+      .catch(() => {});
+    fetch("/api/org/clones")
+      .then((r) => r.json())
+      .then((d) => setOrgClones(d.clones ?? []))
       .catch(() => {});
   }, [isSignedIn]);
 
@@ -810,6 +909,10 @@ function HomeContent() {
     addAndSelect(c);
   }
 
+  function handleSelectOrgClone(c: OrgClone) {
+    addAndSelect(c);
+  }
+
   if (!isLoaded || !isSignedIn) return null;
 
   return (
@@ -823,6 +926,9 @@ function HomeContent() {
         selectedId={selected?.clone_id ?? null}
         onSelect={setSelected}
         creditBalance={creditBalance}
+        orgCreditBalance={orgCreditBalance}
+        orgClones={orgClones}
+        onSelectOrgClone={handleSelectOrgClone}
         searchQuery={search}
         onSearchChange={setSearch}
       />

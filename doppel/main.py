@@ -73,12 +73,6 @@ from doppel.ingestion.connectors.gmail import (
 from doppel.ingestion.pipeline import IngestionPipeline
 from doppel.ingestion.status import create_job, get_job_status
 from doppel.ingestion.style_extractor import extract_style_fingerprint, fetch_sample_texts
-from doppel.brain.company.role_brain import extract_role_knowledge, compute_freshness
-from doppel.brain.company.skills_extractor import (
-    extract_skills_from_role,
-    query_skills,
-    validate_action,
-)
 
 _SCHEMA_FILE = pathlib.Path(__file__).parent / "brain" / "db" / "schemas.sql"
 
@@ -190,6 +184,14 @@ TIER_MONTHLY_LIMITS: dict[str, int] = {
     "enterprise_max": 5000,
 }
 
+# Creator revenue share by billing tier
+REV_SHARE: dict[str, float] = {
+    "free": 0.70,
+    "personal": 0.80,
+    "enterprise_pro": 0.80,
+    "enterprise_max": 0.80,
+}
+
 
 async def _check_rate_limit(clone_id: UUID, session: AsyncSession) -> None:
     """Raise HTTP 429 if this clone has exceeded its daily or monthly query limit."""
@@ -278,6 +280,14 @@ async def _check_clone_access(
         return  # always allow owner
 
     if mode == "private":
+        # Check for explicit permission grant via clone_permissions
+        if caller_user_id:
+            perm_row = await session.execute(
+                sql_text("SELECT user_id FROM clone_permissions WHERE clone_id = :cid AND user_id = :uid LIMIT 1"),
+                {"cid": str(clone_id), "uid": caller_user_id},
+            )
+            if perm_row.mappings().first():
+                return
         raise HTTPException(status_code=403, detail="This clone is private.")
 
     if mode == "allowlist":
@@ -320,6 +330,28 @@ async def create_clone(
         )
 
     clone_id = uuid4()
+
+    # Enforce per-tier clone limit
+    tier_row = await session.execute(
+        sql_text("""
+            SELECT COUNT(*) AS cnt,
+                   MAX(subscription_tier) AS tier
+            FROM clone_identity WHERE user_id = :uid
+        """),
+        {"uid": body.user_id},
+    )
+    tier_rec = tier_row.mappings().first()
+    existing_count = int(tier_rec["cnt"] or 0)
+    tier_order = ["free", "personal", "enterprise_pro", "enterprise_max"]
+    raw_tier = tier_rec["tier"] or "free"
+    highest_tier = raw_tier if raw_tier in CLONE_LIMITS else "free"
+    allowed = CLONE_LIMITS.get(highest_tier, 2)
+    if existing_count >= allowed:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Clone limit reached for {highest_tier} plan ({allowed} clones). Upgrade to create more.",
+        )
+
     # Inherit org's default access_mode if user is in an org
     org_row = await session.execute(
         sql_text("""
@@ -413,8 +445,8 @@ async def get_my_clone(
 CLONE_LIMITS: dict[str, int] = {
     "free": 2,
     "personal": 5,
-    "enterprise_pro": 10,
-    "enterprise_max": 20,
+    "enterprise_pro": 20,
+    "enterprise_max": 50,
 }
 
 
@@ -1524,8 +1556,8 @@ async def rate_clone(
 
 _CREDIT_PACKS = [
     {"id": "pack_100",  "credits": 100,  "price_usd": 5.00,  "label": "Starter",  "price_id_attr": "stripe_credits_starter_price_id"},
-    {"id": "pack_500",  "credits": 500,  "price_usd": 20.00, "label": "Standard", "price_id_attr": "stripe_credits_standard_price_id"},
-    {"id": "pack_1000", "credits": 1000, "price_usd": 35.00, "label": "Pro",      "price_id_attr": "stripe_credits_pro_price_id"},
+    {"id": "pack_500",  "credits": 500,  "price_usd": 23.00, "label": "Standard", "price_id_attr": "stripe_credits_standard_price_id"},
+    {"id": "pack_1000", "credits": 1000, "price_usd": 44.00, "label": "Pro",      "price_id_attr": "stripe_credits_pro_price_id"},
 ]
 
 
@@ -1705,8 +1737,19 @@ async def stripe_credits_webhook(
                     """),
                     {"amount": amount_paid, "sid": stripe_session_id, "bid": bundle_id, "uid": user_id, "qi": queries_included},
                 )
-                # 80% to creator
+                # Rev share to creator (tier-dependent)
                 if amount_paid > 0:
+                    tier_row = await session.execute(
+                        sql_text("""
+                            SELECT ci.subscription_tier FROM clone_identity ci
+                            JOIN knowledge_bundles kb ON ci.clone_id = kb.clone_id
+                            WHERE kb.id = :bid
+                        """),
+                        {"bid": bundle_id},
+                    )
+                    tier_rec = tier_row.mappings().first()
+                    bundle_tier = (tier_rec["subscription_tier"] or "free") if tier_rec else "free"
+                    bundle_share = REV_SHARE.get(bundle_tier, 0.70)
                     await session.execute(
                         sql_text("""
                             UPDATE clone_identity ci
@@ -1714,7 +1757,7 @@ async def stripe_credits_webhook(
                             FROM knowledge_bundles kb
                             WHERE kb.id = :bid AND ci.clone_id = kb.clone_id
                         """),
-                        {"earn": amount_paid * 0.80, "bid": bundle_id},
+                        {"earn": amount_paid * bundle_share, "bid": bundle_id},
                     )
                 await session.commit()
         elif payment_type == "consumer_bundle":
@@ -1951,7 +1994,7 @@ async def chat_stream(
 
     # Credit deduction (mirrors /brain/chat — must happen before streaming starts)
     price_row = await session.execute(
-        sql_text("SELECT user_id, price_per_query, is_listed FROM clone_identity WHERE clone_id = :cid"),
+        sql_text("SELECT user_id, price_per_query, is_listed, subscription_tier FROM clone_identity WHERE clone_id = :cid"),
         {"cid": str(body.clone_id)},
     )
     price_rec = price_row.mappings().first()
@@ -1967,24 +2010,51 @@ async def chat_stream(
             raise HTTPException(status_code=401, detail="Login required to query this clone")
         multiplier = CREDITS_MULTIPLIER.get(body.response_mode, 1)
         credits_cost = int(float(price_rec["price_per_query"])) * multiplier
-        bal_row = await session.execute(
-            sql_text("SELECT credits_remaining FROM query_credits WHERE user_id = :uid"),
-            {"uid": caller_user_id},
-        )
-        bal_rec = bal_row.mappings().first()
-        if not bal_rec or bal_rec["credits_remaining"] < credits_cost:
-            raise HTTPException(status_code=402, detail=f"Insufficient credits (need {credits_cost})")
-        await session.execute(
-            sql_text("UPDATE query_credits SET credits_remaining = credits_remaining - :cost, updated_at = NOW() WHERE user_id = :uid"),
-            {"cost": credits_cost, "uid": caller_user_id},
-        )
+
+        # Check if this is an intra-org interaction
+        org_pair_s = (await session.execute(
+            sql_text("""
+                SELECT om_caller.org_id AS org_id
+                FROM org_memberships om_caller
+                JOIN org_memberships om_owner ON om_owner.org_id = om_caller.org_id
+                WHERE om_caller.user_id = :caller AND om_owner.user_id = :owner
+                LIMIT 1
+            """),
+            {"caller": caller_user_id, "owner": price_rec["user_id"]},
+        )).mappings().first()
+
+        if org_pair_s:
+            org_id_s = str(org_pair_s["org_id"])
+            pool_rec_s = (await session.execute(
+                sql_text("SELECT credits FROM org_credit_pools WHERE org_id = :oid"),
+                {"oid": org_id_s},
+            )).mappings().first()
+            if not pool_rec_s or pool_rec_s["credits"] < credits_cost:
+                raise HTTPException(status_code=402, detail=f"Org credit pool insufficient (need {credits_cost}). Ask your admin to top up the pool.")
+            await session.execute(
+                sql_text("UPDATE org_credit_pools SET credits = credits - :cost, updated_at = NOW() WHERE org_id = :oid"),
+                {"cost": credits_cost, "oid": org_id_s},
+            )
+        else:
+            bal_row = await session.execute(
+                sql_text("SELECT credits_remaining FROM query_credits WHERE user_id = :uid"),
+                {"uid": caller_user_id},
+            )
+            bal_rec = bal_row.mappings().first()
+            if not bal_rec or bal_rec["credits_remaining"] < credits_cost:
+                raise HTTPException(status_code=402, detail=f"Insufficient credits (need {credits_cost})")
+            await session.execute(
+                sql_text("UPDATE query_credits SET credits_remaining = credits_remaining - :cost, updated_at = NOW() WHERE user_id = :uid"),
+                {"cost": credits_cost, "uid": caller_user_id},
+            )
         await session.execute(
             sql_text("INSERT INTO query_transactions (user_id, clone_id, credits_used, response_mode) VALUES (:uid, :cid, :cost, :mode)"),
             {"uid": caller_user_id, "cid": str(body.clone_id), "cost": credits_cost, "mode": body.response_mode},
         )
-        # Earnings: credits × $0.04/credit × 80% creator share (skip when owner is self-testing)
+        # Earnings: credits × $0.04/credit × tier rev share (skip when owner is self-testing)
         if not caller_is_owner:
-            creator_earn = credits_cost * 0.04 * 0.80
+            creator_tier = (price_rec["subscription_tier"] or "free")
+            creator_earn = credits_cost * 0.04 * REV_SHARE.get(creator_tier, 0.70)
             await session.execute(
                 sql_text("""
                     UPDATE clone_identity
@@ -2069,7 +2139,7 @@ async def chat(
 
     # Marketplace credit check: if clone has a price and caller isn't the owner, deduct credits
     price_row = await session.execute(
-        sql_text("SELECT user_id, price_per_query, is_listed FROM clone_identity WHERE clone_id = :cid"),
+        sql_text("SELECT user_id, price_per_query, is_listed, subscription_tier FROM clone_identity WHERE clone_id = :cid"),
         {"cid": str(body.clone_id)},
     )
     price_rec = price_row.mappings().first()
@@ -2085,26 +2155,54 @@ async def chat(
             raise HTTPException(status_code=401, detail="Login required to query this clone")
         multiplier = CREDITS_MULTIPLIER.get(body.response_mode, 1)
         credits_cost = int(float(price_rec["price_per_query"])) * multiplier
-        bal_row = await session.execute(
-            sql_text("SELECT credits_remaining FROM query_credits WHERE user_id = :uid"),
-            {"uid": caller_user_id},
-        )
-        bal_rec = bal_row.mappings().first()
-        if not bal_rec or bal_rec["credits_remaining"] < credits_cost:
-            raise HTTPException(status_code=402, detail=f"Insufficient credits (need {credits_cost})")
-        # Deduct credits_cost credits
-        await session.execute(
-            sql_text("UPDATE query_credits SET credits_remaining = credits_remaining - :cost, updated_at = NOW() WHERE user_id = :uid"),
-            {"cost": credits_cost, "uid": caller_user_id},
-        )
+
+        # Check if this is an intra-org interaction (caller and clone owner in same org)
+        org_pair = (await session.execute(
+            sql_text("""
+                SELECT om_caller.org_id AS org_id
+                FROM org_memberships om_caller
+                JOIN org_memberships om_owner ON om_owner.org_id = om_caller.org_id
+                WHERE om_caller.user_id = :caller AND om_owner.user_id = :owner
+                LIMIT 1
+            """),
+            {"caller": caller_user_id, "owner": price_rec["user_id"]},
+        )).mappings().first()
+
+        if org_pair:
+            # Deduct from org shared credit pool
+            org_id = str(org_pair["org_id"])
+            pool_rec = (await session.execute(
+                sql_text("SELECT credits FROM org_credit_pools WHERE org_id = :oid"),
+                {"oid": org_id},
+            )).mappings().first()
+            if not pool_rec or pool_rec["credits"] < credits_cost:
+                raise HTTPException(status_code=402, detail=f"Org credit pool insufficient (need {credits_cost}). Ask your admin to top up the pool.")
+            await session.execute(
+                sql_text("UPDATE org_credit_pools SET credits = credits - :cost, updated_at = NOW() WHERE org_id = :oid"),
+                {"cost": credits_cost, "oid": org_id},
+            )
+        else:
+            # Deduct from caller's individual credits
+            bal_row = await session.execute(
+                sql_text("SELECT credits_remaining FROM query_credits WHERE user_id = :uid"),
+                {"uid": caller_user_id},
+            )
+            bal_rec = bal_row.mappings().first()
+            if not bal_rec or bal_rec["credits_remaining"] < credits_cost:
+                raise HTTPException(status_code=402, detail=f"Insufficient credits (need {credits_cost})")
+            await session.execute(
+                sql_text("UPDATE query_credits SET credits_remaining = credits_remaining - :cost, updated_at = NOW() WHERE user_id = :uid"),
+                {"cost": credits_cost, "uid": caller_user_id},
+            )
         # Record transaction
         await session.execute(
             sql_text("INSERT INTO query_transactions (user_id, clone_id, credits_used, response_mode) VALUES (:uid, :cid, :cost, :mode)"),
             {"uid": caller_user_id, "cid": str(body.clone_id), "cost": credits_cost, "mode": body.response_mode},
         )
-        # Earnings: credits × $0.04/credit × 80% creator share (skip when owner self-tests)
+        # Earnings: credits × $0.04/credit × tier rev share (skip when owner self-tests)
         if not caller_is_owner:
-            creator_earn = credits_cost * 0.04 * 0.80
+            creator_tier = (price_rec["subscription_tier"] or "free")
+            creator_earn = credits_cost * 0.04 * REV_SHARE.get(creator_tier, 0.70)
             await session.execute(
                 sql_text("""
                     UPDATE clone_identity
@@ -5629,88 +5727,6 @@ async def meeting_stream_ws(
             await db.commit()
 
 
-@app.post("/meetings/{session_id}/leave")
-async def leave_meeting(
-    session_id: str,
-    session: AsyncSession = Depends(get_session),
-) -> dict:
-    """End a meeting session (marks as ended in DB)."""
-    await session.execute(
-        sql_text(
-            "UPDATE meeting_sessions SET status = 'ended', ended_at = NOW() WHERE bot_id = :sid"
-        ),
-        {"sid": session_id},
-    )
-    await session.commit()
-    return {"status": "ended"}
-
-
-@app.get("/meetings/sessions")
-async def list_meeting_sessions(
-    clone_id: UUID = Query(...),
-    limit: int = Query(default=20, le=100),
-    session: AsyncSession = Depends(get_session),
-) -> dict:
-    """List past and active meeting sessions for a clone."""
-
-    rows = await session.execute(
-        sql_text("""
-            SELECT bot_id, meeting_url, meeting_platform, status,
-                   transcript, responses, started_at, ended_at
-            FROM meeting_sessions
-            WHERE clone_id = :cid
-            ORDER BY started_at DESC
-            LIMIT :limit
-        """),
-        {"cid": str(clone_id), "limit": limit},
-    )
-    sessions = []
-    for r in rows.mappings():
-        sessions.append({
-            "bot_id": r["bot_id"],
-            "meeting_url": r["meeting_url"],
-            "platform": r["meeting_platform"],
-            "status": r["status"],
-            "transcript": list(r["transcript"] or []),
-            "responses": list(r["responses"] or []),
-            "started_at": r["started_at"].isoformat() if r["started_at"] else None,
-            "ended_at": r["ended_at"].isoformat() if r["ended_at"] else None,
-        })
-    return {"sessions": sessions}
-
-
-@app.get("/meetings/{bot_id}")
-async def get_meeting_session(
-    bot_id: str,
-    session: AsyncSession = Depends(get_session),
-) -> dict:
-    """Get a single meeting session with live transcript."""
-
-    row = await session.execute(
-        sql_text("""
-            SELECT bot_id, meeting_url, meeting_platform, status,
-                   transcript, responses, started_at, ended_at
-            FROM meeting_sessions
-            WHERE bot_id = :bid
-        """),
-        {"bid": bot_id},
-    )
-    record = row.mappings().first()
-    if not record:
-        raise HTTPException(status_code=404, detail="Session not found")
-
-    return {
-        "bot_id": record["bot_id"],
-        "meeting_url": record["meeting_url"],
-        "platform": record["meeting_platform"],
-        "status": record["status"],
-        "transcript": list(record["transcript"] or []),
-        "responses": list(record["responses"] or []),
-        "started_at": record["started_at"].isoformat() if record["started_at"] else None,
-        "ended_at": record["ended_at"].isoformat() if record["ended_at"] else None,
-    }
-
-
 # ---------------------------------------------------------------------------
 # EMAIL DRAFTS — Draft replies generated by the clone brain
 # ---------------------------------------------------------------------------
@@ -6249,6 +6265,392 @@ async def update_member_role(
 
     await session.commit()
     return {"status": "updated", "user_id": body.target_user_id, "role": body.new_role}
+
+
+@app.delete("/org/members/{target_user_id}")
+async def remove_org_member(
+    target_user_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Org admin removes a member. Cannot remove yourself if you're the only admin."""
+    admin_user_id = request.headers.get("X-User-Id")
+    if not admin_user_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    admin_row = (await session.execute(
+        sql_text("SELECT org_id, role FROM org_memberships WHERE user_id = :uid LIMIT 1"),
+        {"uid": admin_user_id},
+    )).mappings().first()
+    if not admin_row or admin_row["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Only org admins can remove members")
+
+    org_id = admin_row["org_id"]
+
+    if admin_user_id == target_user_id:
+        admin_count = (await session.execute(
+            sql_text("SELECT COUNT(*) FROM org_memberships WHERE org_id = :oid AND role = 'admin'"),
+            {"oid": str(org_id)},
+        )).scalar() or 0
+        if admin_count <= 1:
+            raise HTTPException(status_code=409, detail="Cannot remove the only admin")
+
+    result = await session.execute(
+        sql_text("DELETE FROM org_memberships WHERE org_id = :oid AND user_id = :uid RETURNING user_id"),
+        {"oid": str(org_id), "uid": target_user_id},
+    )
+    if not result.mappings().first():
+        raise HTTPException(status_code=404, detail="Member not found in your org")
+
+    await session.commit()
+    return {"status": "removed", "user_id": target_user_id}
+
+
+class SetCloneOrgAccessRequest(BaseModel):
+    admin_user_id: str
+    access_mode: str   # 'org_scoped' | 'private' | 'public' | 'allowlist'
+
+
+@app.patch("/org/clones/{clone_id}/access")
+async def set_clone_org_access(
+    clone_id: str,
+    body: SetCloneOrgAccessRequest,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Org admin toggles a clone's access_mode. Clone must belong to an org member."""
+    valid_modes = ("private", "allowlist", "public", "org_scoped")
+    if body.access_mode not in valid_modes:
+        raise HTTPException(status_code=422, detail=f"access_mode must be one of: {', '.join(valid_modes)}")
+
+    admin_row = (await session.execute(
+        sql_text("SELECT org_id, role FROM org_memberships WHERE user_id = :uid LIMIT 1"),
+        {"uid": body.admin_user_id},
+    )).mappings().first()
+    if not admin_row or admin_row["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Only org admins can change clone access")
+
+    org_id = admin_row["org_id"]
+
+    # Verify the clone belongs to a member of this org
+    member_row = (await session.execute(
+        sql_text("""
+            SELECT om.user_id FROM org_memberships om
+            JOIN clone_identity ci ON ci.user_id = om.user_id
+            WHERE om.org_id = :oid AND ci.clone_id = :cid
+            LIMIT 1
+        """),
+        {"oid": str(org_id), "cid": clone_id},
+    )).mappings().first()
+    if not member_row:
+        raise HTTPException(status_code=404, detail="Clone not found in your org")
+
+    await session.execute(
+        sql_text("UPDATE clone_identity SET access_mode = :mode WHERE clone_id = :cid"),
+        {"mode": body.access_mode, "cid": clone_id},
+    )
+    await session.commit()
+    return {"status": "updated", "clone_id": clone_id, "access_mode": body.access_mode}
+
+
+class OrgCloneMemberRequest(BaseModel):
+    admin_user_id: str
+    target_user_id: str
+
+
+@app.post("/org/clones/{clone_id}/members", status_code=201)
+async def org_grant_clone_access(
+    clone_id: str,
+    body: OrgCloneMemberRequest,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Org admin grants a specific member viewer access to a clone."""
+    admin_row = (await session.execute(
+        sql_text("SELECT org_id, role FROM org_memberships WHERE user_id = :uid LIMIT 1"),
+        {"uid": body.admin_user_id},
+    )).mappings().first()
+    if not admin_row or admin_row["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Only org admins can grant clone access")
+
+    org_id = admin_row["org_id"]
+
+    # Verify clone belongs to org and target is an org member
+    clone_row = (await session.execute(
+        sql_text("""
+            SELECT ci.clone_id FROM org_memberships om
+            JOIN clone_identity ci ON ci.user_id = om.user_id
+            WHERE om.org_id = :oid AND ci.clone_id = :cid LIMIT 1
+        """),
+        {"oid": str(org_id), "cid": clone_id},
+    )).mappings().first()
+    if not clone_row:
+        raise HTTPException(status_code=404, detail="Clone not found in your org")
+
+    target_row = (await session.execute(
+        sql_text("SELECT user_id FROM org_memberships WHERE org_id = :oid AND user_id = :uid"),
+        {"oid": str(org_id), "uid": body.target_user_id},
+    )).mappings().first()
+    if not target_row:
+        raise HTTPException(status_code=404, detail="Target user is not in your org")
+
+    await session.execute(
+        sql_text("""
+            INSERT INTO clone_permissions (clone_id, user_id, role, granted_by)
+            VALUES (:cid, :uid, 'viewer', :granted_by)
+            ON CONFLICT (clone_id, user_id) DO UPDATE SET role = 'viewer'
+        """),
+        {"cid": clone_id, "uid": body.target_user_id, "granted_by": body.admin_user_id},
+    )
+    await session.commit()
+    return {"status": "granted", "clone_id": clone_id, "user_id": body.target_user_id}
+
+
+@app.delete("/org/clones/{clone_id}/members/{target_user_id}")
+async def org_revoke_clone_access(
+    clone_id: str,
+    target_user_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Org admin revokes a specific member's viewer access to a clone."""
+    admin_user_id = request.headers.get("X-User-Id")
+    if not admin_user_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    admin_row = (await session.execute(
+        sql_text("SELECT org_id, role FROM org_memberships WHERE user_id = :uid LIMIT 1"),
+        {"uid": admin_user_id},
+    )).mappings().first()
+    if not admin_row or admin_row["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Only org admins can revoke clone access")
+
+    await session.execute(
+        sql_text("DELETE FROM clone_permissions WHERE clone_id = :cid AND user_id = :uid"),
+        {"cid": clone_id, "uid": target_user_id},
+    )
+    await session.commit()
+    return {"status": "revoked", "clone_id": clone_id, "user_id": target_user_id}
+
+
+@app.get("/org/clones/{clone_id}/members")
+async def org_list_clone_members(
+    clone_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Org admin: list which org members have explicit access to a clone."""
+    admin_user_id = request.headers.get("X-User-Id")
+    if not admin_user_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    admin_row = (await session.execute(
+        sql_text("SELECT org_id, role FROM org_memberships WHERE user_id = :uid LIMIT 1"),
+        {"uid": admin_user_id},
+    )).mappings().first()
+    if not admin_row or admin_row["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Org admin access required")
+
+    rows = await session.execute(
+        sql_text("""
+            SELECT cp.user_id, cp.role, cp.created_at
+            FROM clone_permissions cp
+            WHERE cp.clone_id = :cid
+        """),
+        {"cid": clone_id},
+    )
+    return {
+        "members": [
+            {"user_id": r["user_id"], "role": r["role"], "granted_at": r["created_at"].isoformat() if r["created_at"] else None}
+            for r in rows.mappings().all()
+        ]
+    }
+
+
+@app.get("/org/clones")
+async def get_org_clones(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Return all org-scoped clones visible to the calling member."""
+    user_id = request.headers.get("X-User-Id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    rows = await session.execute(
+        sql_text("""
+            SELECT
+                ci.clone_id, ci.display_name, ci.handle,
+                ci.avatar_url, ci.category, ci.listing_description,
+                ci.price_per_query, ci.total_queries,
+                ci.is_verified,
+                om_owner.role AS member_role,
+                o.name AS org_name, o.id AS org_id
+            FROM org_memberships om_me
+            JOIN orgs o ON o.id = om_me.org_id
+            JOIN org_memberships om_owner ON om_owner.org_id = om_me.org_id
+            JOIN clone_identity ci ON ci.user_id = om_owner.user_id
+            WHERE om_me.user_id = :uid
+              AND ci.access_mode = 'org_scoped'
+            ORDER BY om_owner.joined_at ASC
+        """),
+        {"uid": user_id},
+    )
+    clones = [
+        {
+            "clone_id": str(r["clone_id"]),
+            "display_name": r["display_name"],
+            "handle": r["handle"],
+            "avatar_url": r["avatar_url"],
+            "category": r["category"],
+            "description": (r["listing_description"] or "")[:180],
+            "price_per_query": float(r["price_per_query"] or 0),
+            "total_queries": int(r["total_queries"] or 0),
+            "is_verified": bool(r["is_verified"]),
+            "member_role": r["member_role"],
+            "org_name": r["org_name"],
+            "org_id": str(r["org_id"]),
+        }
+        for r in rows.mappings().all()
+    ]
+    org_name = clones[0]["org_name"] if clones else None
+    return {"clones": clones, "org_name": org_name}
+
+
+@app.get("/org/admin/clones")
+async def get_org_all_clones(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Admin: return ALL clones owned by org members, with their current access_mode."""
+    user_id = request.headers.get("X-User-Id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    admin_row = (await session.execute(
+        sql_text("SELECT org_id, role FROM org_memberships WHERE user_id = :uid LIMIT 1"),
+        {"uid": user_id},
+    )).mappings().first()
+    if not admin_row or admin_row["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Org admin access required")
+
+    rows = await session.execute(
+        sql_text("""
+            SELECT ci.clone_id, ci.display_name, ci.handle,
+                   ci.avatar_url, ci.category, ci.listing_description,
+                   ci.access_mode, ci.price_per_query, ci.total_queries,
+                   ci.user_id AS owner_user_id,
+                   om.role AS member_role
+            FROM org_memberships om
+            JOIN clone_identity ci ON ci.user_id = om.user_id
+            WHERE om.org_id = :oid
+            ORDER BY om.joined_at ASC, ci.display_name ASC
+        """),
+        {"oid": str(admin_row["org_id"])},
+    )
+    return {
+        "clones": [
+            {
+                "clone_id": str(r["clone_id"]),
+                "display_name": r["display_name"],
+                "handle": r["handle"],
+                "avatar_url": r["avatar_url"],
+                "category": r["category"],
+                "description": (r["listing_description"] or "")[:120],
+                "access_mode": r["access_mode"],
+                "price_per_query": float(r["price_per_query"] or 0),
+                "total_queries": int(r["total_queries"] or 0),
+                "owner_user_id": r["owner_user_id"],
+                "member_role": r["member_role"],
+            }
+            for r in rows.mappings().all()
+        ],
+        "org_id": str(admin_row["org_id"]),
+    }
+
+
+@app.get("/org/credits")
+async def get_org_credits(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Return the shared credit pool balance for the caller's org."""
+    user_id = request.headers.get("X-User-Id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    org_row = (await session.execute(
+        sql_text("SELECT org_id FROM org_memberships WHERE user_id = :uid LIMIT 1"),
+        {"uid": user_id},
+    )).mappings().first()
+    if not org_row:
+        return {"credits": 0, "org_id": None}
+
+    org_id = str(org_row["org_id"])
+    pool_row = (await session.execute(
+        sql_text("SELECT credits FROM org_credit_pools WHERE org_id = :oid"),
+        {"oid": org_id},
+    )).mappings().first()
+    return {"credits": int(pool_row["credits"]) if pool_row else 0, "org_id": org_id}
+
+
+class AddOrgCreditsRequest(BaseModel):
+    credits: int   # must be > 0
+
+
+@app.post("/org/credits/add")
+async def add_org_credits(
+    body: AddOrgCreditsRequest,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Any org member can transfer personal credits into the shared org pool."""
+    user_id = request.headers.get("X-User-Id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    if body.credits <= 0:
+        raise HTTPException(status_code=422, detail="credits must be positive")
+
+    # Verify org membership
+    org_row = (await session.execute(
+        sql_text("SELECT org_id FROM org_memberships WHERE user_id = :uid LIMIT 1"),
+        {"uid": user_id},
+    )).mappings().first()
+    if not org_row:
+        raise HTTPException(status_code=403, detail="Not a member of any org")
+    org_id = str(org_row["org_id"])
+
+    # Verify personal balance
+    personal_row = (await session.execute(
+        sql_text("SELECT credits_remaining FROM query_credits WHERE user_id = :uid"),
+        {"uid": user_id},
+    )).mappings().first()
+    if not personal_row or personal_row["credits_remaining"] < body.credits:
+        raise HTTPException(status_code=402, detail="Insufficient personal credits")
+
+    # Transfer: deduct personal, add to pool
+    await session.execute(
+        sql_text("UPDATE query_credits SET credits_remaining = credits_remaining - :c, updated_at = NOW() WHERE user_id = :uid"),
+        {"c": body.credits, "uid": user_id},
+    )
+    await session.execute(
+        sql_text("""
+            INSERT INTO org_credit_pools (org_id, credits, updated_at)
+            VALUES (:oid, :c, NOW())
+            ON CONFLICT (org_id) DO UPDATE
+            SET credits = org_credit_pools.credits + :c, updated_at = NOW()
+        """),
+        {"oid": org_id, "c": body.credits},
+    )
+    await session.commit()
+
+    pool_row = (await session.execute(
+        sql_text("SELECT credits FROM org_credit_pools WHERE org_id = :oid"),
+        {"oid": org_id},
+    )).mappings().first()
+    return {
+        "status": "transferred",
+        "personal_credits_remaining": personal_row["credits_remaining"] - body.credits,
+        "org_credits": int(pool_row["credits"]) if pool_row else body.credits,
+    }
 
 
 @app.get("/org/knowledge-directory")
@@ -7484,566 +7886,6 @@ async def get_impact_metrics(
     }
 
 
-# ===========================================================================
-# PHASE 3 — COMPANY BRAIN: Role Brains
-# ===========================================================================
-
-class CreateRoleBrainRequest(BaseModel):
-    org_id: UUID
-    role_name: str
-    description: str = ""
-    member_clone_ids: list[UUID] = []
-
-
-@app.post("/org/roles", status_code=201)
-async def create_role_brain(
-    body: CreateRoleBrainRequest,
-    session: AsyncSession = Depends(get_session),
-) -> dict:
-    """Create or update a role brain for an org (e.g. 'support_lead', 'incident_commander')."""
-    # Embed array literal directly — asyncpg mis-infers CAST(:param AS uuid[]) as
-    # a native array binding in INSERT VALUES context, expecting a Python list.
-    # UUIDs are Pydantic-validated so there's no injection risk.
-    ids_literal = "{" + ",".join(str(c) for c in body.member_clone_ids) + "}"
-    try:
-        result = await session.execute(
-            sql_text(f"""
-                INSERT INTO role_brains (org_id, role_name, description, member_clone_ids)
-                VALUES (:org_id, :role_name, :description, '{ids_literal}'::uuid[])
-                ON CONFLICT (org_id, role_name) DO UPDATE
-                  SET description = EXCLUDED.description,
-                      member_clone_ids = EXCLUDED.member_clone_ids
-                RETURNING id, org_id, role_name, description,
-                          COALESCE(freshness_score, 1.0) AS freshness_score, created_at
-            """),
-            {
-                "org_id": str(body.org_id),
-                "role_name": body.role_name,
-                "description": body.description,
-            },
-        )
-        row = result.mappings().first()
-        if not row:
-            raise HTTPException(status_code=422, detail="Org not found — make sure you're in a team workspace")
-        await session.commit()
-    except HTTPException:
-        raise
-    except Exception as e:
-        _log.error("create_role_brain failed org_id=%s: %s", body.org_id, e, exc_info=True)
-        if "foreign key" in str(e).lower() or "violates" in str(e).lower():
-            raise HTTPException(status_code=422, detail="Org not found — make sure you're in a team workspace")
-        if "role_brains" in str(e).lower() and "does not exist" in str(e).lower():
-            raise HTTPException(status_code=503, detail="Database migration pending — restart the backend to apply schema changes")
-        raise HTTPException(status_code=500, detail="Internal server error")
-    return {
-        "id": str(row["id"]),
-        "org_id": str(row["org_id"]),
-        "role_name": row["role_name"],
-        "description": row["description"] or "",
-        "freshness_score": float(row["freshness_score"]),
-        "created_at": row["created_at"].isoformat(),
-    }
-
-
-@app.get("/org/roles")
-async def list_role_brains(
-    org_id: UUID = Query(...),
-    session: AsyncSession = Depends(get_session),
-) -> list[dict]:
-    """List all role brains for an org with freshness scores and skill counts."""
-    result = await session.execute(
-        sql_text("""
-            SELECT rb.id, rb.role_name, rb.description, rb.member_clone_ids,
-                   rb.freshness_score, rb.last_extracted_at, rb.created_at,
-                   rb.knowledge_summary,
-                   (SELECT COUNT(*) FROM org_skills os WHERE os.role_brain_id = rb.id) AS skill_count
-            FROM role_brains rb
-            WHERE rb.org_id = :org_id
-            ORDER BY rb.created_at DESC
-        """),
-        {"org_id": str(org_id)},
-    )
-    rows = result.mappings().all()
-
-    # Fetch member names separately
-    output = []
-    for r in rows:
-        member_ids = list(r["member_clone_ids"] or [])
-        member_names: list[str] = []
-        if member_ids:
-            ids_lit = "{" + ",".join(str(c) for c in member_ids) + "}"
-            names_result = await session.execute(
-                sql_text(f"""
-                    SELECT display_name FROM clone_identity
-                    WHERE clone_id = ANY('{ids_lit}'::uuid[])
-                    ORDER BY display_name
-                """),
-            )
-            member_names = [row[0] for row in names_result.fetchall()]
-
-        ks = r["knowledge_summary"]
-        output.append({
-            "id": str(r["id"]),
-            "role_name": r["role_name"],
-            "description": r["description"] or "",
-            "member_clone_ids": [str(c) for c in member_ids],
-            "member_names": member_names,
-            "member_count": len(member_ids),
-            "freshness_score": float(r["freshness_score"] or 0),
-            "last_extracted_at": r["last_extracted_at"].isoformat() if r["last_extracted_at"] else None,
-            "skill_count": int(r["skill_count"] or 0),
-            "has_knowledge": bool(ks and ks != {}),
-            "knowledge_summary": ks if (ks and ks != {}) else None,
-            "created_at": r["created_at"].isoformat(),
-        })
-    return output
-
-
-@app.get("/org/roles/{role_id}")
-async def get_role_brain(
-    role_id: UUID,
-    session: AsyncSession = Depends(get_session),
-) -> dict:
-    """Get full role brain knowledge summary."""
-    row = (await session.execute(
-        sql_text("""
-            SELECT rb.*, o.name AS org_name
-            FROM role_brains rb
-            JOIN orgs o ON o.id = rb.org_id
-            WHERE rb.id = :id
-        """),
-        {"id": str(role_id)},
-    )).mappings().first()
-
-    if not row:
-        raise HTTPException(status_code=404, detail="Role brain not found")
-
-    return {
-        "id": str(row["id"]),
-        "org_id": str(row["org_id"]),
-        "org_name": row["org_name"],
-        "role_name": row["role_name"],
-        "description": row["description"] or "",
-        "member_clone_ids": [str(c) for c in (row["member_clone_ids"] or [])],
-        "knowledge_summary": row["knowledge_summary"] or {},
-        "freshness_score": float(row["freshness_score"] or 0),
-        "last_extracted_at": row["last_extracted_at"].isoformat() if row["last_extracted_at"] else None,
-        "created_at": row["created_at"].isoformat(),
-    }
-
-
-@app.patch("/org/roles/{role_id}/members")
-async def update_role_members(
-    role_id: UUID,
-    body: dict,
-    session: AsyncSession = Depends(get_session),
-) -> dict:
-    """Update the member clones for a role brain."""
-    member_ids = body.get("member_clone_ids", [])
-    ids_literal = "{" + ",".join(str(c) for c in member_ids) + "}"
-    await session.execute(
-        sql_text(f"""
-            UPDATE role_brains
-            SET member_clone_ids = '{ids_literal}'::uuid[], updated_at = NOW()
-            WHERE id = :id
-        """),
-        {"id": str(role_id)},
-    )
-    await session.commit()
-    return {"status": "updated", "member_count": len(member_ids)}
-
-
-@app.post("/org/roles/{role_id}/extract")
-async def extract_role_brain_route(
-    role_id: UUID,
-    session: AsyncSession = Depends(get_session),
-) -> dict:
-    """
-    Trigger knowledge extraction for a role brain.
-    Aggregates memories from all member clones → structured knowledge + skills.
-    """
-    row = (await session.execute(
-        sql_text("""
-            SELECT rb.*, o.name AS org_name
-            FROM role_brains rb JOIN orgs o ON o.id = rb.org_id
-            WHERE rb.id = :id
-        """),
-        {"id": str(role_id)},
-    )).mappings().first()
-
-    if not row:
-        raise HTTPException(status_code=404, detail="Role brain not found")
-
-    member_ids = list(row["member_clone_ids"] or [])
-    if member_ids:
-        await load_clone_keys(session, member_ids[0])
-
-    try:
-        knowledge = await extract_role_knowledge(
-            session=session,
-            org_id=row["org_id"],
-            role_brain_id=role_id,
-            role_name=row["role_name"],
-            member_clone_ids=member_ids,
-        )
-    except Exception as e:
-        _log.error("extract_role_knowledge failed role_id=%s: %s", role_id, e, exc_info=True)
-        raise HTTPException(status_code=500, detail="Knowledge extraction failed — check your Anthropic API key is configured")
-
-    if knowledge.get("error"):
-        raise HTTPException(status_code=422, detail=knowledge["error"])
-
-    skills_error: str | None = None
-    try:
-        skills = await extract_skills_from_role(
-            session=session,
-            org_id=row["org_id"],
-            role_brain_id=role_id,
-            role_name=row["role_name"],
-            org_name=row["org_name"],
-            knowledge_summary=knowledge,
-        )
-    except Exception as e:
-        _log.error("extract_skills_from_role failed role_id=%s: %s", role_id, e, exc_info=True)
-        skills = []
-        skills_error = str(e)
-
-    knowledge_keys = [k for k, v in knowledge.items() if v]
-    _log.info(
-        "extract result role_id=%s: knowledge_keys=%s parse_error=%s skills=%d error=%s",
-        role_id, knowledge_keys, knowledge.get("parse_error"), len(skills), skills_error,
-    )
-
-    return {
-        "status": "extracted",
-        "role_name": row["role_name"],
-        "procedures_found": len(knowledge.get("decision_procedures") or []),
-        "skills_extracted": len(skills),
-        "knowledge_keys": knowledge_keys,
-        "parse_error": knowledge.get("parse_error", False),
-        "skills_error": skills_error,
-    }
-
-
-@app.patch("/org/roles/{role_id}")
-async def rename_role_brain(
-    role_id: UUID,
-    body: dict,
-    session: AsyncSession = Depends(get_session),
-) -> dict:
-    """Rename a role brain."""
-    new_name = (body.get("role_name") or "").strip()
-    if not new_name:
-        raise HTTPException(status_code=422, detail="role_name is required")
-    await session.execute(
-        sql_text("UPDATE role_brains SET role_name = :name WHERE id = :id"),
-        {"name": new_name, "id": str(role_id)},
-    )
-    await session.commit()
-    return {"id": str(role_id), "role_name": new_name}
-
-
-@app.delete("/org/roles/{role_id}", status_code=204)
-async def delete_role_brain(
-    role_id: UUID,
-    session: AsyncSession = Depends(get_session),
-) -> None:
-    """Delete a role brain and its associated skills."""
-    await session.execute(
-        sql_text("DELETE FROM role_brains WHERE id = :id"),
-        {"id": str(role_id)},
-    )
-    await session.commit()
-
-
-# ===========================================================================
-# PHASE 4 — SKILLS API: Agent Integration
-# ===========================================================================
-
-@app.get("/v1/org/{org_id}/skills")
-async def list_org_skills(
-    org_id: UUID,
-    session: AsyncSession = Depends(get_session),
-) -> dict:
-    """
-    List all executable skills for an organization.
-    Primary endpoint for AI agents to discover what this company knows how to do.
-    """
-    result = await session.execute(
-        sql_text("""
-            SELECT os.id, os.skill_name, os.trigger_context, os.inputs_required,
-                   os.confidence, os.source_count, os.last_verified_at, os.created_at,
-                   rb.role_name
-            FROM org_skills os
-            LEFT JOIN role_brains rb ON rb.id = os.role_brain_id
-            WHERE os.org_id = :org_id
-            ORDER BY os.confidence DESC, os.created_at DESC
-        """),
-        {"org_id": str(org_id)},
-    )
-    skills = result.mappings().all()
-
-    return {
-        "org_id": str(org_id),
-        "skill_count": len(skills),
-        "skills": [
-            {
-                "id": str(s["id"]),
-                "skill_name": s["skill_name"],
-                "role": s["role_name"],
-                "trigger_context": list(s["trigger_context"] or []),
-                "inputs_required": list(s["inputs_required"] or []),
-                "confidence": float(s["confidence"]),
-                "source_count": int(s["source_count"]),
-                "last_verified_at": s["last_verified_at"].isoformat() if s["last_verified_at"] else None,
-            }
-            for s in skills
-        ],
-    }
-
-
-@app.get("/v1/org/{org_id}/skills/{skill_id}")
-async def get_skill(
-    org_id: UUID,
-    skill_id: UUID,
-    session: AsyncSession = Depends(get_session),
-) -> dict:
-    """Get full skill definition including decision procedure."""
-    row = (await session.execute(
-        sql_text("""
-            SELECT os.*, rb.role_name
-            FROM org_skills os
-            LEFT JOIN role_brains rb ON rb.id = os.role_brain_id
-            WHERE os.id = :skill_id AND os.org_id = :org_id
-        """),
-        {"skill_id": str(skill_id), "org_id": str(org_id)},
-    )).mappings().first()
-
-    if not row:
-        raise HTTPException(status_code=404, detail="Skill not found")
-
-    return {
-        "id": str(row["id"]),
-        "org_id": str(org_id),
-        "skill_name": row["skill_name"],
-        "role": row["role_name"],
-        "trigger_context": list(row["trigger_context"] or []),
-        "inputs_required": list(row["inputs_required"] or []),
-        "procedure": row["procedure"] or {},
-        "confidence": float(row["confidence"]),
-        "source_count": int(row["source_count"]),
-        "last_verified_at": row["last_verified_at"].isoformat() if row["last_verified_at"] else None,
-        "created_at": row["created_at"].isoformat(),
-    }
-
-
-class AgentQueryRequest(BaseModel):
-    situation: str
-    context: dict = {}
-
-
-@app.post("/v1/org/{org_id}/query")
-async def agent_query(
-    org_id: UUID,
-    body: AgentQueryRequest,
-    session: AsyncSession = Depends(get_session),
-) -> dict:
-    """
-    Core agent query endpoint. Given a situation, finds the best matching skill
-    and returns a concrete, procedure-grounded recommendation.
-    AI agents call this before taking action to get company-specific guidance.
-    """
-    clone_row = (await session.execute(
-        sql_text("""
-            SELECT om.clone_id FROM org_memberships om
-            WHERE om.org_id = :org_id AND om.clone_id IS NOT NULL LIMIT 1
-        """),
-        {"org_id": str(org_id)},
-    )).mappings().first()
-    if clone_row and clone_row["clone_id"]:
-        await load_clone_keys(session, clone_row["clone_id"])
-
-    result = await query_skills(
-        session=session,
-        org_id=org_id,
-        situation=body.situation,
-        context=body.context,
-    )
-
-    skill_id = result.get("skill_id")
-    await session.execute(
-        sql_text("""
-            INSERT INTO agent_queries
-              (org_id, skill_id, situation, context, response, confidence, escalated, latency_ms)
-            VALUES
-              (:org_id, :skill_id, :situation, CAST(:context AS jsonb),
-               CAST(:response AS jsonb), :confidence, :escalated, :latency_ms)
-        """),
-        {
-            "org_id": str(org_id),
-            "skill_id": skill_id,
-            "situation": body.situation,
-            "context": json.dumps(body.context),
-            "response": json.dumps(result),
-            "confidence": result.get("confidence", 0.0),
-            "escalated": result.get("escalate", False),
-            "latency_ms": result.get("latency_ms", 0),
-        },
-    )
-    await session.commit()
-    return result
-
-
-class ValidateActionRequest(BaseModel):
-    proposed_action: str
-    context: dict = {}
-
-
-@app.post("/v1/org/{org_id}/validate")
-async def validate_agent_action(
-    org_id: UUID,
-    body: ValidateActionRequest,
-    session: AsyncSession = Depends(get_session),
-) -> dict:
-    """Pre-flight check: is this proposed action consistent with company procedure?"""
-    clone_row = (await session.execute(
-        sql_text("""
-            SELECT om.clone_id FROM org_memberships om
-            WHERE om.org_id = :org_id AND om.clone_id IS NOT NULL LIMIT 1
-        """),
-        {"org_id": str(org_id)},
-    )).mappings().first()
-    if clone_row and clone_row["clone_id"]:
-        await load_clone_keys(session, clone_row["clone_id"])
-
-    return await validate_action(
-        session=session,
-        org_id=org_id,
-        proposed_action=body.proposed_action,
-        context=body.context,
-    )
-
-
-@app.get("/v1/org/{org_id}/skills.openapi.json")
-async def skills_openapi_spec(
-    org_id: UUID,
-    session: AsyncSession = Depends(get_session),
-) -> dict:
-    """
-    Export skills as an OpenAPI tool spec for LLM function calling.
-    Drop into LangChain, Anthropic tool_use, or OpenAI function calling.
-    """
-    result = await session.execute(
-        sql_text("""
-            SELECT id, skill_name, trigger_context, inputs_required, confidence
-            FROM org_skills WHERE org_id = :org_id ORDER BY confidence DESC
-        """),
-        {"org_id": str(org_id)},
-    )
-    skills = result.mappings().all()
-
-    org_row = (await session.execute(
-        sql_text("SELECT name FROM orgs WHERE id = :id"),
-        {"id": str(org_id)},
-    )).mappings().first()
-    org_name = org_row["name"] if org_row else str(org_id)
-
-    tools = [
-        {
-            "name": "query_company_brain",
-            "description": (
-                f"Query the {org_name} company brain before taking action. "
-                "Returns procedure-grounded recommendations based on how this company actually operates."
-            ),
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "situation": {"type": "string", "description": "Describe the situation"},
-                    "context": {"type": "object", "description": "Relevant context variables"},
-                },
-                "required": ["situation"],
-            },
-        },
-        {
-            "name": "validate_action",
-            "description": (
-                "Check whether a proposed action is consistent with company procedure before executing."
-            ),
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "proposed_action": {"type": "string"},
-                    "context": {"type": "object"},
-                },
-                "required": ["proposed_action"],
-            },
-        },
-    ] + [
-        {
-            "name": f"skill__{s['skill_name']}",
-            "description": (
-                f"Apply the '{s['skill_name'].replace('_', ' ')}' procedure. "
-                f"Confidence: {s['confidence']:.0%}."
-            ),
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    k: {"type": "string"} for k in (s["inputs_required"] or [])
-                },
-                "required": list(s["inputs_required"] or []),
-            },
-        }
-        for s in skills
-    ]
-
-    return {
-        "org_id": str(org_id),
-        "org_name": org_name,
-        "tools": tools,
-        "usage": {
-            "anthropic": "Pass tools array to anthropic.messages.create(tools=...)",
-            "openai": "Adapt input_schema to parameters.properties format",
-            "langchain": "Use from_openai_tools([tool]) for each tool",
-        },
-    }
-
-
-@app.get("/v1/org/{org_id}/agent-queries")
-async def list_agent_queries(
-    org_id: UUID,
-    limit: int = Query(default=50, le=200),
-    session: AsyncSession = Depends(get_session),
-) -> dict:
-    """Audit log of all agent queries to this org's company brain."""
-    result = await session.execute(
-        sql_text("""
-            SELECT aq.id, aq.situation, aq.confidence, aq.escalated,
-                   aq.latency_ms, aq.created_at, os.skill_name
-            FROM agent_queries aq
-            LEFT JOIN org_skills os ON os.id = aq.skill_id
-            WHERE aq.org_id = :org_id
-            ORDER BY aq.created_at DESC
-            LIMIT :limit
-        """),
-        {"org_id": str(org_id), "limit": limit},
-    )
-    rows = result.mappings().all()
-    return {
-        "org_id": str(org_id),
-        "queries": [
-            {
-                "id": str(r["id"]),
-                "situation": r["situation"],
-                "skill_applied": r["skill_name"],
-                "confidence": float(r["confidence"] or 0),
-                "escalated": bool(r["escalated"]),
-                "latency_ms": r["latency_ms"],
-                "created_at": r["created_at"].isoformat(),
-            }
-            for r in rows
-        ],
-    }
-
 
 # ===========================================================================
 # BLOCK 5 — Enterprise Features
@@ -8253,212 +8095,6 @@ def _guard_preserved(rec: dict, action: str = "modify") -> None:
         raise HTTPException(status_code=409, detail=f"Clone is under legal hold until {hold} — cannot {action}")
 
 
-# ---------------------------------------------------------------------------
-# Feature C — Knowledge Handoff
-# ---------------------------------------------------------------------------
-
-@app.post("/clones/{handle}/capture-handoff", status_code=202)
-async def capture_handoff(
-    handle: str,
-    request: Request,
-    background_tasks: BackgroundTasks,
-    session: AsyncSession = Depends(get_session),
-) -> dict:
-    """
-    Trigger a knowledge handoff capture for a clone.
-    Sets clone as preserved and generates a structured Knowledge Transfer Report.
-    Auth: owner or org admin (enforced by Next.js proxy via X-User-Id header).
-    """
-    triggered_by = request.headers.get("X-User-Id")
-
-    row = await session.execute(
-        sql_text("SELECT clone_id, display_name FROM clone_identity WHERE handle = :h"),
-        {"h": handle},
-    )
-    record = row.mappings().first()
-    if not record:
-        raise HTTPException(status_code=404, detail="Clone not found")
-    clone_id = UUID(str(record["clone_id"]))
-
-    # Mark as preserved immediately
-    await session.execute(
-        sql_text("""
-            UPDATE clone_identity
-            SET is_preserved = TRUE, preserved_at = COALESCE(preserved_at, NOW())
-            WHERE clone_id = :cid
-        """),
-        {"cid": str(clone_id)},
-    )
-
-    # Upsert handoff_reports row
-    await session.execute(
-        sql_text("""
-            INSERT INTO handoff_reports (clone_id, status, triggered_by)
-            VALUES (:cid, 'generating', :tby)
-            ON CONFLICT (clone_id) DO UPDATE
-              SET status = 'generating', triggered_by = EXCLUDED.triggered_by,
-                  generated_at = NULL, created_at = NOW()
-        """),
-        {"cid": str(clone_id), "tby": triggered_by},
-    )
-    await session.commit()
-
-    background_tasks.add_task(_run_handoff_capture, clone_id, triggered_by)
-    return {"status": "generating", "clone_id": str(clone_id)}
-
-
-async def _run_handoff_capture(clone_id: UUID, triggered_by: str | None) -> None:
-    """
-    Background: run full ingestion sweep, then generate Knowledge Transfer Report via brain.
-    """
-    from doppel.brain.db.connection import AsyncSessionLocal
-    import datetime as _dt
-
-    async with AsyncSessionLocal() as session:
-        try:
-            # --- Step 1: full sweep ingestion ---
-            # Gmail
-            gmail_tok = (await session.execute(
-                sql_text("SELECT 1 FROM oauth_tokens WHERE clone_id = :cid AND provider = 'gmail'"),
-                {"cid": str(clone_id)},
-            )).first()
-            if gmail_tok:
-                try:
-                    row = await session.execute(
-                        sql_text("SELECT display_name FROM clone_identity WHERE clone_id = :cid"),
-                        {"cid": str(clone_id)},
-                    )
-                    cname = (row.mappings().first() or {}).get("display_name", "")
-                    from doppel.ingestion.status import create_job
-                    job_id = await create_job(clone_id, "gmail", session)
-                    await _run_gmail_ingestion(clone_id=clone_id, clone_name=cname, job_id=job_id)
-                except Exception as e:
-                    _log.warning("Handoff Gmail sweep failed: %s", e)
-
-            # --- Step 2: query memory stats ---
-            counts = {}
-            for table in ("episodic_memory", "semantic_memory", "procedural_memory", "relational_memory"):
-                n = (await session.execute(
-                    sql_text(f"SELECT COUNT(*) FROM {table} WHERE clone_id = :cid"),
-                    {"cid": str(clone_id)},
-                )).scalar() or 0
-                counts[table] = int(n)
-
-            # --- Step 3: generate report via brain ---
-            await load_clone_keys(session, clone_id)
-            brain = DoppelBrain(session=session, clone_id=clone_id)
-            report_prompt = (
-                "You are about to generate a structured Knowledge Transfer Report for yourself. "
-                "Based on all of your memories, reasoning traces, and experiences, produce a JSON object "
-                "with exactly these keys:\n"
-                '- "domain_summary": a 2-3 sentence description of your core areas of expertise\n'
-                '- "key_decisions": array of up to 5 objects {title, date, rationale, outcome}\n'
-                '- "key_contacts": array of up to 8 objects {name, relationship, context}\n'
-                '- "processes_owned": array of up to 5 objects {name, description, steps}\n'
-                '- "successor_notes": a paragraph of advice for whoever takes over your responsibilities\n\n'
-                "Respond with ONLY valid JSON, no markdown, no explanation."
-            )
-            result = await brain.process(BrainInput(
-                clone_id=clone_id,
-                message=report_prompt,
-                context_type="handoff_report",
-                metadata={"memory_stats": counts},
-            ))
-
-            # Parse the brain response as JSON
-            report: dict = {}
-            try:
-                raw = result.response.strip()
-                if raw.startswith("```"):
-                    raw = raw.split("```")[1].lstrip("json").strip()
-                report = json.loads(raw)
-            except Exception:
-                # Brain didn't return pure JSON — use response as domain_summary
-                report = {
-                    "domain_summary": result.response[:500],
-                    "key_decisions": [],
-                    "key_contacts": [],
-                    "processes_owned": [],
-                    "successor_notes": "",
-                }
-
-            await session.execute(
-                sql_text("""
-                    UPDATE handoff_reports SET
-                        status = 'complete',
-                        domain_summary = :ds,
-                        key_decisions = :kd::jsonb,
-                        key_contacts = :kc::jsonb,
-                        processes_owned = :po::jsonb,
-                        successor_notes = :sn,
-                        memory_stats = :ms::jsonb,
-                        generated_at = NOW()
-                    WHERE clone_id = :cid
-                """),
-                {
-                    "cid": str(clone_id),
-                    "ds": report.get("domain_summary", ""),
-                    "kd": json.dumps(report.get("key_decisions", [])),
-                    "kc": json.dumps(report.get("key_contacts", [])),
-                    "po": json.dumps(report.get("processes_owned", [])),
-                    "sn": report.get("successor_notes", ""),
-                    "ms": json.dumps(counts),
-                },
-            )
-            await session.commit()
-
-        except Exception as e:
-            _log.error("_run_handoff_capture failed clone=%s: %s", clone_id, e, exc_info=True)
-            await session.execute(
-                sql_text("UPDATE handoff_reports SET status = 'failed' WHERE clone_id = :cid"),
-                {"cid": str(clone_id)},
-            )
-            await session.commit()
-
-
-@app.get("/clones/{handle}/handoff-report")
-async def get_handoff_report(
-    handle: str,
-    session: AsyncSession = Depends(get_session),
-) -> dict:
-    """Return the handoff report for a clone. Owner or org admin only (enforced by proxy)."""
-    row = await session.execute(
-        sql_text("""
-            SELECT hr.* FROM handoff_reports hr
-            JOIN clone_identity c ON c.clone_id = hr.clone_id
-            WHERE c.handle = :h
-        """),
-        {"h": handle},
-    )
-    report = row.mappings().first()
-    if not report:
-        return {"status": "not_started"}
-    return {
-        "status": report["status"],
-        "domain_summary": report["domain_summary"],
-        "key_decisions": report["key_decisions"] or [],
-        "key_contacts": report["key_contacts"] or [],
-        "processes_owned": report["processes_owned"] or [],
-        "successor_notes": report["successor_notes"],
-        "memory_stats": report["memory_stats"] or {},
-        "generated_at": report["generated_at"].isoformat() if report["generated_at"] else None,
-    }
-
-
-@app.get("/clones/{handle}/handoff-report.json")
-async def download_handoff_report(
-    handle: str,
-    session: AsyncSession = Depends(get_session),
-):
-    """Download handoff report as a JSON file."""
-    from fastapi.responses import JSONResponse
-    data = await get_handoff_report(handle=handle, session=session)
-    if data.get("status") != "complete":
-        raise HTTPException(status_code=404, detail="Report not complete yet")
-    response = JSONResponse(content=data)
-    response.headers["Content-Disposition"] = f'attachment; filename="{handle}-handoff.json"'
-    return response
-
 
 # ---------------------------------------------------------------------------
 # 5.3  GDPR Data Export (Article 20)
@@ -8574,6 +8210,7 @@ async def gdpr_delete(
     # Cascade in FK-safe order (agent_queries uses org_id, not clone_id — excluded)
     for table in [
         "access_audit_log", "clone_permissions",
+        "bundle_clone_members", "consumer_bundle_items",
         "developer_api_keys", "email_drafts", "episodic_memory",
         "ingestion_jobs", "meeting_sessions", "oauth_tokens",
         "proposals", "reasoning_traces", "semantic_memory",
@@ -8619,6 +8256,7 @@ async def delete_clone_by_handle(
     # agent_queries uses org_id, not clone_id — excluded from cascade
     for table in [
         "access_audit_log", "clone_permissions",
+        "bundle_clone_members", "consumer_bundle_items",
         "developer_api_keys", "email_drafts", "episodic_memory",
         "ingestion_jobs", "meeting_sessions", "oauth_tokens",
         "proposals", "reasoning_traces", "semantic_memory",
@@ -8636,288 +8274,6 @@ async def delete_clone_by_handle(
     await session.commit()
     return {"status": "deleted", "clone_id": clone_id, "handle": handle}
 
-
-# ---------------------------------------------------------------------------
-# 5.5  SCIM Provisioning
-# ---------------------------------------------------------------------------
-
-async def _verify_scim_token(org_id: UUID, token: str, session: AsyncSession) -> None:
-    row = await session.execute(
-        sql_text("SELECT scim_token_hash, scim_enabled FROM orgs WHERE id = :id"),
-        {"id": str(org_id)},
-    )
-    rec = row.mappings().first()
-    if not rec or not rec["scim_enabled"]:
-        raise HTTPException(status_code=403, detail="SCIM not enabled for this org")
-    token_hash = hashlib.sha256(token.encode()).hexdigest()
-    if not hmac.compare_digest(token_hash, rec["scim_token_hash"] or ""):
-        raise HTTPException(status_code=401, detail="Invalid SCIM token")
-
-
-def _scim_user_from_row(row: dict) -> dict:
-    return {
-        "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
-        "id": str(row.get("user_id", "")),
-        "userName": row.get("display_name", ""),
-        "active": not row.get("is_preserved", False),
-        "meta": {"resourceType": "User"},
-    }
-
-
-@app.post("/scim/v2/orgs/{org_id}/Users", status_code=201)
-async def scim_create_user(
-    org_id: UUID,
-    body: dict,
-    request: Request,
-    session: AsyncSession = Depends(get_session),
-) -> dict:
-    auth = request.headers.get("Authorization", "")
-    token = auth.removeprefix("Bearer ").strip()
-    await _verify_scim_token(org_id, token, session)
-
-    display_name = (body.get("displayName") or body.get("name", {}).get("formatted") or body.get("userName", ""))
-    external_id = body.get("externalId") or body.get("id") or str(uuid4())
-
-    handle = f"scim-{external_id[:12].lower().replace('-', '')}"
-    clone_id = uuid4()
-    try:
-        await session.execute(
-            sql_text("""
-                INSERT INTO clone_identity (clone_id, display_name, handle, user_id, access_mode, style_fingerprint, value_system)
-                VALUES (:cid, :name, :handle, :uid, 'org_scoped', '{}', '{}')
-            """),
-            {"cid": str(clone_id), "name": display_name, "handle": handle, "uid": external_id},
-        )
-        await session.execute(
-            sql_text("INSERT INTO org_memberships (org_id, user_id, clone_id, role) VALUES (:oid, :uid, :cid, 'member')"),
-            {"oid": str(org_id), "uid": external_id, "cid": str(clone_id)},
-        )
-        await session.commit()
-    except Exception as e:
-        if "unique" in str(e).lower():
-            raise HTTPException(status_code=409, detail="User already exists")
-        _log.error("SCIM user creation failed: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-    return _scim_user_from_row({"user_id": external_id, "display_name": display_name})
-
-
-@app.get("/scim/v2/orgs/{org_id}/Users")
-async def scim_list_users(
-    org_id: UUID,
-    request: Request,
-    session: AsyncSession = Depends(get_session),
-) -> dict:
-    auth = request.headers.get("Authorization", "")
-    token = auth.removeprefix("Bearer ").strip()
-    await _verify_scim_token(org_id, token, session)
-
-    rows = await session.execute(
-        sql_text("""
-            SELECT c.user_id, c.display_name, c.is_preserved
-            FROM clone_identity c
-            JOIN org_memberships m ON m.user_id = c.user_id AND m.org_id = :oid
-        """),
-        {"oid": str(org_id)},
-    )
-    users = [_scim_user_from_row(dict(r)) for r in rows.mappings()]
-    return {
-        "schemas": ["urn:ietf:params:scim:api:messages:2.0:ListResponse"],
-        "totalResults": len(users),
-        "Resources": users,
-    }
-
-
-@app.get("/scim/v2/orgs/{org_id}/Users/{user_id}")
-async def scim_get_user(
-    org_id: UUID,
-    user_id: str,
-    request: Request,
-    session: AsyncSession = Depends(get_session),
-) -> dict:
-    auth = request.headers.get("Authorization", "")
-    token = auth.removeprefix("Bearer ").strip()
-    await _verify_scim_token(org_id, token, session)
-
-    row = await session.execute(
-        sql_text("""
-            SELECT c.user_id, c.display_name, c.is_preserved
-            FROM clone_identity c
-            JOIN org_memberships m ON m.user_id = c.user_id
-            WHERE m.org_id = :oid AND c.user_id = :uid
-        """),
-        {"oid": str(org_id), "uid": user_id},
-    )
-    rec = row.mappings().first()
-    if not rec:
-        raise HTTPException(status_code=404, detail="User not found")
-    return _scim_user_from_row(dict(rec))
-
-
-@app.patch("/scim/v2/orgs/{org_id}/Users/{user_id}")
-async def scim_patch_user(
-    org_id: UUID,
-    user_id: str,
-    body: dict,
-    request: Request,
-    session: AsyncSession = Depends(get_session),
-) -> dict:
-    """SCIM PATCH — active: false sets is_preserved = true on the clone."""
-    auth = request.headers.get("Authorization", "")
-    token = auth.removeprefix("Bearer ").strip()
-    await _verify_scim_token(org_id, token, session)
-
-    ops = body.get("Operations", [])
-    active_val = None
-    for op in ops:
-        if op.get("path") == "active" or op.get("op", "").lower() == "replace":
-            v = op.get("value")
-            if isinstance(v, bool):
-                active_val = v
-            elif isinstance(v, dict) and "active" in v:
-                active_val = v["active"]
-
-    if active_val is False:
-        await session.execute(
-            sql_text("""
-                UPDATE clone_identity SET is_preserved = TRUE, preserved_at = NOW()
-                WHERE user_id = :uid
-            """),
-            {"uid": user_id},
-        )
-        await session.commit()
-    elif active_val is True:
-        await session.execute(
-            sql_text("UPDATE clone_identity SET is_preserved = FALSE, preserved_at = NULL WHERE user_id = :uid"),
-            {"uid": user_id},
-        )
-        await session.commit()
-
-    row = await session.execute(
-        sql_text("SELECT user_id, display_name, is_preserved FROM clone_identity WHERE user_id = :uid"),
-        {"uid": user_id},
-    )
-    rec = row.mappings().first()
-    if not rec:
-        raise HTTPException(status_code=404, detail="User not found")
-    return _scim_user_from_row(dict(rec))
-
-
-class EnableScimRequest(BaseModel):
-    user_id: str
-
-
-@app.post("/org/scim/enable")
-async def enable_scim(
-    body: EnableScimRequest,
-    session: AsyncSession = Depends(get_session),
-) -> dict:
-    """Generate a SCIM bearer token for the org. Only the org owner can call this."""
-    row = await session.execute(
-        sql_text("SELECT id FROM orgs WHERE owner_user_id = :uid LIMIT 1"),
-        {"uid": body.user_id},
-    )
-    rec = row.mappings().first()
-    if not rec:
-        raise HTTPException(status_code=403, detail="Not an org owner")
-
-    raw_token = secrets.token_urlsafe(32)
-    token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
-    await session.execute(
-        sql_text("UPDATE orgs SET scim_token_hash = :h, scim_enabled = TRUE WHERE id = :id"),
-        {"h": token_hash, "id": str(rec["id"])},
-    )
-    await session.commit()
-    return {"scim_token": raw_token, "note": "Store this token securely — it will not be shown again"}
-
-
-# ---------------------------------------------------------------------------
-# 5.6  SSO / SAML Configuration (stub)
-# ---------------------------------------------------------------------------
-
-class SsoConfigRequest(BaseModel):
-    user_id: str
-    provider: str
-    metadata_url: str | None = None
-    entity_id: str | None = None
-    certificate: str | None = None
-
-
-_VALID_SSO_PROVIDERS = {"okta", "azure_ad", "google_workspace", "saml_generic"}
-
-
-@app.post("/org/sso-config", status_code=201)
-async def create_sso_config(
-    body: SsoConfigRequest,
-    session: AsyncSession = Depends(get_session),
-) -> dict:
-    if body.provider not in _VALID_SSO_PROVIDERS:
-        raise HTTPException(status_code=422, detail=f"provider must be one of {_VALID_SSO_PROVIDERS}")
-
-    org_row = await session.execute(
-        sql_text("SELECT id FROM orgs WHERE owner_user_id = :uid LIMIT 1"),
-        {"uid": body.user_id},
-    )
-    org = org_row.mappings().first()
-    if not org:
-        raise HTTPException(status_code=403, detail="Not an org owner")
-
-    await session.execute(
-        sql_text("""
-            INSERT INTO sso_configs (org_id, provider, metadata_url, entity_id, certificate)
-            VALUES (:org_id, :provider, :metadata_url, :entity_id, :cert)
-            ON CONFLICT (org_id) DO UPDATE
-            SET provider = EXCLUDED.provider, metadata_url = EXCLUDED.metadata_url,
-                entity_id = EXCLUDED.entity_id, certificate = EXCLUDED.certificate
-        """),
-        {
-            "org_id": str(org["id"]),
-            "provider": body.provider,
-            "metadata_url": body.metadata_url,
-            "entity_id": body.entity_id,
-            "cert": body.certificate,
-        },
-    )
-    await session.commit()
-    return {"status": "saved", "provider": body.provider}
-
-
-@app.get("/org/sso-config")
-async def get_sso_config(
-    user_id: str = Query(...),
-    session: AsyncSession = Depends(get_session),
-) -> dict:
-    org_row = await session.execute(
-        sql_text("SELECT id FROM orgs WHERE owner_user_id = :uid LIMIT 1"),
-        {"uid": user_id},
-    )
-    org = org_row.mappings().first()
-    if not org:
-        raise HTTPException(status_code=403, detail="Not an org owner")
-
-    cfg_row = await session.execute(
-        sql_text("SELECT provider, metadata_url, entity_id, enabled FROM sso_configs WHERE org_id = :oid"),
-        {"oid": str(org["id"])},
-    )
-    cfg = cfg_row.mappings().first()
-    if not cfg:
-        return {"configured": False}
-
-    return {
-        "configured": True,
-        "provider": cfg["provider"],
-        "metadata_url": cfg["metadata_url"],
-        "entity_id": cfg["entity_id"],
-        "enabled": cfg["enabled"],
-    }
-
-
-@app.post("/org/sso-config/test")
-async def test_sso_config(
-    user_id: str = Query(...),
-    session: AsyncSession = Depends(get_session),
-) -> dict:
-    return {"status": "not_active", "message": "Contact support to activate SSO for your organisation."}
 
 
 # ---------------------------------------------------------------------------

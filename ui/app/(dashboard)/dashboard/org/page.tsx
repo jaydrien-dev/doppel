@@ -1,370 +1,450 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import dynamic from "next/dynamic";
-import Link from "next/link";
+import { useCallback, useEffect, useState } from "react";
 import { useUser } from "@clerk/nextjs";
-
-const ForceGraph2D = dynamic(() => import("react-force-graph-2d"), {
-  ssr: false,
-  loading: () => (
-    <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div style={{ width: 16, height: 16, borderRadius: "50%", border: "1px solid rgba(255,255,255,0.20)", borderTopColor: "rgba(255,255,255,0.60)", animation: "spin 0.8s linear infinite" }} />
-    </div>
-  ),
-});
+import Link from "next/link";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-interface Org {
-  id: string;
-  name: string;
-  slug: string;
-  is_owner: boolean;
-  created_at: string | null;
-}
+interface OrgInfo { id: string; name: string; slug: string; is_owner: boolean; }
 
 interface OrgMember {
   user_id: string;
   role: "admin" | "member";
   joined_at: string | null;
-  clone: {
-    clone_id: string;
-    display_name: string;
-    handle: string;
-    access_mode: string;
-    is_onboarding_resource?: boolean;
-  } | null;
+  clone: { clone_id: string; display_name: string; handle: string; access_mode: string } | null;
 }
 
-interface SearchResult {
+interface OrgClone {
   clone_id: string;
-  clone_name: string;
-  clone_handle: string;
-  content: string;
-  source: string;
-  similarity: number;
+  display_name: string;
+  handle: string;
+  avatar_url: string | null;
+  category: string | null;
+  description: string;
+  access_mode: string;
+  price_per_query: number;
+  total_queries: number;
+  owner_user_id: string;
+  member_role: "admin" | "member";
 }
 
+interface CloneMember { user_id: string; role: string; }
+
+interface UserProfile { name: string; email: string; image_url: string | null; }
+
 // ---------------------------------------------------------------------------
-// Create org panel
+// Helpers
 // ---------------------------------------------------------------------------
+const ACCESS_LABELS: Record<string, { label: string; color: string; bg: string; border: string }> = {
+  org_scoped: { label: "Org-wide",  color: "rgba(52,211,153,0.85)",  bg: "rgba(52,211,153,0.08)",  border: "rgba(52,211,153,0.20)" },
+  private:    { label: "Private",   color: "rgba(255,255,255,0.35)", bg: "rgba(255,255,255,0.04)", border: "rgba(255,255,255,0.09)" },
+  public:     { label: "Public",    color: "rgba(107,174,255,0.80)", bg: "rgba(26,115,232,0.08)",  border: "rgba(26,115,232,0.20)" },
+  allowlist:  { label: "Allowlist", color: "rgba(251,191,36,0.80)",  bg: "rgba(251,191,36,0.07)",  border: "rgba(251,191,36,0.18)" },
+};
 
-function CreateOrgPanel({ onCreate }: { onCreate: (org: Org) => void }) {
-  const [name, setName] = useState("");
-  const [slug, setSlug] = useState("");
-  const [creating, setCreating] = useState(false);
-  const [error, setError] = useState("");
+function formatDate(iso: string | null) {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
 
-  function slugify(s: string) {
-    return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-  }
-
-  async function create() {
-    if (!name.trim() || !slug.trim()) return;
-    setCreating(true);
-    setError("");
-    try {
-      const res = await fetch("/api/org", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: name.trim(), slug: slug.trim() }),
-      });
-      if (res.status === 409) {
-        setError("Slug already taken — try another.");
-        return;
-      }
-      const data = await res.json();
-      onCreate({ id: data.org_id, name: data.name, slug: data.slug, is_owner: true, created_at: null });
-    } finally {
-      setCreating(false);
-    }
-  }
-
+function SectionHead({ label, count }: { label: string; count?: number }) {
   return (
-    <div className="card" style={{ maxWidth: 384 }}>
-      <p style={{ fontSize: 13, fontWeight: 500, color: "rgba(255,255,255,0.80)", marginBottom: 4 }}>Create a team workspace</p>
-      <p style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", marginBottom: 20 }}>
-        Invite colleagues, see everyone&apos;s clones, and search across your team&apos;s collective knowledge.
+    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+      <p style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.12em", color: "rgba(255,255,255,0.25)", margin: 0 }}>
+        {label}
       </p>
-      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        <input
-          type="text"
-          placeholder="Workspace name (e.g. Acme Corp)"
-          value={name}
-          onChange={(e) => { setName(e.target.value); setSlug(slugify(e.target.value)); }}
-          className="input"
-          style={{ width: "100%" }}
-        />
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: 12, color: "rgba(255,255,255,0.25)", flexShrink: 0 }}>doppel.ai/team/</span>
-          <input
-            type="text"
-            placeholder="slug"
-            value={slug}
-            onChange={(e) => setSlug(slugify(e.target.value))}
-            className="input"
-            style={{ flex: 1, fontFamily: "monospace" }}
-          />
-        </div>
-        {error && <p style={{ fontSize: 11, color: "rgba(248,113,113,0.70)" }}>{error}</p>}
-        <button
-          onClick={create}
-          disabled={creating || !name.trim() || !slug.trim()}
-          className="btn btn--primary"
-          style={{ width: "100%", justifyContent: "center" }}
-        >
-          {creating ? "Creating…" : "Create workspace"}
-        </button>
-      </div>
+      {count !== undefined && (
+        <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 999, background: "rgba(255,255,255,0.05)", color: "rgba(255,255,255,0.30)" }}>
+          {count}
+        </span>
+      )}
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Clone card
+// MemberRow — defined at module level to avoid recreating component type
 // ---------------------------------------------------------------------------
-
-function CloneCard({
-  member,
-  isAdmin,
-  onRoleChange,
+function MemberRow({
+  member, profiles, currentUserId, changingRole, removing,
+  onRoleChange, onRemove,
 }: {
   member: OrgMember;
-  isAdmin: boolean;
-  onRoleChange: (userId: string, newRole: "admin" | "member") => void;
+  profiles: Record<string, UserProfile>;
+  currentUserId: string;
+  changingRole: string | null;
+  removing: string | null;
+  onRoleChange: (userId: string, role: "admin" | "member") => void;
+  onRemove: (userId: string) => void;
 }) {
-  const [updatingRole, setUpdatingRole] = useState(false);
-  const [roleError, setRoleError] = useState("");
-  const [isKnowledgeResource, setIsKnowledgeResource] = useState(
-    member.clone?.is_onboarding_resource ?? false
-  );
-  const [togglingResource, setTogglingResource] = useState(false);
-  const [knowledgeError, setKnowledgeError] = useState("");
-  const c = member.clone;
-
-  async function toggleKnowledgeResource() {
-    if (!c) return;
-    setTogglingResource(true);
-    setKnowledgeError("");
-    try {
-      const next = !isKnowledgeResource;
-      const res = await fetch(`/api/clones/${c.handle}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ is_onboarding_resource: next }),
-      });
-      if (res.ok) {
-        setIsKnowledgeResource(next);
-      } else {
-        const data = await res.json().catch(() => ({}));
-        setKnowledgeError(data.detail ?? data.error ?? `Error ${res.status}`);
-      }
-    } catch {
-      setKnowledgeError("Network error");
-    } finally {
-      setTogglingResource(false);
-    }
-  }
-
-  async function handleRoleChange(newRole: "admin" | "member") {
-    if (newRole === member.role) return;
-    setUpdatingRole(true);
-    setRoleError("");
-    try {
-      const res = await fetch("/api/org/members/role", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ target_user_id: member.user_id, new_role: newRole }),
-      });
-      if (res.ok) {
-        onRoleChange(member.user_id, newRole);
-      } else {
-        const data = await res.json().catch(() => ({}));
-        setRoleError(data.detail ?? data.error ?? `Error ${res.status}`);
-      }
-    } catch {
-      setRoleError("Network error");
-    } finally {
-      setUpdatingRole(false);
-    }
-  }
-
-  if (!c) {
-    return (
-      <div className="card" style={{ display: "flex", alignItems: "center", gap: 12, opacity: 0.6 }}>
-        <div style={{ width: 32, height: 32, borderRadius: "50%", background: "rgba(255,255,255,0.04)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, color: "rgba(255,255,255,0.30)", flexShrink: 0 }}>?</div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <p style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", margin: 0 }}>No clone yet</p>
-          <p style={{ fontSize: 11, color: "rgba(255,255,255,0.20)", fontFamily: "monospace", margin: 0 }}>{member.user_id.slice(0, 12)}…</p>
-        </div>
-        {isAdmin && (
-          <RoleSelector role={member.role} disabled={updatingRole} onChange={handleRoleChange} />
-        )}
-      </div>
-    );
-  }
+  const profile = profiles[member.user_id];
+  const name = profile?.name || member.user_id.slice(0, 16) + "…";
+  const email = profile?.email || "";
+  const isSelf = member.user_id === currentUserId;
 
   return (
-    <div className="card" style={{ overflow: "hidden", padding: 0 }}>
-      <div style={{ padding: 16, display: "flex", alignItems: "center", gap: 12 }}>
-        <Link href={`/c/${c.handle}`} target="_blank" style={{ display: "flex", alignItems: "center", gap: 12, flex: 1, minWidth: 0, textDecoration: "none" }}>
-          <div style={{ width: 32, height: 32, borderRadius: "50%", background: "rgba(255,255,255,0.06)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, color: "rgba(255,255,255,0.50)", fontWeight: 500, flexShrink: 0 }}>
-            {c.display_name.charAt(0).toUpperCase()}
-          </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <p style={{ fontSize: 13, color: "rgba(255,255,255,0.75)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", margin: 0 }}>{c.display_name}</p>
-            <p style={{ fontSize: 11, color: "rgba(255,255,255,0.30)", fontFamily: "monospace", margin: 0 }}>@{c.handle}</p>
-          </div>
-        </Link>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-          {c.access_mode === "public"
-            ? <span className="badge badge--pos">{c.access_mode}</span>
-            : <span className="badge badge--neutral">{c.access_mode}</span>
-          }
-          {isAdmin && (
-            <button
-              onClick={(e) => { e.stopPropagation(); e.preventDefault(); toggleKnowledgeResource(); }}
-              disabled={togglingResource}
-              title={isKnowledgeResource ? "Remove from Team Knowledge" : "Add to Team Knowledge"}
-              style={{
-                fontSize: 10, padding: "2px 8px", borderRadius: 999,
-                border: isKnowledgeResource ? "1px solid rgba(255,255,255,0.15)" : "1px solid rgba(255,255,255,0.05)",
-                background: isKnowledgeResource ? "rgba(255,255,255,0.06)" : "rgba(255,255,255,0.02)",
-                color: isKnowledgeResource ? "rgba(255,255,255,0.50)" : "rgba(255,255,255,0.20)",
-                cursor: "pointer", transition: "all 0.15s", opacity: togglingResource ? 0.4 : 1,
-                fontFamily: "inherit",
-              }}
-            >
-              {isKnowledgeResource ? "knowledge" : "+ knowledge"}
-            </button>
-          )}
-          {isAdmin ? (
-            <RoleSelector role={member.role} disabled={updatingRole} onChange={handleRoleChange} />
-          ) : member.role === "admin" ? (
-            <span className="badge badge--neutral">admin</span>
-          ) : null}
-          <Link
-            href={`/c/${c.handle}`}
-            target="_blank"
-            style={{ color: "rgba(255,255,255,0.20)", transition: "color 0.15s", lineHeight: 0, display: "flex" }}
-            onMouseEnter={(e) => (e.currentTarget.style.color = "rgba(255,255,255,0.40)")}
-            onMouseLeave={(e) => (e.currentTarget.style.color = "rgba(255,255,255,0.20)")}
-          >
-            <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
-              <path d="M2.5 8.5l6-6M8.5 8.5V2.5H2.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </Link>
-        </div>
+    <div style={{
+      display: "flex", alignItems: "center", gap: 14,
+      padding: "12px 16px", borderRadius: 14,
+      background: "rgba(255,255,255,0.03)",
+      border: "1px solid rgba(255,255,255,0.07)",
+    }}>
+      {/* Avatar */}
+      <div style={{
+        width: 36, height: 36, borderRadius: 10, flexShrink: 0, overflow: "hidden",
+        background: "rgba(255,255,255,0.07)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        fontSize: 13, fontWeight: 500, color: "rgba(255,255,255,0.50)",
+      }}>
+        {profile?.image_url
+          ? <img src={profile.image_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+          : name[0]?.toUpperCase()}
       </div>
-      {(roleError || knowledgeError) && (
-        <div style={{ padding: "0 16px 12px", display: "flex", flexDirection: "column", gap: 2 }}>
-          {roleError && <p style={{ fontSize: 11, color: "rgba(248,113,113,0.60)", margin: 0 }}>{roleError}</p>}
-          {knowledgeError && <p style={{ fontSize: 11, color: "rgba(248,113,113,0.60)", margin: 0 }}>{knowledgeError}</p>}
-        </div>
+
+      {/* Info */}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <p style={{ fontSize: 13, fontWeight: 500, color: "rgba(255,255,255,0.80)", margin: 0 }}>
+          {name}{isSelf ? " (you)" : ""}
+        </p>
+        <p style={{ fontSize: 11, color: "rgba(255,255,255,0.28)", margin: "2px 0 0" }}>
+          {email || (member.clone ? `@${member.clone.handle}` : "No clone")} · {formatDate(member.joined_at)}
+        </p>
+      </div>
+
+      {/* Role select */}
+      <select
+        value={member.role}
+        disabled={changingRole === member.user_id || isSelf}
+        onChange={(e) => onRoleChange(member.user_id, e.target.value as "admin" | "member")}
+        style={{
+          fontSize: 12, padding: "5px 10px", borderRadius: 8,
+          background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)",
+          color: member.role === "admin" ? "rgba(167,139,250,0.85)" : "rgba(255,255,255,0.50)",
+          cursor: isSelf ? "default" : "pointer", fontFamily: "inherit", outline: "none",
+          opacity: changingRole === member.user_id ? 0.5 : 1,
+        }}
+      >
+        <option value="member">Member</option>
+        <option value="admin">Admin</option>
+      </select>
+
+      {/* Remove */}
+      {!isSelf && (
+        <button
+          onClick={() => onRemove(member.user_id)}
+          disabled={removing === member.user_id}
+          title="Remove member"
+          style={{
+            width: 30, height: 30, borderRadius: 8,
+            border: "1px solid rgba(239,68,68,0.20)",
+            background: "rgba(239,68,68,0.06)", color: "rgba(239,68,68,0.55)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            cursor: "pointer", transition: "all 160ms", flexShrink: 0,
+            opacity: removing === member.user_id ? 0.5 : 1,
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(239,68,68,0.12)"; e.currentTarget.style.color = "rgba(239,68,68,0.85)"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(239,68,68,0.06)"; e.currentTarget.style.color = "rgba(239,68,68,0.55)"; }}
+        >
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+            <path d="M2 6h8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+          </svg>
+        </button>
       )}
     </div>
   );
 }
 
-function RoleSelector({
-  role,
-  disabled,
-  onChange,
+// ---------------------------------------------------------------------------
+// CloneAccessPanel — per-clone expand to manage individual member access
+// ---------------------------------------------------------------------------
+function CloneAccessPanel({
+  clone, members, profiles, currentUserId,
 }: {
-  role: string;
-  disabled: boolean;
-  onChange: (r: "admin" | "member") => void;
+  clone: OrgClone;
+  members: OrgMember[];
+  profiles: Record<string, UserProfile>;
+  currentUserId: string;
 }) {
-  return (
-    <select
-      value={role}
-      disabled={disabled}
-      onChange={(e) => { e.stopPropagation(); onChange(e.target.value as "admin" | "member"); }}
-      onClick={(e) => e.stopPropagation()}
-      className="input"
-      style={{ fontSize: 10, padding: "2px 8px", cursor: "pointer", opacity: disabled ? 0.4 : 1, width: "auto" }}
-    >
-      <option value="member">member</option>
-      <option value="admin">admin</option>
-    </select>
-  );
-}
+  const [expanded, setExpanded] = useState(false);
+  const [cloneMembers, setCloneMembers] = useState<CloneMember[]>([]);
+  const [loadingMembers, setLoadingMembers] = useState(false);
+  const [granting, setGranting] = useState<string | null>(null);
+  const [revoking, setRevoking] = useState<string | null>(null);
+  const [toggling, setToggling] = useState(false);
+  const [accessMode, setAccessMode] = useState(clone.access_mode);
 
-// ---------------------------------------------------------------------------
-// Cross-clone search
-// ---------------------------------------------------------------------------
-
-function CrossCloneSearch() {
-  const [query, setQuery] = useState("");
-  const [results, setResults] = useState<SearchResult[]>([]);
-  const [searching, setSearching] = useState(false);
-  const [searched, setSearched] = useState(false);
-
-  async function search() {
-    if (!query.trim()) return;
-    setSearching(true);
-    setSearched(false);
+  async function fetchCloneMembers() {
+    setLoadingMembers(true);
     try {
-      const res = await fetch("/api/org/search", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: query.trim() }),
-      });
-      const data = await res.json();
-      setResults(data.results ?? []);
-      setSearched(true);
+      const res = await fetch(`/api/org/admin/clones/${clone.clone_id}/members`);
+      const d = await res.json();
+      setCloneMembers(d.members ?? []);
     } finally {
-      setSearching(false);
+      setLoadingMembers(false);
     }
   }
 
+  async function handleExpand() {
+    if (!expanded) await fetchCloneMembers();
+    setExpanded((v) => !v);
+  }
+
+  async function handleToggleOrgWide() {
+    const newMode = accessMode === "org_scoped" ? "private" : "org_scoped";
+    setToggling(true);
+    try {
+      await fetch(`/api/org/admin/clones/${clone.clone_id}/access`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ access_mode: newMode }),
+      });
+      setAccessMode(newMode);
+    } finally {
+      setToggling(false);
+    }
+  }
+
+  async function handleGrant(targetUserId: string) {
+    setGranting(targetUserId);
+    try {
+      await fetch(`/api/org/admin/clones/${clone.clone_id}/members`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ target_user_id: targetUserId }),
+      });
+      await fetchCloneMembers();
+    } finally {
+      setGranting(null);
+    }
+  }
+
+  async function handleRevoke(targetUserId: string) {
+    setRevoking(targetUserId);
+    try {
+      await fetch(`/api/org/admin/clones/${clone.clone_id}/members/${targetUserId}`, {
+        method: "DELETE",
+      });
+      setCloneMembers((prev) => prev.filter((m) => m.user_id !== targetUserId));
+    } finally {
+      setRevoking(null);
+    }
+  }
+
+  const am = ACCESS_LABELS[accessMode] ?? ACCESS_LABELS.private;
+  const isPublicWarning = accessMode === "public";
+  const grantedIds = new Set(cloneMembers.map((m) => m.user_id));
+  const eligible = members.filter((m) => !grantedIds.has(m.user_id) && m.user_id !== clone.owner_user_id);
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <div style={{ display: "flex", gap: 8 }}>
-        <input
-          type="text"
-          placeholder="Search across all team clones…"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && search()}
-          className="input"
-          style={{ flex: 1 }}
-        />
+    <div style={{
+      borderRadius: 14, overflow: "hidden",
+      background: accessMode === "org_scoped" ? "rgba(52,211,153,0.04)" : "rgba(255,255,255,0.025)",
+      border: `1px solid ${accessMode === "org_scoped" ? "rgba(52,211,153,0.12)" : "rgba(255,255,255,0.07)"}`,
+      transition: "all 200ms",
+    }}>
+      {/* Header row */}
+      <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "12px 16px" }}>
+        {/* Avatar */}
+        <div style={{
+          width: 38, height: 38, borderRadius: 11, flexShrink: 0, overflow: "hidden",
+          background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.09)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          fontSize: 15, fontWeight: 500, color: "rgba(255,255,255,0.50)",
+        }}>
+          {clone.avatar_url
+            ? <img src={clone.avatar_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+            : clone.display_name[0]?.toUpperCase()}
+        </div>
+
+        {/* Name + owner */}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <p style={{ fontSize: 13, fontWeight: 500, color: "rgba(255,255,255,0.80)", margin: 0 }}>
+              {clone.display_name}
+            </p>
+            {clone.owner_user_id === currentUserId && (
+              <span style={{ fontSize: 10, padding: "2px 7px", borderRadius: 999, background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.30)" }}>yours</span>
+            )}
+          </div>
+          <p style={{ fontSize: 11, color: "rgba(255,255,255,0.28)", margin: "2px 0 0" }}>
+            @{clone.handle} · {clone.total_queries.toLocaleString()} queries
+            {profiles[clone.owner_user_id] && ` · by ${profiles[clone.owner_user_id].name}`}
+          </p>
+        </div>
+
+        {/* Access badge */}
+        <span style={{
+          fontSize: 11, padding: "4px 10px", borderRadius: 999,
+          background: am.bg, border: `1px solid ${am.border}`, color: am.color, whiteSpace: "nowrap",
+        }}>
+          {am.label}
+        </span>
+
+        {/* Org-wide toggle */}
         <button
-          onClick={search}
-          disabled={searching || !query.trim()}
-          className="btn btn--primary"
-          style={{ flexShrink: 0 }}
+          onClick={handleToggleOrgWide}
+          disabled={toggling}
+          style={{
+            padding: "7px 13px", borderRadius: 9, fontSize: 12, fontWeight: 500,
+            cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap",
+            background: accessMode === "org_scoped" ? "rgba(239,68,68,0.07)" : "rgba(52,211,153,0.08)",
+            border: `1px solid ${accessMode === "org_scoped" ? "rgba(239,68,68,0.18)" : "rgba(52,211,153,0.22)"}`,
+            color: accessMode === "org_scoped" ? "rgba(239,68,68,0.75)" : "rgba(52,211,153,0.80)",
+            transition: "all 160ms", opacity: toggling ? 0.5 : 1,
+          }}
         >
-          {searching ? "Searching…" : "Search"}
+          {toggling ? "…" : accessMode === "org_scoped" ? "Remove org-wide" : "Share org-wide"}
+        </button>
+
+        {/* Expand */}
+        <button
+          onClick={handleExpand}
+          style={{
+            width: 30, height: 30, borderRadius: 8, border: "1px solid rgba(255,255,255,0.09)",
+            background: "rgba(255,255,255,0.05)", color: "rgba(255,255,255,0.45)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            cursor: "pointer", transition: "all 160ms", flexShrink: 0,
+          }}
+          title={expanded ? "Collapse" : "Manage individual access"}
+        >
+          <svg width="11" height="11" viewBox="0 0 12 12" fill="none"
+            style={{ transform: expanded ? "rotate(180deg)" : "none", transition: "transform 200ms" }}>
+            <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
         </button>
       </div>
 
-      {searched && results.length === 0 && (
-        <p style={{ fontSize: 13, color: "rgba(255,255,255,0.30)", padding: "0 4px" }}>No matching memories found across your team.</p>
+      {/* Public clone warning */}
+      {isPublicWarning && (
+        <div style={{
+          display: "flex", alignItems: "center", gap: 10,
+          padding: "9px 16px",
+          background: "rgba(251,191,36,0.07)",
+          borderTop: "1px solid rgba(251,191,36,0.15)",
+        }}>
+          <svg width="13" height="13" viewBox="0 0 14 14" fill="none" style={{ flexShrink: 0 }}>
+            <path d="M7 2L13 12H1L7 2z" stroke="rgba(251,191,36,0.80)" strokeWidth="1.3" strokeLinejoin="round"/>
+            <path d="M7 6v2.5M7 10v.5" stroke="rgba(251,191,36,0.80)" strokeWidth="1.3" strokeLinecap="round"/>
+          </svg>
+          <p style={{ fontSize: 11, color: "rgba(251,191,36,0.80)", margin: 0 }}>
+            This clone is <strong>public</strong> — anyone on the internet can access it, not just org members.
+          </p>
+        </div>
       )}
 
-      {results.length > 0 && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {results.map((r, i) => (
-            <div key={i} className="card">
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-                <div style={{ width: 20, height: 20, borderRadius: "50%", background: "rgba(255,255,255,0.06)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, color: "rgba(255,255,255,0.40)", fontWeight: 500 }}>
-                  {r.clone_name?.charAt(0).toUpperCase()}
+      {/* Expanded member access panel */}
+      {expanded && (
+        <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", padding: "14px 16px 16px" }}>
+          <p style={{ fontSize: 11, color: "rgba(255,255,255,0.30)", marginBottom: 12, fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.08em" }}>
+            Individual access
+          </p>
+
+          {loadingMembers ? (
+            <p style={{ fontSize: 12, color: "rgba(255,255,255,0.25)" }}>Loading…</p>
+          ) : (
+            <>
+              {/* Granted members */}
+              {cloneMembers.length > 0 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 12 }}>
+                  {cloneMembers.map((cm) => {
+                    const p = profiles[cm.user_id];
+                    return (
+                      <div key={cm.user_id} style={{
+                        display: "flex", alignItems: "center", gap: 10,
+                        padding: "8px 12px", borderRadius: 10,
+                        background: "rgba(52,211,153,0.05)", border: "1px solid rgba(52,211,153,0.12)",
+                      }}>
+                        <div style={{
+                          width: 28, height: 28, borderRadius: 8, overflow: "hidden", flexShrink: 0,
+                          background: "rgba(255,255,255,0.07)",
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          fontSize: 11, color: "rgba(255,255,255,0.45)",
+                        }}>
+                          {p?.image_url
+                            ? <img src={p.image_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                            : (p?.name[0] ?? "?")}
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <p style={{ fontSize: 12, color: "rgba(255,255,255,0.70)", margin: 0 }}>
+                            {p?.name ?? cm.user_id.slice(0, 14)}
+                          </p>
+                          {p?.email && <p style={{ fontSize: 11, color: "rgba(255,255,255,0.28)", margin: "1px 0 0" }}>{p.email}</p>}
+                        </div>
+                        <span style={{ fontSize: 10, color: "rgba(52,211,153,0.70)" }}>Has access</span>
+                        <button
+                          onClick={() => handleRevoke(cm.user_id)}
+                          disabled={revoking === cm.user_id}
+                          style={{
+                            fontSize: 11, padding: "4px 10px", borderRadius: 7, cursor: "pointer",
+                            background: "rgba(239,68,68,0.07)", border: "1px solid rgba(239,68,68,0.18)",
+                            color: "rgba(239,68,68,0.70)", fontFamily: "inherit",
+                            opacity: revoking === cm.user_id ? 0.5 : 1,
+                          }}
+                        >
+                          {revoking === cm.user_id ? "…" : "Revoke"}
+                        </button>
+                      </div>
+                    );
+                  })}
                 </div>
-                <span style={{ fontSize: 12, color: "rgba(255,255,255,0.50)" }}>{r.clone_name}</span>
-                <span style={{ fontSize: 10, color: "rgba(255,255,255,0.20)", fontFamily: "monospace" }}>@{r.clone_handle}</span>
-                <span style={{ marginLeft: "auto", fontSize: 10, color: "rgba(255,255,255,0.25)", background: "rgba(255,255,255,0.04)", padding: "2px 8px", borderRadius: 999, fontFamily: "monospace" }}>
-                  {(r.similarity * 100).toFixed(0)}%
-                </span>
-              </div>
-              <p style={{ fontSize: 13, color: "rgba(255,255,255,0.60)", lineHeight: 1.6, margin: 0 }}>{r.content}</p>
-              <p style={{ fontSize: 11, color: "rgba(255,255,255,0.25)", marginTop: 4, marginBottom: 0 }}>{r.source}</p>
-            </div>
-          ))}
+              )}
+
+              {/* Add members */}
+              {eligible.length > 0 && (
+                <div>
+                  <p style={{ fontSize: 11, color: "rgba(255,255,255,0.22)", marginBottom: 8 }}>Add member:</p>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                    {eligible.map((m) => {
+                      const p = profiles[m.user_id];
+                      return (
+                        <div key={m.user_id} style={{
+                          display: "flex", alignItems: "center", gap: 10,
+                          padding: "7px 12px", borderRadius: 10,
+                          background: "rgba(255,255,255,0.025)", border: "1px solid rgba(255,255,255,0.06)",
+                        }}>
+                          <div style={{
+                            width: 26, height: 26, borderRadius: 7, overflow: "hidden", flexShrink: 0,
+                            background: "rgba(255,255,255,0.07)",
+                            display: "flex", alignItems: "center", justifyContent: "center",
+                            fontSize: 11, color: "rgba(255,255,255,0.40)",
+                          }}>
+                            {p?.image_url
+                              ? <img src={p.image_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                              : (p?.name[0] ?? "?")}
+                          </div>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <p style={{ fontSize: 12, color: "rgba(255,255,255,0.60)", margin: 0 }}>
+                              {p?.name ?? m.user_id.slice(0, 14)}
+                            </p>
+                          </div>
+                          <button
+                            onClick={() => handleGrant(m.user_id)}
+                            disabled={granting === m.user_id}
+                            style={{
+                              fontSize: 11, padding: "4px 10px", borderRadius: 7, cursor: "pointer",
+                              background: "rgba(26,115,232,0.10)", border: "1px solid rgba(26,115,232,0.22)",
+                              color: "rgba(107,174,255,0.80)", fontFamily: "inherit",
+                              opacity: granting === m.user_id ? 0.5 : 1,
+                            }}
+                          >
+                            {granting === m.user_id ? "…" : "Grant access"}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {cloneMembers.length === 0 && eligible.length === 0 && (
+                <p style={{ fontSize: 12, color: "rgba(255,255,255,0.22)" }}>
+                  All org members have been added, or share org-wide instead.
+                </p>
+              )}
+            </>
+          )}
         </div>
       )}
     </div>
@@ -372,199 +452,123 @@ function CrossCloneSearch() {
 }
 
 // ---------------------------------------------------------------------------
-// Invite panel
+// Members section
 // ---------------------------------------------------------------------------
-
-function InvitePanel({ orgId }: { orgId: string }) {
-  const [email, setEmail] = useState("");
+function MembersSection({
+  members, profiles, orgId, currentUserId, onRefresh,
+}: {
+  members: OrgMember[];
+  profiles: Record<string, UserProfile>;
+  orgId: string;
+  currentUserId: string;
+  onRefresh: () => void;
+}) {
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState<"member" | "admin">("member");
   const [inviting, setInviting] = useState(false);
-  const [sent, setSent] = useState(false);
-  const [error, setError] = useState("");
+  const [inviteMsg, setInviteMsg] = useState<string | null>(null);
+  const [removing, setRemoving] = useState<string | null>(null);
+  const [changingRole, setChangingRole] = useState<string | null>(null);
 
-  async function invite() {
-    if (!email.trim()) return;
-    setInviting(true);
-    setError("");
+  async function handleInvite() {
+    if (!inviteEmail.trim()) return;
+    setInviting(true); setInviteMsg(null);
     try {
       const res = await fetch("/api/org/invite", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ org_id: orgId, invited_email: email.trim() }),
+        body: JSON.stringify({ org_id: orgId, invited_email: inviteEmail.trim(), role: inviteRole }),
       });
-      if (!res.ok) {
-        setError("Failed to invite — try again.");
-        return;
-      }
-      setSent(true);
-      setEmail("");
-      setTimeout(() => setSent(false), 3000);
-    } finally {
-      setInviting(false);
-    }
+      const d = await res.json();
+      setInviteMsg(res.ok ? `Invite sent to ${inviteEmail.trim()}.` : (d.detail ?? "Failed."));
+      if (res.ok) { setInviteEmail(""); onRefresh(); }
+    } finally { setInviting(false); }
+  }
+
+  async function handleRoleChange(targetUserId: string, newRole: "admin" | "member") {
+    setChangingRole(targetUserId);
+    try {
+      await fetch("/api/org/members/role", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ target_user_id: targetUserId, new_role: newRole }),
+      });
+      onRefresh();
+    } finally { setChangingRole(null); }
+  }
+
+  async function handleRemove(targetUserId: string) {
+    setRemoving(targetUserId);
+    try {
+      await fetch(`/api/org/members/${targetUserId}`, { method: "DELETE" });
+      onRefresh();
+    } finally { setRemoving(null); }
   }
 
   return (
-    <div className="card" style={{ padding: 16 }}>
-      <p style={{ fontSize: 12, color: "rgba(255,255,255,0.50)", fontWeight: 500, marginBottom: 12 }}>Invite teammate</p>
-      <div style={{ display: "flex", gap: 8 }}>
-        <input
-          type="email"
-          placeholder="colleague@company.com"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && invite()}
-          className="input"
-          style={{ flex: 1 }}
-        />
-        <button
-          onClick={invite}
-          disabled={inviting || !email.trim()}
-          className="btn btn--primary"
-          style={{ flexShrink: 0 }}
-        >
-          {inviting ? "…" : sent ? "Invited" : "Invite"}
-        </button>
-      </div>
-      {error && <p style={{ fontSize: 11, color: "rgba(248,113,113,0.70)", marginTop: 8, marginBottom: 0 }}>{error}</p>}
-      <p style={{ fontSize: 11, color: "rgba(255,255,255,0.20)", marginTop: 8, marginBottom: 0 }}>
-        They&apos;ll be added when they sign up with this email.
-      </p>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Org knowledge graph
-// ---------------------------------------------------------------------------
-
-interface OrgNode {
-  id: string;
-  label: string;
-  nodeType: "org" | "member" | "clone";
-  x?: number;
-  y?: number;
-  fx?: number | null;
-  fy?: number | null;
-}
-
-interface OrgLink {
-  source: string;
-  target: string;
-}
-
-function OrgGraph({ orgName, members }: { orgName: string; members: OrgMember[] }) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [dimensions, setDimensions] = useState({ width: 600, height: 400 });
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const graphRef = useRef<any>(null);
-
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const obs = new ResizeObserver(() => {
-      setDimensions({ width: el.offsetWidth, height: el.offsetHeight });
-    });
-    obs.observe(el);
-    setDimensions({ width: el.offsetWidth, height: el.offsetHeight });
-    return () => obs.disconnect();
-  }, []);
-
-  const nodes: OrgNode[] = [];
-  const links: OrgLink[] = [];
-
-  nodes.push({ id: "org", label: orgName, nodeType: "org" });
-
-  for (const m of members) {
-    const memberId = `member_${m.user_id}`;
-    const memberLabel = m.clone?.display_name ?? m.user_id.slice(0, 8) + "…";
-    nodes.push({ id: memberId, label: memberLabel, nodeType: "member" });
-    links.push({ source: "org", target: memberId });
-
-    if (m.clone) {
-      const cloneId = `clone_${m.clone.clone_id}`;
-      nodes.push({ id: cloneId, label: `@${m.clone.handle}`, nodeType: "clone" });
-      links.push({ source: memberId, target: cloneId });
-    }
-  }
-
-  const NODE_COLOR: Record<OrgNode["nodeType"], string> = {
-    org: "rgba(255,255,255,0.85)",
-    member: "rgba(196,181,253,0.8)",
-    clone: "rgba(147,197,253,0.75)",
-  };
-
-  const NODE_SIZE: Record<OrgNode["nodeType"], number> = {
-    org: 8,
-    member: 5,
-    clone: 3.5,
-  };
-
-  const nodeCanvasObject = (
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    node: any,
-    ctx: CanvasRenderingContext2D,
-    globalScale: number
-  ) => {
-    const n = node as OrgNode & { x: number; y: number };
-    const color = NODE_COLOR[n.nodeType];
-    const radius = NODE_SIZE[n.nodeType];
-
-    ctx.beginPath();
-    ctx.arc(n.x, n.y, radius, 0, 2 * Math.PI);
-    ctx.fillStyle = color;
-    ctx.fill();
-
-    if (globalScale >= 1 || n.nodeType === "org") {
-      const label = n.label.length > 20 ? n.label.slice(0, 20) + "…" : n.label;
-      const fontSize = n.nodeType === "org"
-        ? Math.max(12 / globalScale, 3)
-        : Math.max(9 / globalScale, 2.5);
-      ctx.font = `${fontSize}px sans-serif`;
-      ctx.fillStyle = n.nodeType === "org" ? "rgba(255,255,255,0.8)" : "rgba(255,255,255,0.45)";
-      ctx.textAlign = "center";
-      ctx.fillText(label, n.x, n.y + radius + fontSize + 1);
-    }
-  };
-
-  if (members.length === 0) {
-    return (
-      <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <p style={{ fontSize: 13, color: "rgba(255,255,255,0.30)" }}>Invite teammates to see the org graph.</p>
-      </div>
-    );
-  }
-
-  return (
-    <div ref={containerRef} style={{ flex: 1, position: "relative", borderRadius: 16, overflow: "hidden", background: "#080808", border: "1px solid rgba(255,255,255,0.06)" }}>
-      <ForceGraph2D
-        ref={graphRef}
-        graphData={{ nodes: nodes as object[], links }}
-        width={dimensions.width}
-        height={dimensions.height}
-        backgroundColor="#080808"
-        nodeRelSize={1}
-        nodeCanvasObject={nodeCanvasObject}
-        nodeCanvasObjectMode={() => "replace"}
-        linkColor={() => "rgba(255,255,255,0.08)"}
-        linkWidth={1}
-        cooldownTicks={80}
-        d3AlphaDecay={0.03}
-        d3VelocityDecay={0.5}
-        enableNodeDrag={true}
-        enableZoomInteraction={true}
-        enablePanInteraction={true}
-      />
-      <div style={{ position: "absolute", bottom: 12, left: 12, display: "flex", alignItems: "center", gap: 16, pointerEvents: "none" }}>
-        {[
-          { color: "rgba(255,255,255,0.80)", label: "Workspace" },
-          { color: "rgba(196,181,253,0.75)", label: "Member" },
-          { color: "rgba(147,197,253,0.70)", label: "Clone" },
-        ].map(({ color, label }) => (
-          <div key={label} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <div style={{ width: 6, height: 6, borderRadius: "50%", background: color }} />
-            <span style={{ fontSize: 10, color: "rgba(255,255,255,0.25)" }}>{label}</span>
-          </div>
+    <div>
+      <SectionHead label="Members" count={members.length} />
+      <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 24 }}>
+        {members.length === 0 && (
+          <p style={{ fontSize: 13, color: "rgba(255,255,255,0.25)", padding: "20px 0" }}>No members yet.</p>
+        )}
+        {members.map((m) => (
+          <MemberRow
+            key={m.user_id}
+            member={m}
+            profiles={profiles}
+            currentUserId={currentUserId}
+            changingRole={changingRole}
+            removing={removing}
+            onRoleChange={handleRoleChange}
+            onRemove={handleRemove}
+          />
         ))}
+      </div>
+
+      {/* Invite */}
+      <div style={{ padding: "16px 18px", borderRadius: 14, background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.07)" }}>
+        <p style={{ fontSize: 12, color: "rgba(255,255,255,0.40)", marginBottom: 12, fontWeight: 500 }}>Invite by email</p>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input
+            value={inviteEmail}
+            onChange={(e) => setInviteEmail(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleInvite()}
+            placeholder="colleague@company.com"
+            style={{
+              flex: 1, padding: "9px 14px", borderRadius: 10, fontSize: 13,
+              background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.09)",
+              color: "rgba(255,255,255,0.75)", outline: "none", fontFamily: "inherit",
+            }}
+          />
+          <select
+            value={inviteRole}
+            onChange={(e) => setInviteRole(e.target.value as "admin" | "member")}
+            style={{
+              padding: "9px 12px", borderRadius: 10, fontSize: 12,
+              background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.09)",
+              color: "rgba(255,255,255,0.55)", fontFamily: "inherit", outline: "none", cursor: "pointer",
+            }}
+          >
+            <option value="member">Member</option>
+            <option value="admin">Admin</option>
+          </select>
+          <button
+            onClick={handleInvite}
+            disabled={inviting || !inviteEmail.trim()}
+            style={{
+              padding: "9px 18px", borderRadius: 10, fontSize: 13, fontWeight: 500,
+              background: inviteEmail.trim() ? "rgba(26,115,232,0.20)" : "rgba(255,255,255,0.04)",
+              border: `1px solid ${inviteEmail.trim() ? "rgba(26,115,232,0.35)" : "rgba(255,255,255,0.08)"}`,
+              color: inviteEmail.trim() ? "rgba(107,174,255,0.90)" : "rgba(255,255,255,0.25)",
+              cursor: inviteEmail.trim() ? "pointer" : "default",
+              fontFamily: "inherit", transition: "all 160ms", opacity: inviting ? 0.6 : 1,
+            }}
+          >
+            {inviting ? "Sending…" : "Invite"}
+          </button>
+        </div>
+        {inviteMsg && <p style={{ fontSize: 12, color: "rgba(52,211,153,0.75)", marginTop: 10 }}>{inviteMsg}</p>}
       </div>
     </div>
   );
@@ -573,177 +577,256 @@ function OrgGraph({ orgName, members }: { orgName: string; members: OrgMember[] 
 // ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
-
-interface PendingInvite {
-  org_id: string;
-  org_name: string;
-  org_slug: string;
-  role: string;
-}
-
-export default function OrgPage() {
-  const { user } = useUser();
-  const [org, setOrg] = useState<Org | null | undefined>(undefined);
+export default function OrgAdminPage() {
+  const { user, isLoaded } = useUser();
+  const [org, setOrg] = useState<OrgInfo | null>(null);
   const [members, setMembers] = useState<OrgMember[]>([]);
-  const [tab, setTab] = useState<"clones" | "search" | "graph">("clones");
-  const [pendingInvite, setPendingInvite] = useState<PendingInvite | null>(null);
-  const [joining, setJoining] = useState(false);
+  const [clones, setClones] = useState<OrgClone[]>([]);
+  const [profiles, setProfiles] = useState<Record<string, UserProfile>>({});
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState<"members" | "clones">("members");
+  const [orgCredits, setOrgCredits] = useState(0);
+  const [addingCredits, setAddingCredits] = useState(false);
+  const [creditInput, setCreditInput] = useState("");
+  const [creditMsg, setCreditMsg] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetch("/api/org")
-      .then((r) => r.json())
-      .then((d) => setOrg(d.org ?? null))
-      .catch(() => setOrg(null));
-  }, []);
+  const load = useCallback(async () => {
+    if (!user?.id) return;
+    const [orgRes, membersRes] = await Promise.all([
+      fetch("/api/org"),
+      fetch("/api/org/members"),
+    ]);
+    const orgData = await orgRes.json();
+    const membersData = await membersRes.json();
 
-  useEffect(() => {
-    if (org !== null) return;
-    fetch("/api/org/pending-invite")
-      .then((r) => r.json())
-      .then((d) => setPendingInvite(d.invite ?? null))
-      .catch(() => {});
-  }, [org]);
+    const orgInfo: OrgInfo | null = orgData.org ?? null;
+    setOrg(orgInfo);
 
-  useEffect(() => {
-    if (!org) return;
-    fetch("/api/org/members")
-      .then((r) => r.json())
-      .then((d) => setMembers(d.members ?? []))
-      .catch(() => {});
-  }, [org]);
+    const memberList: OrgMember[] = membersData.members ?? [];
+    setMembers(memberList);
 
-  async function acceptInvite() {
-    setJoining(true);
-    try {
-      const res = await fetch("/api/org/join", { method: "POST" });
-      const data = await res.json();
-      if (res.ok && data.org) {
-        setOrg(data.org);
-        setPendingInvite(null);
-      }
-    } finally {
-      setJoining(false);
+    const me = memberList.find((m) => m.user_id === user.id);
+    const admin = me?.role === "admin";
+    setIsAdmin(admin);
+
+    // Fetch Clerk profiles for all member user_ids
+    if (memberList.length > 0) {
+      const profileRes = await fetch("/api/org/member-profiles", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_ids: memberList.map((m) => m.user_id) }),
+      });
+      const profileData = await profileRes.json();
+      setProfiles(profileData.profiles ?? {});
     }
-  }
 
-  if (org === undefined) {
+    if (admin) {
+      const [clonesRes, creditsRes] = await Promise.all([
+        fetch("/api/org/admin/clones"),
+        fetch("/api/org/credits"),
+      ]);
+      const clonesData = await clonesRes.json();
+      setClones(clonesData.clones ?? []);
+      const creditsData = await creditsRes.json();
+      setOrgCredits(creditsData.credits ?? 0);
+    }
+
+    setLoading(false);
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (isLoaded && user) load();
+  }, [isLoaded, user?.id, load]);
+
+  if (!isLoaded || loading) {
     return (
-      <div style={{ padding: 32, display: "flex", alignItems: "center", gap: 8 }}>
-        <div style={{ width: 6, height: 6, borderRadius: "50%", background: "rgba(255,255,255,0.20)" }} />
-        <span style={{ fontSize: 13, color: "rgba(255,255,255,0.30)" }}>Loading…</span>
+      <div className="db-page">
+        <div className="db-page-head"><div><p className="db-eyebrow">Organisation</p><h1 className="db-h1">Loading…</h1></div></div>
       </div>
     );
   }
-
-  const ORG_TABS = [
-    { id: "clones" as const, label: `Clones (${members.length})` },
-    { id: "graph" as const, label: "Graph" },
-    { id: "search" as const, label: "Search" },
-  ];
 
   if (!org) {
     return (
       <div className="db-page">
-        <div className="db-page-head">
-          <div>
-            <p className="db-eyebrow">Workspace</p>
-            <h1 className="db-h1">Team</h1>
-          </div>
+        <div className="db-page-head"><div><p className="db-eyebrow">Organisation</p><h1 className="db-h1">No Organisation</h1></div></div>
+        <div style={{ padding: "48px 0", textAlign: "center", borderRadius: 16, border: "1px solid rgba(255,255,255,0.07)", background: "rgba(255,255,255,0.02)" }}>
+          <p style={{ fontSize: 14, color: "rgba(255,255,255,0.40)", marginBottom: 6 }}>You&apos;re not part of an organisation yet.</p>
+          <p style={{ fontSize: 12, color: "rgba(255,255,255,0.22)" }}>Upgrade to Pro or Max to create one.</p>
+          <Link href="/dashboard/billing" style={{ display: "inline-block", marginTop: 20, padding: "9px 20px", borderRadius: 10, fontSize: 13, fontWeight: 500, textDecoration: "none", background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.12)", color: "rgba(255,255,255,0.65)" }}>
+            View plans →
+          </Link>
         </div>
-        {pendingInvite && (
-          <div className="card" style={{ marginBottom: 16 }}>
-            <p style={{ fontSize: 13, fontWeight: 500, color: "rgba(255,255,255,0.70)", marginBottom: 4 }}>
-              You&apos;ve been invited to join <span style={{ color: "rgba(255,255,255,0.85)" }}>{pendingInvite.org_name}</span>
-            </p>
-            <p style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", marginBottom: 16 }}>
-              As a {pendingInvite.role} · doppel.ai/team/{pendingInvite.org_slug}
-            </p>
-            <button
-              onClick={acceptInvite}
-              disabled={joining}
-              className="btn btn--primary"
-            >
-              {joining ? "Joining…" : `Join ${pendingInvite.org_name}`}
-            </button>
-          </div>
-        )}
-        <CreateOrgPanel onCreate={setOrg} />
       </div>
     );
   }
 
+  if (!isAdmin) {
+    return (
+      <div className="db-page">
+        <div className="db-page-head">
+          <div><p className="db-eyebrow">Organisation</p><h1 className="db-h1">{org.name}</h1></div>
+          <Link href="/org" className="btn btn--sm">View team clones →</Link>
+        </div>
+        <div style={{ padding: "40px 0", textAlign: "center", borderRadius: 16, border: "1px solid rgba(255,255,255,0.07)", background: "rgba(255,255,255,0.02)" }}>
+          <p style={{ fontSize: 14, color: "rgba(255,255,255,0.40)" }}>Admin access required to manage this organisation.</p>
+          <p style={{ fontSize: 12, color: "rgba(255,255,255,0.22)", marginTop: 6 }}>Contact your org admin to request elevated permissions.</p>
+        </div>
+      </div>
+    );
+  }
+
+  const orgVisibleCount = clones.filter((c) => c.access_mode === "org_scoped").length;
+
   return (
-    <div className="db-page">
+    <div className="db-page" style={{ "--page-accent": "#6BAEFF" } as React.CSSProperties}>
       <div className="db-page-head">
         <div>
-          <p className="db-eyebrow">Workspace</p>
-          <h1 className="db-h1">{org.name} <em>· {members.length} member{members.length !== 1 ? "s" : ""}</em></h1>
-          <p style={{ fontSize: 12, marginTop: 4, color: "var(--fg-dark-3)" }}>
-            <span style={{ fontFamily: "monospace" }}>doppel.ai/team/{org.slug}</span>
-          </p>
+          <p className="db-eyebrow">Organisation</p>
+          <h1 className="db-h1">{org.name} <em>Admin</em></h1>
         </div>
-        {org.is_owner && <InvitePanel orgId={org.id} />}
+        <Link href="/org" className="btn btn--sm">View as member →</Link>
+      </div>
+
+      {/* Stats */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 32 }}>
+        {[
+          { label: "Members", value: members.length, color: "rgba(255,255,255,0.85)" },
+          { label: "Clones in org", value: clones.length, color: "rgba(255,255,255,0.85)" },
+          { label: "Org-visible", value: orgVisibleCount, color: "rgba(255,255,255,0.85)" },
+          { label: "Pool credits", value: orgCredits, color: orgCredits > 0 ? "rgba(52,211,153,0.85)" : "rgba(239,68,68,0.75)" },
+        ].map(({ label, value, color }) => (
+          <div key={label} style={{ padding: "18px 20px", borderRadius: 14, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)" }}>
+            <p style={{ fontSize: 26, fontWeight: 300, color, margin: "0 0 4px", letterSpacing: "-0.02em" }}>{value}</p>
+            <p style={{ fontSize: 11, color: "rgba(255,255,255,0.28)", margin: 0, textTransform: "uppercase", letterSpacing: "0.08em" }}>{label}</p>
+          </div>
+        ))}
       </div>
 
       {/* Tabs */}
-      <div style={{ display: "flex", gap: 4, marginBottom: 24, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 16, padding: 4, width: "fit-content" }}>
-        {ORG_TABS.map((t) => (
-          <button
-            key={t.id}
-            onClick={() => setTab(t.id)}
-            style={{
-              padding: "8px 18px", borderRadius: 12, border: "none",
-              background: tab === t.id ? "rgba(255,255,255,0.08)" : "transparent",
-              color: tab === t.id ? "rgba(255,255,255,0.85)" : "rgba(255,255,255,0.40)",
-              fontFamily: "inherit", fontSize: 13, cursor: "pointer",
-            }}
-          >
-            {t.label}
+      <div style={{ display: "flex", gap: 4, padding: 4, borderRadius: 12, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)", marginBottom: 28, width: "fit-content" }}>
+        {(["members", "clones"] as const).map((t) => (
+          <button key={t} onClick={() => setTab(t)} style={{
+            padding: "7px 20px", borderRadius: 9, fontSize: 13, fontWeight: 500,
+            cursor: "pointer", fontFamily: "inherit", border: "none",
+            background: tab === t ? "rgba(255,255,255,0.09)" : "transparent",
+            color: tab === t ? "rgba(255,255,255,0.85)" : "rgba(255,255,255,0.35)",
+            transition: "all 160ms",
+          }}>
+            {t === "members" ? `Members (${members.length})` : `Clone access (${clones.length})`}
           </button>
         ))}
       </div>
 
-      {tab === "clones" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {members.length === 0 ? (
-            <div className="card" style={{ textAlign: "center" }}>
-              <p style={{ fontSize: 13, color: "rgba(255,255,255,0.30)" }}>No members yet — invite your team above.</p>
-            </div>
-          ) : (
-            members.map((m) => {
-              const currentUserIsAdmin = org.is_owner ||
-                members.find((x) => x.user_id === user?.id)?.role === "admin";
-              return (
-                <CloneCard
-                  key={m.user_id}
-                  member={m}
-                  isAdmin={currentUserIsAdmin}
-                  onRoleChange={(userId, newRole) =>
-                    setMembers((prev) =>
-                      prev.map((x) => x.user_id === userId ? { ...x, role: newRole } : x)
-                    )
-                  }
+      {tab === "members" ? (
+        <div>
+          <MembersSection
+            members={members}
+            profiles={profiles}
+            orgId={org.id}
+            currentUserId={user!.id}
+            onRefresh={load}
+          />
+
+          {/* Org credit pool */}
+          <div style={{ marginTop: 32 }}>
+            <SectionHead label="Credit Pool" />
+            <div style={{ padding: "18px 20px", borderRadius: 14, background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.07)" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+                <div>
+                  <p style={{ fontSize: 24, fontWeight: 300, color: orgCredits > 0 ? "rgba(52,211,153,0.85)" : "rgba(239,68,68,0.70)", margin: "0 0 3px", letterSpacing: "-0.02em" }}>
+                    {orgCredits} credits
+                  </p>
+                  <p style={{ fontSize: 12, color: "rgba(255,255,255,0.30)", margin: 0 }}>
+                    Shared pool — all org members draw from this when querying org clones.
+                  </p>
+                </div>
+                <Link href="/dashboard/credits" style={{
+                  fontSize: 12, padding: "7px 14px", borderRadius: 9, textDecoration: "none",
+                  background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.09)",
+                  color: "rgba(255,255,255,0.45)",
+                }}>
+                  Buy credits →
+                </Link>
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <input
+                  type="number"
+                  min={1}
+                  value={creditInput}
+                  onChange={(e) => setCreditInput(e.target.value)}
+                  placeholder="Amount to add"
+                  style={{
+                    flex: 1, padding: "9px 14px", borderRadius: 10, fontSize: 13,
+                    background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.09)",
+                    color: "rgba(255,255,255,0.75)", outline: "none", fontFamily: "inherit",
+                  }}
                 />
-              );
-            })
+                <button
+                  disabled={addingCredits || !creditInput || parseInt(creditInput) < 1}
+                  onClick={async () => {
+                    const n = parseInt(creditInput);
+                    if (!n || n < 1) return;
+                    setAddingCredits(true); setCreditMsg(null);
+                    try {
+                      const res = await fetch("/api/org/credits", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ credits: n }),
+                      });
+                      const d = await res.json();
+                      if (res.ok) {
+                        setOrgCredits(d.org_credits ?? orgCredits + n);
+                        setCreditInput("");
+                        setCreditMsg(`Added ${n} credits to the pool.`);
+                      } else {
+                        setCreditMsg(d.detail ?? "Failed.");
+                      }
+                    } finally { setAddingCredits(false); }
+                  }}
+                  style={{
+                    padding: "9px 18px", borderRadius: 10, fontSize: 13, fontWeight: 500,
+                    cursor: creditInput && parseInt(creditInput) >= 1 ? "pointer" : "default",
+                    background: creditInput && parseInt(creditInput) >= 1 ? "rgba(52,211,153,0.12)" : "rgba(255,255,255,0.04)",
+                    border: `1px solid ${creditInput && parseInt(creditInput) >= 1 ? "rgba(52,211,153,0.30)" : "rgba(255,255,255,0.08)"}`,
+                    color: creditInput && parseInt(creditInput) >= 1 ? "rgba(52,211,153,0.85)" : "rgba(255,255,255,0.25)",
+                    fontFamily: "inherit", transition: "all 160ms", opacity: addingCredits ? 0.6 : 1,
+                  }}
+                >
+                  {addingCredits ? "Adding…" : "Add to pool"}
+                </button>
+              </div>
+              {creditMsg && (
+                <p style={{ fontSize: 12, color: creditMsg.startsWith("Add") ? "rgba(52,211,153,0.75)" : "rgba(239,68,68,0.70)", marginTop: 10 }}>
+                  {creditMsg}
+                </p>
+              )}
+              <p style={{ fontSize: 11, color: "rgba(255,255,255,0.20)", marginTop: 10 }}>
+                Transfers from your personal credit balance. Any org member can contribute.
+              </p>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div>
+          <SectionHead label="Clone Access" count={clones.length} />
+          {clones.length === 0 && (
+            <p style={{ fontSize: 13, color: "rgba(255,255,255,0.25)", padding: "20px 0" }}>
+              No clones found. Members need to create clones first.
+            </p>
           )}
-        </div>
-      )}
-
-      {tab === "graph" && (
-        <div style={{ display: "flex", flexDirection: "column", height: 480 }}>
-          <OrgGraph orgName={org.name} members={members} />
-        </div>
-      )}
-
-      {tab === "search" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          <p style={{ fontSize: 12, color: "rgba(255,255,255,0.30)", lineHeight: 1.6 }}>
-            Semantic search across all memories from every clone in your workspace.
-            Useful for finding shared context, avoiding duplicate work, or discovering
-            what your colleagues know.
-          </p>
-          <CrossCloneSearch />
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {clones.map((c) => (
+              <CloneAccessPanel
+                key={c.clone_id}
+                clone={c}
+                members={members}
+                profiles={profiles}
+                currentUserId={user!.id}
+              />
+            ))}
+          </div>
         </div>
       )}
     </div>

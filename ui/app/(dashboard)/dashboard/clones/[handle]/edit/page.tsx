@@ -32,7 +32,7 @@ interface CloneDetail {
   listing_description?: string;
   price_per_query: number;
   category?: string;
-  access_mode: "private" | "public" | "restricted";
+  access_mode: "private" | "public" | "org_scoped" | "restricted";
   is_listed: boolean;
   subscription_tier: string;
   is_verified: boolean;
@@ -68,7 +68,8 @@ export default function CloneEditPage({ params }: { params: Promise<{ handle: st
   const [description, setDescription]   = useState("");
   const [price, setPrice]               = useState("0.00");
   const [category, setCategory]         = useState("other");
-  const [accessMode, setAccessMode]     = useState<"private" | "public">("private");
+  const [accessMode, setAccessMode]     = useState<"private" | "org_scoped" | "public">("private");
+  const [showPublicWarning, setShowPublicWarning] = useState(false);
   const [isListed, setIsListed]         = useState(false);
 
   const [avatarUrl, setAvatarUrl]         = useState("");
@@ -93,7 +94,7 @@ export default function CloneEditPage({ params }: { params: Promise<{ handle: st
         setDescription(d.listing_description ?? "");
         setPrice(String(Math.round((d.price_per_query ?? 0) as number)));
         setCategory(d.category ?? "other");
-        setAccessMode(d.access_mode === "public" ? "public" : "private");
+        setAccessMode(d.access_mode === "public" ? "public" : d.access_mode === "org_scoped" ? "org_scoped" : "private");
         setIsListed(d.is_listed ?? false);
         setAvatarUrl(d.avatar_url ?? "");
         setBannerUrl(d.listing_banner_url ?? "");
@@ -354,30 +355,64 @@ export default function CloneEditPage({ params }: { params: Promise<{ handle: st
             <p className="card-title">Access</p>
 
             {/* Access mode */}
-            <div style={{ display: "flex", gap: 10, marginBottom: 20 }}>
-              {(["private", "public"] as const).map((mode) => {
+            <div style={{ display: "flex", gap: 10, marginBottom: accessMode === "public" ? 12 : 20 }}>
+              {([
+                { mode: "private",    label: "Private",      hint: "Only you can access this clone" },
+                { mode: "org_scoped", label: "Organisation",  hint: "Visible to all members of your org" },
+                { mode: "public",     label: "Public",        hint: "Anyone with the link can chat" },
+              ] as const).map(({ mode, label, hint }) => {
                 const active = accessMode === mode;
-                const label = mode === "private" ? "Private" : "Public";
-                const hint  = mode === "private" ? "Only you can access this clone" : "Anyone with the link can chat";
+                const isOrg = mode === "org_scoped";
+                const isPub = mode === "public";
+                const borderColor = active
+                  ? isOrg ? "rgba(107,174,255,0.40)" : isPub ? "rgba(52,211,153,0.35)" : "rgba(255,255,255,0.22)"
+                  : "rgba(255,255,255,0.06)";
+                const textColor = active
+                  ? isOrg ? "rgba(107,174,255,0.90)" : isPub ? "rgba(52,211,153,0.90)" : "rgba(255,255,255,0.85)"
+                  : "rgba(255,255,255,0.40)";
                 return (
                   <button
                     key={mode}
-                    onClick={() => setAccessMode(mode)}
+                    onClick={() => {
+                      if (mode === "public" && accessMode !== "public") setShowPublicWarning(true);
+                      else if (mode !== "public") setShowPublicWarning(false);
+                      setAccessMode(mode);
+                    }}
                     style={{
                       flex: 1, padding: 14, borderRadius: 12, cursor: "pointer",
                       fontFamily: "inherit", textAlign: "left",
-                      background: active ? "rgba(255,255,255,0.07)" : "rgba(255,255,255,0.03)",
-                      border: `1.5px solid ${active ? "rgba(255,255,255,0.20)" : "rgba(255,255,255,0.06)"}`,
+                      background: active
+                        ? isOrg ? "rgba(107,174,255,0.07)" : isPub ? "rgba(52,211,153,0.06)" : "rgba(255,255,255,0.07)"
+                        : "rgba(255,255,255,0.03)",
+                      border: `1.5px solid ${borderColor}`,
+                      transition: "all 160ms",
                     }}
                   >
-                    <p style={{ fontSize: 13, fontWeight: 500, color: active ? "rgba(255,255,255,0.85)" : "rgba(255,255,255,0.45)", marginBottom: 2 }}>
+                    <p style={{ fontSize: 13, fontWeight: 500, color: textColor, marginBottom: 2 }}>
                       {label}
                     </p>
-                    <p style={{ fontSize: 11, color: "rgba(255,255,255,0.30)" }}>{hint}</p>
+                    <p style={{ fontSize: 11, color: "rgba(255,255,255,0.28)" }}>{hint}</p>
                   </button>
                 );
               })}
             </div>
+
+            {/* Public warning */}
+            {accessMode === "public" && showPublicWarning && (
+              <div style={{
+                display: "flex", alignItems: "flex-start", gap: 10,
+                padding: "10px 14px", borderRadius: 10, marginBottom: 16,
+                background: "rgba(239,68,68,0.07)", border: "1px solid rgba(239,68,68,0.20)",
+              }}>
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" style={{ color: "rgba(239,68,68,0.70)", flexShrink: 0, marginTop: 1 }}>
+                  <path d="M7 2L13 12H1L7 2z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"/>
+                  <path d="M7 6v2.5M7 10v.2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+                </svg>
+                <p style={{ fontSize: 12, color: "rgba(239,68,68,0.75)", margin: 0 }}>
+                  This clone will be accessible to anyone on the internet — not just your org members.
+                </p>
+              </div>
+            )}
 
             {/* Listed toggle */}
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>

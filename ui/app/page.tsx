@@ -1215,26 +1215,26 @@ function StatsSection() {
 const PLANS = [
   {
     name: "Free", color: "#34D399", monthly: 0, yearly: 0,
-    desc: "Your personal clone. Keep it forever.",
-    feats: ["1 personal clone", "All connectors", "50 queries / month", "Shareable link"],
+    desc: "Build your clone. Share it. Yours forever.",
+    feats: ["2 clones", "Train from any source (Gmail, Notion, Slack…)", "Public chat link", "Sell on the marketplace · 70% rev share"],
     cta: "Start free", featured: false,
   },
   {
-    name: "Personal", color: "#1A73E8", monthly: 15, yearly: 150,
-    desc: "Full individual power.",
-    feats: ["Everything in Free", "250 queries / month", "Meeting bot", "API access", "Data export"],
+    name: "Personal", color: "#1A73E8", monthly: 19, yearly: 190,
+    desc: "Sell your knowledge. Earn on every query.",
+    feats: ["5 clones", "80% revenue share on consumer queries", "Priority marketplace listing", "API access", "Custom clone pricing"],
     cta: "Get Personal", featured: false,
   },
   {
-    name: "Pro", color: "#A78BFA", monthly: 59, yearly: 590, featured: true, perSeat: true,
-    desc: "Company Brain for your team.",
-    feats: ["Everything in Personal · per seat", "Company Brain + Role Brains", "Skills API", "SSO · SCIM", "Audit log"],
+    name: "Pro", color: "#A78BFA", monthly: 49, yearly: 490, featured: true, perSeat: true,
+    desc: "Scale your knowledge across a team.",
+    feats: ["20 clones org-wide · everything in Personal", "Org-wide audit log", "Priority support"],
     cta: "Get Pro",
   },
   {
-    name: "Max", color: "#E91E63", monthly: 179, yearly: 1790, perSeat: true,
-    desc: "The full intelligence layer.",
-    feats: ["Everything in Pro", "Org intelligence feed", "Drift detection", "SOC 2 Type II", "Dedicated CSM"],
+    name: "Max", color: "#E91E63", monthly: 149, yearly: 1490, perSeat: true,
+    desc: "Enterprise-grade. No compromises.",
+    feats: ["50 clones org-wide · everything in Pro", "SOC 2 Type II", "Guaranteed uptime SLA", "Dedicated CSM + priority support", "Custom contracts"],
     cta: "Talk to us", featured: false,
   },
 ];

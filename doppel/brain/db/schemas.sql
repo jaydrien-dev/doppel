@@ -306,6 +306,12 @@ CREATE TABLE IF NOT EXISTS org_invites (
 
 CREATE INDEX IF NOT EXISTS org_invites_org_idx ON org_invites (org_id);
 
+CREATE TABLE IF NOT EXISTS org_credit_pools (
+    org_id      UUID PRIMARY KEY REFERENCES orgs(id) ON DELETE CASCADE,
+    credits     INT NOT NULL DEFAULT 0,
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 
 -- ---------------------------------------------------------------------------
 -- SLACK INSTALLATIONS

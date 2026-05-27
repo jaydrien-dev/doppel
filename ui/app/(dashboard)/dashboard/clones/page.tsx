@@ -11,7 +11,7 @@ interface CloneRow {
   clone_id: string;
   display_name: string;
   handle: string;
-  access_mode: "private" | "public" | "restricted";
+  access_mode: "private" | "public" | "org_scoped" | "restricted";
   is_listed: boolean;
   subscription_tier: string;
   created_at: string | null;
@@ -49,10 +49,11 @@ function deriveColor(name: string) {
 // ---------------------------------------------------------------------------
 // Clone status
 // ---------------------------------------------------------------------------
-type CloneStatus = "public" | "private" | "archived";
+type CloneStatus = "public" | "private" | "org" | "archived";
 
 function getStatus(clone: CloneRow): CloneStatus {
   if (clone.access_mode === "restricted" as string) return "archived";
+  if (clone.access_mode === "org_scoped") return "org";
   if (clone.is_listed) return "public";
   return "private";
 }
@@ -209,21 +210,6 @@ function CloneCard({ clone, onDeleted }: { clone: CloneRow; onDeleted: () => voi
   const avatar  = clone.avatar_url || null;
   const [showDelete, setShowDelete] = useState(false);
 
-  function StatusBadge() {
-    if (status === "public") {
-      return (
-        <span className="badge badge--pos">
-          <span className="badge__dot" />
-          Public
-        </span>
-      );
-    }
-    if (status === "archived") {
-      return <span className="badge badge--neg">Archived</span>;
-    }
-    return <span className="badge badge--neutral">Private</span>;
-  }
-
   return (
     <div
       className="card"
@@ -262,7 +248,18 @@ function CloneCard({ clone, onDeleted }: { clone: CloneRow; onDeleted: () => voi
             @{clone.handle}
           </p>
         </div>
-        <StatusBadge />
+        {status === "public" && (
+          <span className="badge badge--pos"><span className="badge__dot" />Public</span>
+        )}
+        {status === "org" && (
+          <span className="badge" style={{ fontSize: 11, padding: "3px 8px", borderRadius: 999, background: "rgba(107,174,255,0.10)", border: "1px solid rgba(107,174,255,0.22)", color: "rgba(107,174,255,0.80)", fontWeight: 500 }}>Org</span>
+        )}
+        {status === "archived" && (
+          <span className="badge badge--neg">Archived</span>
+        )}
+        {status === "private" && (
+          <span className="badge badge--neutral">Private</span>
+        )}
       </div>
 
       {/* Stats row */}
@@ -320,7 +317,7 @@ function CloneCard({ clone, onDeleted }: { clone: CloneRow; onDeleted: () => voi
 // ---------------------------------------------------------------------------
 // Main page
 // ---------------------------------------------------------------------------
-type FilterTab = "all" | "public" | "private" | "archived";
+type FilterTab = "all" | "public" | "private" | "org" | "archived";
 
 export default function ClonesPage() {
   const router = useRouter();
@@ -354,6 +351,7 @@ export default function ClonesPage() {
     { id: "all",      label: `All (${clones.length})` },
     { id: "public",   label: `Public (${clones.filter((c) => getStatus(c) === "public").length})` },
     { id: "private",  label: `Private (${clones.filter((c) => getStatus(c) === "private").length})` },
+    { id: "org",      label: `Org (${clones.filter((c) => getStatus(c) === "org").length})` },
     { id: "archived", label: `Archived (${clones.filter((c) => getStatus(c) === "archived").length})` },
   ];
 

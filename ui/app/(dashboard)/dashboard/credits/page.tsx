@@ -16,9 +16,9 @@ const PACK_META: Record<string, {
   tagline: string; best_for: string; badge?: string;
   color: string; bg: string; border: string;
 }> = {
-  pack_100:  { tagline: "Try the marketplace", best_for: "100 queries · $0.05 each",    color: "#6FCF97", bg: "rgba(111,207,151,0.07)", border: "rgba(111,207,151,0.15)" },
-  pack_500:  { tagline: "Regular use",          best_for: "500 queries · $0.04 each",    badge: "Popular", color: "#6BAEFF", bg: "rgba(107,174,255,0.07)", border: "rgba(107,174,255,0.20)" },
-  pack_1000: { tagline: "Maximum value",         best_for: "1,000 queries · $0.035 each", color: "#C4B5FD", bg: "rgba(196,181,253,0.07)", border: "rgba(196,181,253,0.15)" },
+  pack_100:  { tagline: "Try the marketplace", best_for: "100 queries · $0.050 each",  color: "#6FCF97", bg: "rgba(111,207,151,0.07)", border: "rgba(111,207,151,0.15)" },
+  pack_500:  { tagline: "Regular use",          best_for: "500 queries · $0.046 each",  badge: "Popular", color: "#6BAEFF", bg: "rgba(107,174,255,0.07)", border: "rgba(107,174,255,0.20)" },
+  pack_1000: { tagline: "Maximum value",         best_for: "1,000 queries · $0.044 each", color: "#C4B5FD", bg: "rgba(196,181,253,0.07)", border: "rgba(196,181,253,0.15)" },
 };
 
 function CreditBalance({ credits }: { credits: number }) {
@@ -232,7 +232,7 @@ function CreditsContent() {
             { q: "Do credits expire?", a: "No. Credits never expire and carry over indefinitely." },
             { q: "Can I query free clones without credits?", a: "Yes — free marketplace clones don't require credits. Credits are only spent on paid clones." },
             { q: "What happens if I run out mid-session?", a: "You'll be prompted to top up before the next query. Your conversation history is saved." },
-            { q: "Do clone owners get a cut?", a: "Yes. Clone owners keep 80% of every credit spent on their clone. Doppel takes 20%." },
+            { q: "Do clone owners get a cut?", a: "Yes. Clone owners keep 70–80% of every credit spent on their clone depending on their plan. Doppel takes the remainder." },
           ].map(({ q, a }) => (
             <div key={q}>
               <p style={{ fontSize: 13, color: "rgba(255,255,255,0.55)" }}>{q}</p>
