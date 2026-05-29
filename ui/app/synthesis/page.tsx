@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { useUser, SignInButton } from "@clerk/nextjs";
 import Link from "next/link";
-import { MarketplaceActionBar } from "@/components/layout/MarketplaceActionBar";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -14,6 +13,7 @@ interface CloneOption {
   handle: string;
   category: string | null;
   price_per_query: number;
+  source?: "marketplace" | "org" | "own";
 }
 
 interface Perspective {
@@ -43,7 +43,7 @@ interface DeliberateResult {
 }
 
 // ---------------------------------------------------------------------------
-// Category color map
+// Helpers
 // ---------------------------------------------------------------------------
 const CAT_COLORS: Record<string, string> = {
   business: "#1A73E8", engineering: "#7B1FA2", design: "#E91E63",
@@ -53,18 +53,7 @@ const CAT_COLORS: Record<string, string> = {
 function catColor(cat: string | null) { return CAT_COLORS[cat ?? "other"] ?? "#8E24AA"; }
 
 // ---------------------------------------------------------------------------
-// Icons
-// ---------------------------------------------------------------------------
-const I = {
-  chevR:  <svg width="6" height="11" viewBox="0 0 6 11" fill="none"><path d="M1 1l3.5 4.5L1 10" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/></svg>,
-  check:  <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>,
-  search: <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="7" cy="7" r="5" stroke="currentColor" strokeWidth="1.4"/><path d="M11 11l3 3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/></svg>,
-  layers: <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M8 2L2 5l6 3 6-3-6-3zM2 8l6 3 6-3M2 11l6 3 6-3" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"/></svg>,
-  dot2:   <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><circle cx="3" cy="3.5" r="2" fill="currentColor" opacity="0.8"/><circle cx="8" cy="7" r="1.6" fill="currentColor" opacity="0.5"/></svg>,
-};
-
-// ---------------------------------------------------------------------------
-// Clone chip (light)
+// Clone chip
 // ---------------------------------------------------------------------------
 function CloneChip({ clone, selected, onToggle, disabled }: {
   clone: CloneOption; selected: boolean; onToggle: () => void; disabled: boolean;
@@ -76,48 +65,49 @@ function CloneChip({ clone, selected, onToggle, disabled }: {
       disabled={disabled && !selected}
       style={{
         display: "inline-flex", alignItems: "center", gap: 8,
-        padding: "7px 12px", borderRadius: 10,
-        fontFamily: "inherit", fontSize: 13, fontWeight: 500,
+        padding: "6px 12px", borderRadius: 10,
+        fontFamily: "inherit", fontSize: 12, fontWeight: 500,
         cursor: disabled && !selected ? "not-allowed" : "pointer",
-        opacity: disabled && !selected ? 0.40 : 1,
-        background: selected ? `color-mix(in srgb, ${color} 10%, transparent)` : "#F8F9FA",
-        border: `1.5px solid ${selected ? color : "rgba(0,0,0,0.08)"}`,
-        color: selected ? color : "#5F6368",
-        transition: "all 180ms ease",
+        opacity: disabled && !selected ? 0.35 : 1,
+        background: selected ? `color-mix(in srgb, ${color} 12%, transparent)` : "rgba(255,255,255,0.04)",
+        border: `1.5px solid ${selected ? color : "rgba(255,255,255,0.09)"}`,
+        color: selected ? color : "rgba(255,255,255,0.55)",
+        transition: "all 150ms ease",
       }}
     >
       <span style={{
-        width: 20, height: 20, borderRadius: "50%", flexShrink: 0,
+        width: 18, height: 18, borderRadius: "50%", flexShrink: 0,
         display: "inline-flex", alignItems: "center", justifyContent: "center",
-        background: color, color: "rgba(255,255,255,0.35)",
-        fontSize: 10, fontWeight: 600,
+        background: `color-mix(in srgb, ${color} 20%, transparent)`,
+        color, fontSize: 9, fontWeight: 600,
       }}>
         {clone.display_name.charAt(0).toUpperCase()}
       </span>
       <span>{clone.display_name}</span>
       {clone.price_per_query > 0 && (
-        <span style={{ fontSize: 10, color: "#9CA3AF" }}>{clone.price_per_query}cr</span>
+        <span style={{ fontSize: 10, color: "rgba(255,255,255,0.28)" }}>{clone.price_per_query}cr</span>
       )}
       {selected && (
-        <span style={{ color }}>{I.check}</span>
+        <svg width="9" height="9" viewBox="0 0 10 10" fill="none" style={{ color }}>
+          <path d="M1.5 5l2.5 2.5 4.5-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
       )}
     </button>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Query results (light)
+// Query results
 // ---------------------------------------------------------------------------
 function QueryResults({ result }: { result: QueryResult }) {
   const [activeTab, setActiveTab] = useState<string>("synthesis");
 
   return (
-    <div style={{ background: "#fff", border: "1px solid rgba(0,0,0,0.08)", borderRadius: 16, overflow: "hidden", boxShadow: "0 1px 3px rgba(0,0,0,0.06)" }}>
-      {/* Tab bar */}
+    <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 16, overflow: "hidden" }}>
       <div style={{
         display: "flex", alignItems: "center", gap: 0,
-        padding: "0 20px", borderBottom: "1px solid #F1F3F4",
-        background: "#FAFAFA",
+        padding: "0 20px", borderBottom: "1px solid rgba(255,255,255,0.07)",
+        background: "rgba(255,255,255,0.02)",
       }}>
         {[
           { id: "synthesis", label: "Synthesis" },
@@ -127,19 +117,18 @@ function QueryResults({ result }: { result: QueryResult }) {
             key={id}
             onClick={() => setActiveTab(id)}
             style={{
-              padding: "12px 14px", fontSize: 13, fontWeight: 500,
+              padding: "12px 14px", fontSize: 12, fontWeight: 500,
               fontFamily: "inherit", cursor: "pointer", background: "none",
-              borderBottom: `2px solid ${activeTab === id ? "#1A73E8" : "transparent"}`,
+              borderBottom: `2px solid ${activeTab === id ? "rgba(255,255,255,0.70)" : "transparent"}`,
               borderTop: "none", borderLeft: "none", borderRight: "none",
-              color: activeTab === id ? "#1A73E8" : "#5F6368",
-              marginBottom: -1,
-              transition: "color 150ms ease",
+              color: activeTab === id ? "rgba(255,255,255,0.80)" : "rgba(255,255,255,0.35)",
+              marginBottom: -1, transition: "color 150ms ease",
             }}
           >
             {label}
           </button>
         ))}
-        <span style={{ marginLeft: "auto", fontSize: 11, color: "#9CA3AF", paddingBottom: 12 }}>
+        <span style={{ marginLeft: "auto", fontSize: 11, color: "rgba(255,255,255,0.25)", paddingBottom: 12 }}>
           {result.credits_used} credit{result.credits_used !== 1 ? "s" : ""} used
         </span>
       </div>
@@ -147,8 +136,8 @@ function QueryResults({ result }: { result: QueryResult }) {
       <div style={{ padding: 24 }}>
         {activeTab === "synthesis" ? (
           <>
-            <p style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.14em", textTransform: "uppercase", color: "#9CA3AF", marginBottom: 14 }}>Synthesised answer</p>
-            <p style={{ fontSize: 14, color: "#1D1D1F", lineHeight: 1.7, margin: 0 }}>{result.synthesis}</p>
+            <p style={{ fontSize: 10, fontWeight: 500, letterSpacing: "0.12em", textTransform: "uppercase", color: "rgba(255,255,255,0.25)", marginBottom: 14 }}>Synthesised answer</p>
+            <p style={{ fontSize: 14, color: "rgba(255,255,255,0.75)", lineHeight: 1.75, margin: 0 }}>{result.synthesis}</p>
           </>
         ) : (() => {
           const p = result.perspectives.find((x) => x.clone_id === activeTab);
@@ -158,19 +147,19 @@ function QueryResults({ result }: { result: QueryResult }) {
             <>
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
                 <div style={{
-                  width: 28, height: 28, borderRadius: "50%",
+                  width: 26, height: 26, borderRadius: "50%",
                   display: "flex", alignItems: "center", justifyContent: "center",
-                  fontSize: 12, fontWeight: 600,
-                  background: color, color: "rgba(255,255,255,0.35)", flexShrink: 0,
+                  fontSize: 11, fontWeight: 600,
+                  background: `color-mix(in srgb, ${color} 20%, transparent)`, color, flexShrink: 0,
                 }}>
                   {p.name.charAt(0)}
                 </div>
-                <p style={{ fontSize: 14, fontWeight: 500, color: "#1D1D1F", margin: 0 }}>{p.name}</p>
-                <span style={{ marginLeft: "auto", fontSize: 12, color: "#9CA3AF" }}>
+                <p style={{ fontSize: 13, fontWeight: 500, color: "rgba(255,255,255,0.75)", margin: 0 }}>{p.name}</p>
+                <span style={{ marginLeft: "auto", fontSize: 11, color: "rgba(255,255,255,0.30)" }}>
                   {Math.round(p.confidence * 100)}% confidence
                 </span>
               </div>
-              <p style={{ fontSize: 14, color: "#374151", lineHeight: 1.7, margin: 0 }}>{p.response}</p>
+              <p style={{ fontSize: 14, color: "rgba(255,255,255,0.65)", lineHeight: 1.75, margin: 0 }}>{p.response}</p>
             </>
           );
         })()}
@@ -180,48 +169,42 @@ function QueryResults({ result }: { result: QueryResult }) {
 }
 
 // ---------------------------------------------------------------------------
-// Deliberate results (light)
+// Deliberate results
 // ---------------------------------------------------------------------------
 function DeliberateResults({ result }: { result: DeliberateResult }) {
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-      <div style={{ background: "#fff", border: "1px solid rgba(0,0,0,0.08)", borderRadius: 16, overflow: "hidden", boxShadow: "0 1px 3px rgba(0,0,0,0.06)" }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 16, overflow: "hidden" }}>
         <div style={{
           display: "flex", alignItems: "center", justifyContent: "space-between",
-          padding: "12px 20px", borderBottom: "1px solid #F1F3F4", background: "#FAFAFA",
+          padding: "11px 20px", borderBottom: "1px solid rgba(255,255,255,0.07)",
         }}>
-          <p style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.14em", textTransform: "uppercase", color: "#9CA3AF", margin: 0 }}>
+          <p style={{ fontSize: 10, fontWeight: 500, letterSpacing: "0.12em", textTransform: "uppercase", color: "rgba(255,255,255,0.25)", margin: 0 }}>
             Deliberation transcript
           </p>
-          <span style={{ fontSize: 11, color: "#9CA3AF" }}>{result.credits_used} credits used</span>
+          <span style={{ fontSize: 11, color: "rgba(255,255,255,0.25)" }}>{result.credits_used} credits used</span>
         </div>
         <div>
           {result.turns.map((turn, i) => {
             const color = catColor(null);
             const showHeader = i === 0 || result.turns[i - 1].name !== turn.name;
             return (
-              <div
-                key={i}
-                style={{ padding: "14px 20px", borderTop: i !== 0 ? "1px solid #F1F3F4" : "none" }}
-              >
+              <div key={i} style={{ padding: "14px 20px", borderTop: i !== 0 ? "1px solid rgba(255,255,255,0.05)" : "none" }}>
                 {showHeader && (
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
                     <div style={{
-                      width: 22, height: 22, borderRadius: "50%",
+                      width: 20, height: 20, borderRadius: "50%",
                       display: "flex", alignItems: "center", justifyContent: "center",
-                      fontSize: 10, fontWeight: 600,
-                      background: color, color: "rgba(255,255,255,0.35)", flexShrink: 0,
+                      fontSize: 9, fontWeight: 600,
+                      background: `color-mix(in srgb, ${color} 20%, transparent)`, color, flexShrink: 0,
                     }}>
                       {turn.name.charAt(0)}
                     </div>
                     <p style={{ fontSize: 12, fontWeight: 500, color, margin: 0 }}>{turn.name}</p>
-                    <span style={{ marginLeft: "auto", fontSize: 10, color: "#9CA3AF" }}>Round {turn.round}</span>
+                    <span style={{ marginLeft: "auto", fontSize: 10, color: "rgba(255,255,255,0.25)" }}>Round {turn.round}</span>
                   </div>
                 )}
-                <p style={{
-                  fontSize: 13, color: "#374151", lineHeight: 1.65,
-                  paddingLeft: showHeader ? 0 : 30, margin: 0,
-                }}>
+                <p style={{ fontSize: 13, color: "rgba(255,255,255,0.60)", lineHeight: 1.65, paddingLeft: showHeader ? 0 : 28, margin: 0 }}>
                   {turn.message}
                 </p>
               </div>
@@ -230,16 +213,16 @@ function DeliberateResults({ result }: { result: DeliberateResult }) {
         </div>
       </div>
 
-      <div style={{ background: "#fff", border: "1px solid rgba(0,0,0,0.08)", borderRadius: 16, padding: 24, boxShadow: "0 1px 3px rgba(0,0,0,0.06)" }}>
-        <p style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.14em", textTransform: "uppercase", color: "#9CA3AF", marginBottom: 12 }}>Summary</p>
-        <p style={{ fontSize: 14, color: "#1D1D1F", lineHeight: 1.7, margin: 0 }}>{result.summary}</p>
+      <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 16, padding: 24 }}>
+        <p style={{ fontSize: 10, fontWeight: 500, letterSpacing: "0.12em", textTransform: "uppercase", color: "rgba(255,255,255,0.25)", marginBottom: 12 }}>Summary</p>
+        <p style={{ fontSize: 14, color: "rgba(255,255,255,0.70)", lineHeight: 1.75, margin: 0 }}>{result.summary}</p>
       </div>
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Main page
+// Page
 // ---------------------------------------------------------------------------
 export default function SynthesisPage() {
   const { isSignedIn, isLoaded, user } = useUser();
@@ -253,26 +236,45 @@ export default function SynthesisPage() {
   const [queryResult, setQueryResult] = useState<QueryResult | null>(null);
   const [deliberateResult, setDeliberateResult] = useState<DeliberateResult | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [credits, setCredits] = useState<number | null>(null);
+  const [planCredits, setPlanCredits] = useState<number | null>(null);
+  const [boughtCredits, setBoughtCredits] = useState<number | null>(null);
 
   useEffect(() => {
-    fetch("/api/marketplace?limit=50")
-      .then((r) => r.json())
-      .then((d) => setClones(d.clones ?? []))
-      .catch(() => {});
+    // Fetch all accessible clones: marketplace + org
+    const fetches: Promise<CloneOption[]>[] = [
+      fetch("/api/marketplace?limit=100")
+        .then((r) => r.json())
+        .then((d) => (d.clones ?? []).map((c: CloneOption) => ({ ...c, source: "marketplace" as const }))),
+      fetch("/api/org/clones")
+        .then((r) => r.json())
+        .then((d) => (d.clones ?? []).map((c: CloneOption) => ({ ...c, source: "org" as const }))),
+    ];
+
+    Promise.allSettled(fetches).then((results) => {
+      const seen = new Set<string>();
+      const merged: CloneOption[] = [];
+      for (const r of results) {
+        if (r.status === "fulfilled") {
+          for (const c of r.value) {
+            if (!seen.has(c.clone_id)) { seen.add(c.clone_id); merged.push(c); }
+          }
+        }
+      }
+      setClones(merged);
+    });
   }, []);
 
   useEffect(() => {
-    if (user) {
-      fetch("/api/credits/balance")
-        .then((r) => r.json())
-        .then((d) => setCredits(d.credits_remaining ?? 0))
-        .catch(() => {});
-    }
+    if (!user) return;
+    fetch("/api/credits/balance")
+      .then((r) => r.json())
+      .then((d) => { setPlanCredits(d.plan_credits ?? 0); setBoughtCredits(d.bought_credits ?? 0); })
+      .catch(() => {});
   }, [user]);
 
   const filtered = clones.filter((c) =>
-    c.display_name.toLowerCase().includes(search.toLowerCase())
+    c.display_name.toLowerCase().includes(search.toLowerCase()) ||
+    c.handle.toLowerCase().includes(search.toLowerCase())
   );
 
   function toggle(id: string) {
@@ -281,6 +283,7 @@ export default function SynthesisPage() {
 
   const maxSelected = mode === "deliberate" ? 2 : 5;
   const ready = selected.length >= 2 && selected.length <= maxSelected && message.trim();
+  const totalCredits = (planCredits ?? 0) + (boughtCredits ?? 0);
 
   async function submit() {
     if (!ready || loading || (mode === "deliberate" && selected.length !== 2)) return;
@@ -298,7 +301,12 @@ export default function SynthesisPage() {
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail ?? "Query failed");
         setQueryResult(data);
-        if (data.credits_used) setCredits((c) => c !== null ? c - data.credits_used : c);
+        if (data.credits_used) {
+          const used = data.credits_used;
+          const planUsed = Math.min(planCredits ?? 0, used);
+          setPlanCredits((p) => p !== null ? Math.max(0, p - planUsed) : p);
+          setBoughtCredits((b) => b !== null ? Math.max(0, b - Math.max(0, used - planUsed)) : b);
+        }
       } else {
         const res = await fetch("/api/synthesis/deliberate", {
           method: "POST",
@@ -308,7 +316,12 @@ export default function SynthesisPage() {
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail ?? "Deliberation failed");
         setDeliberateResult(data);
-        if (data.credits_used) setCredits((c) => c !== null ? c - data.credits_used : c);
+        if (data.credits_used) {
+          const used = data.credits_used;
+          const planUsed = Math.min(planCredits ?? 0, used);
+          setPlanCredits((p) => p !== null ? Math.max(0, p - planUsed) : p);
+          setBoughtCredits((b) => b !== null ? Math.max(0, b - Math.max(0, used - planUsed)) : b);
+        }
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong");
@@ -320,90 +333,67 @@ export default function SynthesisPage() {
   if (!isLoaded) return null;
 
   return (
-    <div style={{ minHeight: "100vh" }}>
-      {/* Header */}
-      <header className="mk-hdr mk-hdr--scrolled">
-        <div className="mk-hdr__inner">
-          <Link href="/" className="mk-hdr__brand">
-            <svg width="22" height="22" viewBox="0 0 22 22" fill="none" style={{ flexShrink: 0 }}>
-              <rect x="0.5" y="0.5" width="21" height="21" rx="6.5" fill="rgba(26,115,232,0.08)" stroke="rgba(26,115,232,0.22)" />
-              <circle cx="8.88" cy="8.88" r="4.65" fill="#1A73E8" fillOpacity="0.90" />
-              <circle cx="13.96" cy="13.96" r="3.80" fill="#1A73E8" fillOpacity="0.50" />
-            </svg>
-            doppel
-          </Link>
-          <div className="mk-hdr__crumbs">
-            <span className="mk-hdr__crumb-sep">{I.chevR}</span>
-            <Link href="/marketplace" className="mk-hdr__crumb">Marketplace</Link>
-            <span className="mk-hdr__crumb-sep">{I.chevR}</span>
-            <span className="mk-hdr__crumb mk-hdr__crumb--cur">Synthesis</span>
-          </div>
-          <div className="mk-hdr__actions">
-            {credits !== null && (
-              <div style={{
-                display: "inline-flex", alignItems: "center", gap: 6,
-                padding: "5px 12px", borderRadius: 9999,
-                background: "rgba(26,115,232,0.08)", border: "1px solid rgba(26,115,232,0.15)",
-                fontSize: 12, fontWeight: 500, color: "#1A73E8",
-              }}>
-                <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#1A73E8", display: "inline-block" }} />
-                {credits} credits
-              </div>
-            )}
-            {!isSignedIn && (
-              <SignInButton mode="modal">
-                <button className="mk-btn mk-btn--primary mk-btn--sm">Sign in</button>
-              </SignInButton>
-            )}
-          </div>
-        </div>
-      </header>
-
-      {/* Hero strip */}
-      <section style={{
-        background: "#0F1B3D", padding: "40px 24px 48px",
-        position: "relative", overflow: "hidden",
+    <div style={{
+      minHeight: "100vh", background: "#080808",
+      fontFamily: "var(--font-sans, 'Plus Jakarta Sans', system-ui, sans-serif)",
+    }}>
+      {/* Sticky nav */}
+      <div style={{
+        borderBottom: "1px solid rgba(255,255,255,0.07)",
+        padding: "0 24px", height: 52,
+        position: "sticky", top: 0,
+        background: "rgba(8,8,8,0.92)", backdropFilter: "blur(12px)", zIndex: 10,
+        display: "flex", alignItems: "center", gap: 10,
       }}>
-        <div style={{
-          position: "absolute", inset: 0,
-          backgroundImage: "radial-gradient(rgba(255,255,255,0.06) 1px, transparent 1px)",
-          backgroundSize: "28px 28px",
-          maskImage: "radial-gradient(ellipse 80% 60% at 50% 40%, #000 30%, transparent 70%)",
-          WebkitMaskImage: "radial-gradient(ellipse 80% 60% at 50% 40%, #000 30%, transparent 70%)",
-        }} />
-        <div style={{ maxWidth: 680, margin: "0 auto", position: "relative", zIndex: 1, textAlign: "center" }}>
-          <div style={{ display: "inline-flex", alignItems: "center", gap: 6, marginBottom: 14,
-            background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.12)",
-            borderRadius: 999, padding: "4px 12px", fontSize: 11, fontWeight: 500,
-            letterSpacing: "0.12em", textTransform: "uppercase", color: "rgba(255,255,255,0.55)" }}>
-            {I.layers}
-            Multi-clone synthesis
+        <Link href="/home" style={{ fontSize: 13, color: "rgba(255,255,255,0.40)", textDecoration: "none" }}>
+          ← Home
+        </Link>
+        <span style={{ color: "rgba(255,255,255,0.18)", fontSize: 13 }}>/</span>
+        <span style={{ fontSize: 13, color: "rgba(255,255,255,0.65)", fontWeight: 500 }}>Synthesis</span>
+        {(planCredits !== null || boughtCredits !== null) && (
+          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+            {(planCredits ?? 0) > 0 && (
+              <span style={{ fontSize: 11, color: "rgba(96,165,250,0.65)" }}>{planCredits} plan</span>
+            )}
+            {(planCredits ?? 0) > 0 && (boughtCredits ?? 0) > 0 && (
+              <span style={{ color: "rgba(255,255,255,0.18)", fontSize: 11 }}>·</span>
+            )}
+            {(boughtCredits ?? 0) > 0 && (
+              <span style={{ fontSize: 11, color: "rgba(255,255,255,0.40)" }}>{boughtCredits} cr</span>
+            )}
+            {totalCredits === 0 && (
+              <Link href="/dashboard/credits" style={{ fontSize: 11, color: "rgba(255,255,255,0.30)", textDecoration: "none" }}>get credits</Link>
+            )}
           </div>
-          <h1 style={{ fontSize: 32, fontWeight: 300, color: "#fff", margin: "0 0 12px", letterSpacing: "-0.02em", lineHeight: 1.15 }}>
-            Ask multiple clones.<br />Get one unified answer.
-          </h1>
-          <p style={{ fontSize: 14, color: "rgba(255,255,255,0.55)", margin: 0, lineHeight: 1.6 }}>
-            Query 2–5 experts in parallel, then synthesise their perspectives into one coherent view. Costs 1 credit per clone.
-          </p>
-        </div>
-      </section>
+        )}
+      </div>
 
       {/* Body */}
-      <div style={{ maxWidth: 720, margin: "0 auto", padding: "32px 24px 100px", display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={{ maxWidth: 680, margin: "0 auto", padding: "32px 24px 80px", display: "flex", flexDirection: "column", gap: 16 }}>
+
+        {/* Header */}
+        <div style={{ marginBottom: 4 }}>
+          <p style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.12em", color: "rgba(255,255,255,0.25)", marginBottom: 6 }}>Feature</p>
+          <h1 style={{ fontSize: 26, fontWeight: 300, color: "rgba(255,255,255,0.85)", margin: "0 0 6px", letterSpacing: "-0.02em" }}>Synthesis</h1>
+          <p style={{ fontSize: 13, color: "rgba(255,255,255,0.40)", margin: 0, lineHeight: 1.6 }}>
+            Ask 2–5 clones the same question in parallel, then get a unified synthesised answer. Or let two clones deliberate back and forth.
+          </p>
+        </div>
 
         {!isSignedIn ? (
           <div style={{
-            background: "#fff", border: "1px solid rgba(0,0,0,0.08)", borderRadius: 20,
-            padding: "56px 24px", textAlign: "center", boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
+            background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)",
+            borderRadius: 16, padding: "48px 24px", textAlign: "center",
           }}>
-            <div style={{ width: 44, height: 44, borderRadius: 12, background: "rgba(26,115,232,0.08)", color: "#1A73E8",
-              display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>
-              {I.layers}
-            </div>
-            <p style={{ fontSize: 15, fontWeight: 500, color: "#1D1D1F", marginBottom: 6 }}>Sign in to use Synthesis</p>
-            <p style={{ fontSize: 13, color: "#5F6368", marginBottom: 24 }}>Synthesis requires credits. Sign in to get started.</p>
+            <p style={{ fontSize: 14, color: "rgba(255,255,255,0.55)", marginBottom: 20 }}>Sign in to use Synthesis</p>
             <SignInButton mode="modal">
-              <button className="mk-btn mk-btn--primary">Sign in</button>
+              <button style={{
+                padding: "9px 22px", borderRadius: 10, fontSize: 13, fontWeight: 500,
+                background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.14)",
+                color: "rgba(255,255,255,0.75)", cursor: "pointer", fontFamily: "inherit",
+              }}>
+                Sign in
+              </button>
             </SignInButton>
           </div>
         ) : (
@@ -412,69 +402,72 @@ export default function SynthesisPage() {
             <div>
               <div style={{
                 display: "inline-flex", gap: 3, padding: 3, borderRadius: 12,
-                background: "#F1F3F4", border: "1px solid rgba(0,0,0,0.06)",
+                background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)",
               }}>
                 {(["query", "deliberate"] as const).map((m) => (
                   <button
                     key={m}
                     onClick={() => { setMode(m); setSelected([]); setQueryResult(null); setDeliberateResult(null); }}
                     style={{
-                      padding: "7px 16px", fontSize: 13, fontWeight: 500,
+                      padding: "6px 16px", fontSize: 12, fontWeight: 500,
                       fontFamily: "inherit", borderRadius: 9, cursor: "pointer",
-                      border: "none",
-                      background: mode === m ? "#fff" : "transparent",
-                      color: mode === m ? "#1D1D1F" : "#5F6368",
-                      boxShadow: mode === m ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
-                      transition: "all 180ms ease",
+                      border: "1px solid transparent",
+                      background: mode === m ? "rgba(255,255,255,0.08)" : "transparent",
+                      borderColor: mode === m ? "rgba(255,255,255,0.10)" : "transparent",
+                      color: mode === m ? "rgba(255,255,255,0.80)" : "rgba(255,255,255,0.35)",
+                      transition: "all 150ms ease",
                     }}
                   >
                     {m === "query" ? "Query all" : "Deliberate"}
                   </button>
                 ))}
               </div>
-              <p style={{ fontSize: 12, color: "#5F6368", marginTop: 10, lineHeight: 1.6 }}>
+              <p style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", marginTop: 10, lineHeight: 1.6 }}>
                 {mode === "query"
-                  ? "Ask the same question to 2–5 clones. Get individual perspectives plus a synthesised answer. Costs 1 credit per clone."
-                  : `Pick exactly 2 clones and give them a topic. They debate back and forth for ${rounds} rounds. Costs ${rounds * 2} credits.`}
+                  ? `Ask the same question to 2–5 clones simultaneously. Costs 1 credit per clone.`
+                  : `Pick exactly 2 clones. They debate a topic for ${rounds} rounds. Costs ${rounds * 2} credits.`}
               </p>
             </div>
 
             {/* Clone picker */}
-            <div style={{ background: "#fff", border: "1px solid rgba(0,0,0,0.08)", borderRadius: 16, overflow: "hidden", boxShadow: "0 1px 3px rgba(0,0,0,0.06)" }}>
+            <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 16, overflow: "hidden" }}>
               <div style={{
                 display: "flex", alignItems: "center", justifyContent: "space-between",
-                padding: "11px 16px", borderBottom: "1px solid #F1F3F4", background: "#FAFAFA",
+                padding: "10px 16px", borderBottom: "1px solid rgba(255,255,255,0.06)",
               }}>
-                <p style={{ fontSize: 12, fontWeight: 500, color: "#5F6368", margin: 0 }}>
+                <p style={{ fontSize: 12, fontWeight: 500, color: "rgba(255,255,255,0.40)", margin: 0 }}>
                   Select clones{" "}
-                  <span style={{ fontWeight: 400, color: "#9CA3AF" }}>
+                  <span style={{ fontWeight: 400, color: "rgba(255,255,255,0.25)" }}>
                     ({selected.length}/{maxSelected}{mode === "deliberate" ? ", exactly 2" : ""})
                   </span>
                 </p>
                 {selected.length > 0 && (
                   <button
                     onClick={() => setSelected([])}
-                    style={{ fontSize: 11, color: "#9CA3AF", background: "none", border: "none", cursor: "pointer", fontFamily: "inherit" }}
+                    style={{ fontSize: 11, color: "rgba(255,255,255,0.30)", background: "none", border: "none", cursor: "pointer", fontFamily: "inherit" }}
                   >
                     Clear
                   </button>
                 )}
               </div>
-              <div style={{ padding: "10px 12px", borderBottom: "1px solid #F1F3F4", display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ color: "#9CA3AF", display: "inline-flex" }}>{I.search}</span>
+              <div style={{ padding: "8px 12px", borderBottom: "1px solid rgba(255,255,255,0.06)", display: "flex", alignItems: "center", gap: 8 }}>
+                <svg width="13" height="13" viewBox="0 0 14 14" fill="none" style={{ color: "rgba(255,255,255,0.25)", flexShrink: 0 }}>
+                  <circle cx="6" cy="6" r="4.5" stroke="currentColor" strokeWidth="1.3"/>
+                  <path d="M9.5 9.5L12 12" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+                </svg>
                 <input
                   placeholder="Search clones…"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   style={{
                     flex: 1, border: "none", outline: "none", background: "transparent",
-                    fontSize: 13, color: "#1D1D1F", fontFamily: "inherit",
+                    fontSize: 12, color: "rgba(255,255,255,0.70)", fontFamily: "inherit",
                   }}
                 />
               </div>
-              <div style={{ padding: 12, display: "flex", flexWrap: "wrap", gap: 7, maxHeight: 200, overflowY: "auto" }}>
+              <div style={{ padding: 12, display: "flex", flexWrap: "wrap", gap: 6, maxHeight: 200, overflowY: "auto" }}>
                 {filtered.length === 0 && (
-                  <p style={{ fontSize: 12, color: "#9CA3AF" }}>No clones found</p>
+                  <p style={{ fontSize: 12, color: "rgba(255,255,255,0.25)" }}>No clones found</p>
                 )}
                 {filtered.map((c) => (
                   <CloneChip
@@ -489,9 +482,9 @@ export default function SynthesisPage() {
             </div>
 
             {/* Question / topic */}
-            <div style={{ background: "#fff", border: "1px solid rgba(0,0,0,0.08)", borderRadius: 16, overflow: "hidden", boxShadow: "0 1px 3px rgba(0,0,0,0.06)" }}>
-              <div style={{ padding: "11px 16px", borderBottom: "1px solid #F1F3F4", background: "#FAFAFA" }}>
-                <p style={{ fontSize: 12, fontWeight: 500, color: "#5F6368", margin: 0 }}>
+            <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 16, overflow: "hidden" }}>
+              <div style={{ padding: "10px 16px", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+                <p style={{ fontSize: 12, fontWeight: 500, color: "rgba(255,255,255,0.35)", margin: 0 }}>
                   {mode === "query" ? "Your question" : "Topic for deliberation"}
                 </p>
               </div>
@@ -501,12 +494,12 @@ export default function SynthesisPage() {
                 placeholder={
                   mode === "query"
                     ? "Should we raise a Series A right now, or wait two more quarters?"
-                    : "Should startups focus on growth or profitability?"
+                    : "Should startups focus on growth or profitability in year 1?"
                 }
                 rows={3}
                 style={{
                   width: "100%", padding: "14px 16px",
-                  fontSize: 13, color: "#1D1D1F",
+                  fontSize: 13, color: "rgba(255,255,255,0.75)",
                   background: "transparent", border: "none", outline: "none",
                   resize: "none", lineHeight: 1.6, fontFamily: "inherit",
                   boxSizing: "border-box",
@@ -517,13 +510,13 @@ export default function SynthesisPage() {
             {/* Rounds slider */}
             {mode === "deliberate" && (
               <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-                <p style={{ fontSize: 12, color: "#5F6368", flexShrink: 0 }}>Rounds: {rounds}</p>
+                <p style={{ fontSize: 12, color: "rgba(255,255,255,0.40)", flexShrink: 0 }}>Rounds: {rounds}</p>
                 <input
                   type="range" min={2} max={5} value={rounds}
                   onChange={(e) => setRounds(Number(e.target.value))}
-                  style={{ flex: 1, accentColor: "#1A73E8" }}
+                  style={{ flex: 1, accentColor: "rgba(255,255,255,0.50)" }}
                 />
-                <p style={{ fontSize: 12, color: "#9CA3AF", flexShrink: 0 }}>{rounds * 2} credits</p>
+                <p style={{ fontSize: 12, color: "rgba(255,255,255,0.30)", flexShrink: 0 }}>{rounds * 2} credits</p>
               </div>
             )}
 
@@ -532,23 +525,31 @@ export default function SynthesisPage() {
               <button
                 onClick={submit}
                 disabled={!ready || loading || (mode === "deliberate" && selected.length !== 2)}
-                className="mk-btn mk-btn--primary"
-                style={{ display: "inline-flex", alignItems: "center", gap: 8 }}
+                style={{
+                  display: "inline-flex", alignItems: "center", gap: 8,
+                  padding: "9px 20px", borderRadius: 10, fontSize: 13, fontWeight: 500,
+                  fontFamily: "inherit", cursor: ready && !loading ? "pointer" : "not-allowed",
+                  opacity: ready && !loading ? 1 : 0.45,
+                  background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.14)",
+                  color: "rgba(255,255,255,0.80)", transition: "all 150ms",
+                }}
               >
                 {loading ? (
                   <>
                     <span style={{
                       width: 12, height: 12, borderRadius: "50%",
-                      border: "1.5px solid rgba(255,255,255,0.30)",
-                      borderTopColor: "rgba(255,255,255,0.90)",
+                      border: "1.5px solid rgba(255,255,255,0.20)",
+                      borderTopColor: "rgba(255,255,255,0.70)",
                       display: "inline-block",
-                      animation: "spin 0.7s linear infinite",
+                      animation: "synth-spin 0.7s linear infinite",
                     }} />
                     {mode === "query" ? "Querying…" : "Deliberating…"}
                   </>
                 ) : (
                   <>
-                    {I.dot2}
+                    <svg width="11" height="11" viewBox="0 0 14 14" fill="none">
+                      <path d="M7 2L2 5l5 3 5-3-5-3zM2 8l5 3 5-3M2 11l5 3 5-3" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round"/>
+                    </svg>
                     {mode === "query"
                       ? `Synthesise (${selected.length} credit${selected.length !== 1 ? "s" : ""})`
                       : `Deliberate (${rounds * 2} credits)`}
@@ -556,7 +557,7 @@ export default function SynthesisPage() {
                 )}
               </button>
               {!ready && !loading && (
-                <span style={{ fontSize: 12, color: "#9CA3AF" }}>
+                <span style={{ fontSize: 12, color: "rgba(255,255,255,0.28)" }}>
                   {selected.length < 2
                     ? "Select at least 2 clones"
                     : mode === "deliberate" && selected.length !== 2
@@ -568,8 +569,8 @@ export default function SynthesisPage() {
 
             {/* Error */}
             {error && (
-              <div style={{ padding: "12px 16px", borderRadius: 12, background: "#FFF1F2", border: "1px solid rgba(220,38,38,0.20)" }}>
-                <p style={{ fontSize: 13, color: "#DC2626", margin: 0 }}>{error}</p>
+              <div style={{ padding: "12px 16px", borderRadius: 12, background: "rgba(248,113,113,0.06)", border: "1px solid rgba(248,113,113,0.18)" }}>
+                <p style={{ fontSize: 13, color: "rgba(248,113,113,0.80)", margin: 0 }}>{error}</p>
               </div>
             )}
 
@@ -580,8 +581,7 @@ export default function SynthesisPage() {
         )}
       </div>
 
-      <MarketplaceActionBar />
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      <style>{`@keyframes synth-spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 }

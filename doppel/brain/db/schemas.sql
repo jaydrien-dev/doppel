@@ -312,6 +312,17 @@ CREATE TABLE IF NOT EXISTS org_credit_pools (
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Shareable join-link tokens for orgs (admin generates once; any signed-in user can use)
+CREATE TABLE IF NOT EXISTS org_join_tokens (
+    token      TEXT PRIMARY KEY DEFAULT encode(gen_random_bytes(16), 'hex'),
+    org_id     UUID NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
+    role       TEXT NOT NULL DEFAULT 'member',
+    created_by TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    use_count  INT NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS org_join_tokens_org_idx ON org_join_tokens (org_id);
+
 
 -- ---------------------------------------------------------------------------
 -- SLACK INSTALLATIONS
@@ -585,6 +596,14 @@ CREATE INDEX IF NOT EXISTS qtx_clone_idx ON query_transactions (clone_id, create
 
 -- Migration for existing installs:
 ALTER TABLE query_transactions ADD COLUMN IF NOT EXISTS response_mode TEXT NOT NULL DEFAULT 'fast';
+
+-- Weekly plan credits: per-user, resets every Monday (unused credits do not roll over)
+CREATE TABLE IF NOT EXISTS plan_credits (
+    user_id    TEXT PRIMARY KEY,
+    credits    INT NOT NULL DEFAULT 0,
+    week_start TIMESTAMPTZ NOT NULL DEFAULT date_trunc('week', NOW()),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 
 -- Stripe checkout sessions for credit top-ups
 CREATE TABLE IF NOT EXISTS stripe_credit_sessions (

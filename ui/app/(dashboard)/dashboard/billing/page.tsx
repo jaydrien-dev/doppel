@@ -49,8 +49,8 @@ const PLANS: {
     name: "Personal",
     color: "#1A73E8",
     desc: "Sell your knowledge. Earn on every query.",
-    monthly: 19,
-    yearly: 190,
+    monthly: 15,
+    yearly: 150,
     monthlyEnvKey: "NEXT_PUBLIC_STRIPE_PERSONAL_MONTHLY_PRICE_ID",
     yearlyEnvKey: "NEXT_PUBLIC_STRIPE_PERSONAL_YEARLY_PRICE_ID",
     features: [
@@ -103,20 +103,7 @@ const PLANS: {
   },
 ];
 
-const PRICE_IDS: Partial<Record<Tier, Record<Period, string>>> = {
-  personal: {
-    monthly: process.env.NEXT_PUBLIC_STRIPE_PERSONAL_MONTHLY_PRICE_ID ?? "",
-    yearly:  process.env.NEXT_PUBLIC_STRIPE_PERSONAL_YEARLY_PRICE_ID ?? "",
-  },
-  enterprise_pro: {
-    monthly: process.env.NEXT_PUBLIC_STRIPE_ENT_PRO_MONTHLY_PRICE_ID ?? "",
-    yearly:  process.env.NEXT_PUBLIC_STRIPE_ENT_PRO_YEARLY_PRICE_ID ?? "",
-  },
-  enterprise_max: {
-    monthly: process.env.NEXT_PUBLIC_STRIPE_ENT_MAX_MONTHLY_PRICE_ID ?? "",
-    yearly:  process.env.NEXT_PUBLIC_STRIPE_ENT_MAX_YEARLY_PRICE_ID ?? "",
-  },
-};
+// Price IDs are resolved server-side — no NEXT_PUBLIC_ vars needed.
 
 const ISparkle = (
   <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor">
@@ -159,20 +146,19 @@ function BillingContent() {
   }, []);
 
   async function handleUpgrade(planId: Tier) {
-    const priceId = PRICE_IDS[planId]?.[period];
-    if (!priceId) {
-      alert("Stripe price not configured. Add the relevant NEXT_PUBLIC_STRIPE_* env vars to .env.local and restart.");
-      return;
-    }
     setLoadingPlan(planId);
     try {
       const res = await fetch("/api/billing/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ price_id: priceId }),
+        body: JSON.stringify({ tier: planId, period }),
       });
       const data = await res.json();
-      if (data.url) router.push(data.url);
+      if (data.url) {
+        router.push(data.url);
+      } else {
+        alert(data.detail ?? "Checkout failed — check Stripe configuration.");
+      }
     } finally {
       setLoadingPlan(null);
     }

@@ -452,6 +452,220 @@ function CloneAccessPanel({
 }
 
 // ---------------------------------------------------------------------------
+// Create-org gate (shown when user has no org)
+// ---------------------------------------------------------------------------
+function CreateOrgGate({ onCreated }: { onCreated: () => void }) {
+  const { user } = useUser();
+  const [tier, setTier] = useState<string | null>(null);
+  const [name, setName] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Check clone tier
+    fetch("/api/clones")
+      .then((r) => r.json())
+      .then((d) => {
+        const clones: { subscription_tier?: string }[] = d.clones ?? [];
+        const tiers = clones.map((c) => c.subscription_tier ?? "free");
+        const rank: Record<string, number> = { free: 0, personal: 1, enterprise_pro: 2, enterprise_max: 3 };
+        const best = tiers.reduce((a, b) => (rank[a] ?? 0) >= (rank[b] ?? 0) ? a : b, "free");
+        setTier(best);
+      })
+      .catch(() => setTier("free"));
+  }, [user?.id]);
+
+  const isEnterprise = tier === "enterprise_pro" || tier === "enterprise_max";
+
+  async function handleCreate() {
+    if (!name.trim()) return;
+    setCreating(true); setErr(null);
+    const slug = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    try {
+      const res = await fetch("/api/org", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: name.trim(), slug }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.detail ?? "Failed to create org");
+      onCreated();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Something went wrong");
+    } finally {
+      setCreating(false); }
+  }
+
+  return (
+    <div className="db-page">
+      <div className="db-page-head">
+        <div><p className="db-eyebrow">Organisation</p><h1 className="db-h1">Organisation</h1></div>
+      </div>
+
+      {tier === null ? (
+        <div style={{ padding: "48px 0", textAlign: "center" }}>
+          <p style={{ fontSize: 13, color: "rgba(255,255,255,0.28)" }}>Loading…</p>
+        </div>
+      ) : !isEnterprise ? (
+        <div style={{ padding: "48px 0", textAlign: "center", borderRadius: 16, border: "1px solid rgba(255,255,255,0.07)", background: "rgba(255,255,255,0.02)" }}>
+          <p style={{ fontSize: 14, color: "rgba(255,255,255,0.40)", marginBottom: 6 }}>Organisations require an Enterprise plan.</p>
+          <p style={{ fontSize: 12, color: "rgba(255,255,255,0.22)", marginBottom: 24 }}>Upgrade to Enterprise Pro or Max to create a team workspace.</p>
+          <Link href="/dashboard/billing" style={{ display: "inline-block", padding: "9px 20px", borderRadius: 10, fontSize: 13, fontWeight: 500, textDecoration: "none", background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.12)", color: "rgba(255,255,255,0.65)" }}>
+            View plans →
+          </Link>
+        </div>
+      ) : (
+        <div style={{ maxWidth: 480 }}>
+          <div style={{ padding: "28px 28px", borderRadius: 16, border: "1px solid rgba(255,255,255,0.09)", background: "rgba(255,255,255,0.02)" }}>
+            <p style={{ fontSize: 13, fontWeight: 500, color: "rgba(255,255,255,0.55)", marginBottom: 20 }}>Create your organisation</p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <div>
+                <p style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", marginBottom: 6 }}>Organisation name</p>
+                <input
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleCreate()}
+                  placeholder="Acme Inc."
+                  autoFocus
+                  style={{
+                    width: "100%", padding: "10px 14px", borderRadius: 10, fontSize: 14,
+                    background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.10)",
+                    color: "rgba(255,255,255,0.80)", outline: "none", fontFamily: "inherit",
+                    boxSizing: "border-box",
+                  }}
+                />
+                {name.trim() && (
+                  <p style={{ fontSize: 11, color: "rgba(255,255,255,0.25)", marginTop: 5 }}>
+                    Slug: {name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}
+                  </p>
+                )}
+              </div>
+              <button
+                onClick={handleCreate}
+                disabled={creating || !name.trim()}
+                style={{
+                  padding: "10px 20px", borderRadius: 10, fontSize: 13, fontWeight: 500,
+                  background: name.trim() ? "rgba(255,255,255,0.09)" : "rgba(255,255,255,0.03)",
+                  border: `1px solid ${name.trim() ? "rgba(255,255,255,0.16)" : "rgba(255,255,255,0.07)"}`,
+                  color: name.trim() ? "rgba(255,255,255,0.80)" : "rgba(255,255,255,0.25)",
+                  cursor: name.trim() && !creating ? "pointer" : "default",
+                  fontFamily: "inherit", transition: "all 150ms", opacity: creating ? 0.6 : 1,
+                }}
+              >
+                {creating ? "Creating…" : "Create organisation"}
+              </button>
+              {err && <p style={{ fontSize: 12, color: "rgba(248,113,113,0.75)" }}>{err}</p>}
+            </div>
+          </div>
+
+          <p style={{ fontSize: 12, color: "rgba(255,255,255,0.22)", marginTop: 16, lineHeight: 1.6 }}>
+            As the owner you&apos;ll be an admin. Invite teammates after creating.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Invite link section
+// ---------------------------------------------------------------------------
+function InviteLinkSection() {
+  const [token, setToken] = useState<string | null>(null);
+  const [useCount, setUseCount] = useState(0);
+  const [resetting, setResetting] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/org/join-token")
+      .then((r) => r.json())
+      .then((d) => { setToken(d.token ?? null); setUseCount(d.use_count ?? 0); })
+      .catch(() => {});
+  }, []);
+
+  const joinUrl = token
+    ? `${typeof window !== "undefined" ? window.location.origin : ""}/join/${token}`
+    : "";
+
+  async function handleCopy() {
+    if (!joinUrl) return;
+    await navigator.clipboard.writeText(joinUrl);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
+  async function handleReset() {
+    setResetting(true);
+    try {
+      const res = await fetch("/api/org/join-token", { method: "POST" });
+      const d = await res.json();
+      setToken(d.token ?? null);
+      setUseCount(0);
+    } finally { setResetting(false); }
+  }
+
+  return (
+    <div style={{ marginTop: 28 }}>
+      <SectionHead label="Invite link" />
+      <div style={{ padding: "16px 18px", borderRadius: 14, background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.07)" }}>
+        <p style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", marginBottom: 12, lineHeight: 1.6 }}>
+          Share this link with anyone you want to add. They&apos;ll join as a member.
+          {useCount > 0 && <span style={{ color: "rgba(255,255,255,0.25)", marginLeft: 6 }}>{useCount} joined via link</span>}
+        </p>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input
+            readOnly
+            value={token ? joinUrl : "Generating…"}
+            style={{
+              flex: 1, padding: "9px 14px", borderRadius: 10, fontSize: 12,
+              background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)",
+              color: "rgba(255,255,255,0.55)", outline: "none", fontFamily: "ui-monospace, monospace",
+              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+            }}
+            onFocus={(e) => e.target.select()}
+          />
+          <button
+            onClick={handleCopy}
+            disabled={!token}
+            style={{
+              padding: "9px 16px", borderRadius: 10, fontSize: 12, fontWeight: 500,
+              background: copied ? "rgba(52,211,153,0.10)" : "rgba(255,255,255,0.06)",
+              border: `1px solid ${copied ? "rgba(52,211,153,0.25)" : "rgba(255,255,255,0.10)"}`,
+              color: copied ? "rgba(52,211,153,0.80)" : "rgba(255,255,255,0.55)",
+              cursor: token ? "pointer" : "default", fontFamily: "inherit", transition: "all 150ms",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {copied ? "Copied!" : "Copy link"}
+          </button>
+          <button
+            onClick={handleReset}
+            disabled={resetting}
+            title="Revoke and regenerate link"
+            style={{
+              padding: "9px 12px", borderRadius: 10, fontSize: 12,
+              background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)",
+              color: "rgba(255,255,255,0.30)", cursor: "pointer", fontFamily: "inherit",
+              transition: "all 150ms", opacity: resetting ? 0.5 : 1,
+            }}
+          >
+            {resetting ? "…" : (
+              <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
+                <path d="M12 7A5 5 0 112 7" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+                <path d="M12 3v4h-4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            )}
+          </button>
+        </div>
+        <p style={{ fontSize: 11, color: "rgba(255,255,255,0.18)", marginTop: 8 }}>
+          Resetting revokes the old link immediately — anyone who hasn&apos;t joined yet will need the new link.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Members section
 // ---------------------------------------------------------------------------
 function MembersSection({
@@ -648,18 +862,7 @@ export default function OrgAdminPage() {
   }
 
   if (!org) {
-    return (
-      <div className="db-page">
-        <div className="db-page-head"><div><p className="db-eyebrow">Organisation</p><h1 className="db-h1">No Organisation</h1></div></div>
-        <div style={{ padding: "48px 0", textAlign: "center", borderRadius: 16, border: "1px solid rgba(255,255,255,0.07)", background: "rgba(255,255,255,0.02)" }}>
-          <p style={{ fontSize: 14, color: "rgba(255,255,255,0.40)", marginBottom: 6 }}>You&apos;re not part of an organisation yet.</p>
-          <p style={{ fontSize: 12, color: "rgba(255,255,255,0.22)" }}>Upgrade to Pro or Max to create one.</p>
-          <Link href="/dashboard/billing" style={{ display: "inline-block", marginTop: 20, padding: "9px 20px", borderRadius: 10, fontSize: 13, fontWeight: 500, textDecoration: "none", background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.12)", color: "rgba(255,255,255,0.65)" }}>
-            View plans →
-          </Link>
-        </div>
-      </div>
-    );
+    return <CreateOrgGate onCreated={load} />;
   }
 
   if (!isAdmin) {
@@ -728,6 +931,8 @@ export default function OrgAdminPage() {
             currentUserId={user!.id}
             onRefresh={load}
           />
+
+          <InviteLinkSection />
 
           {/* Org credit pool */}
           <div style={{ marginTop: 32 }}>

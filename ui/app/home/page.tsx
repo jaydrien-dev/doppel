@@ -446,7 +446,8 @@ function ConvSidebar({
   conversations,
   selectedId,
   onSelect,
-  creditBalance,
+  planCredits,
+  boughtCredits,
   orgCreditBalance,
   orgClones,
   onSelectOrgClone,
@@ -456,7 +457,8 @@ function ConvSidebar({
   conversations: Conversation[];
   selectedId: string | null;
   onSelect: (c: Conversation) => void;
-  creditBalance: number | null;
+  planCredits: number | null;
+  boughtCredits: number | null;
   orgCreditBalance: number | null;
   orgClones: OrgClone[];
   onSelectOrgClone: (c: OrgClone) => void;
@@ -570,6 +572,21 @@ function ConvSidebar({
           </svg>
           My Organisation
         </Link>
+        <Link href="/synthesis" style={{
+          display: "flex", alignItems: "center", gap: 8,
+          padding: "8px 14px", borderRadius: 10,
+          background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)",
+          color: "rgba(255,255,255,0.45)", fontSize: 12, fontWeight: 500,
+          textDecoration: "none", transition: "all 150ms",
+        }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.07)"; e.currentTarget.style.color = "rgba(255,255,255,0.75)"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.03)"; e.currentTarget.style.color = "rgba(255,255,255,0.45)"; }}
+        >
+          <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
+            <path d="M7 1L2 4l5 3 5-3-5-3zM2 7l5 3 5-3M2 10l5 3 5-3" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"/>
+          </svg>
+          Synthesis
+        </Link>
       </div>
 
       {/* Conversation list */}
@@ -671,17 +688,23 @@ function ConvSidebar({
             <p style={{ fontSize: 12, fontWeight: 500, color: "rgba(255,255,255,0.65)", margin: 0 }}>
               {user?.firstName ?? "You"}
             </p>
-            {(creditBalance !== null || orgCreditBalance !== null) && (
-              <p style={{ fontSize: 10, color: "rgba(255,255,255,0.28)", margin: "1px 0 0" }}>
-                {creditBalance !== null ? `${creditBalance} cr` : ""}
-                {orgCreditBalance !== null && orgCreditBalance > 0 && (
-                  <span style={{ color: "rgba(107,174,255,0.55)", marginLeft: creditBalance !== null ? 5 : 0 }}>
-                    {creditBalance !== null ? "· " : ""}{orgCreditBalance} org
-                  </span>
+            {(planCredits !== null || boughtCredits !== null || orgCreditBalance !== null) && (
+              <p style={{ fontSize: 10, color: "rgba(255,255,255,0.28)", margin: "1px 0 0", display: "flex", alignItems: "center", flexWrap: "wrap", gap: "0 4px" }}>
+                {planCredits !== null && planCredits > 0 && (
+                  <span style={{ color: "rgba(96,165,250,0.65)" }}>{planCredits} plan</span>
                 )}
-                {(creditBalance === 0 && (orgCreditBalance === null || orgCreditBalance === 0)) && (
-                  <Link href="/dashboard/credits" style={{ color: "rgba(255,255,255,0.22)", textDecoration: "none", marginLeft: 4 }}>
-                    buy credits
+                {planCredits !== null && planCredits > 0 && boughtCredits !== null && boughtCredits > 0 && (
+                  <span style={{ color: "rgba(255,255,255,0.18)" }}>·</span>
+                )}
+                {boughtCredits !== null && boughtCredits > 0 && (
+                  <span>{boughtCredits} cr</span>
+                )}
+                {orgCreditBalance !== null && orgCreditBalance > 0 && (
+                  <span style={{ color: "rgba(107,174,255,0.55)" }}>· {orgCreditBalance} org</span>
+                )}
+                {(planCredits === 0 || planCredits === null) && (boughtCredits === 0 || boughtCredits === null) && (orgCreditBalance === null || orgCreditBalance === 0) && (
+                  <Link href="/dashboard/credits" style={{ color: "rgba(255,255,255,0.22)", textDecoration: "none" }}>
+                    get credits
                   </Link>
                 )}
               </p>
@@ -836,7 +859,8 @@ function HomeContent() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [featured, setFeatured] = useState<MarketplaceClone[]>([]);
   const [selected, setSelected] = useState<Conversation | null>(null);
-  const [creditBalance, setCreditBalance] = useState<number | null>(null);
+  const [planCredits, setPlanCredits] = useState<number | null>(null);
+  const [boughtCredits, setBoughtCredits] = useState<number | null>(null);
   const [orgCreditBalance, setOrgCreditBalance] = useState<number | null>(null);
   const [orgClones, setOrgClones] = useState<OrgClone[]>([]);
   const [search, setSearch] = useState("");
@@ -857,7 +881,7 @@ function HomeContent() {
       .catch(() => {});
     fetch("/api/credits/balance")
       .then((r) => r.json())
-      .then((d) => setCreditBalance(d.balance ?? 0))
+      .then((d) => { setPlanCredits(d.plan_credits ?? 0); setBoughtCredits(d.bought_credits ?? 0); })
       .catch(() => {});
     fetch("/api/org/credits")
       .then((r) => r.json())
@@ -925,7 +949,8 @@ function HomeContent() {
         conversations={conversations}
         selectedId={selected?.clone_id ?? null}
         onSelect={setSelected}
-        creditBalance={creditBalance}
+        planCredits={planCredits}
+        boughtCredits={boughtCredits}
         orgCreditBalance={orgCreditBalance}
         orgClones={orgClones}
         onSelectOrgClone={handleSelectOrgClone}

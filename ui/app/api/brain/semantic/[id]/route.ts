@@ -8,10 +8,9 @@ export async function PATCH(
 ) {
   const { userId } = await auth();
   if (!userId) return Response.json({ error: "Unauthorized" }, { status: 401 });
-
   const { id } = await params;
   const body = await req.json();
-  const res = await backendFetch(`/brain/memories/${id}`, {
+  const res = await backendFetch(`/brain/semantic/${id}`, {
     method: "PATCH",
     body: JSON.stringify(body),
   });
@@ -25,11 +24,10 @@ export async function DELETE(
 ) {
   const { userId } = await auth();
   if (!userId) return Response.json({ error: "Unauthorized" }, { status: 401 });
-
   const { id } = await params;
   const { searchParams } = new URL(req.url);
   const cloneId = searchParams.get("clone_id");
-  const res = await backendFetch(`/brain/memories/${id}?clone_id=${cloneId}`, { method: "DELETE" });
+  const res = await backendFetch(`/brain/semantic/${id}?clone_id=${cloneId}`, { method: "DELETE" });
   const data = await res.json();
   return Response.json(data, { status: res.status });
 }

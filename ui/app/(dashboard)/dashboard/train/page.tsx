@@ -19,6 +19,17 @@ import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 export default function TrainPage() {
   const { clone, isLoading } = useClone();
 
+  // Memory usage
+  const [memoryStats, setMemoryStats] = useState<{ memory_used: number; memory_limit: number } | null>(null);
+
+  useEffect(() => {
+    if (!clone) return;
+    fetch(`/api/brain/stats?clone_id=${clone.clone_id}`)
+      .then((r) => r.json())
+      .then((d) => setMemoryStats({ memory_used: d.memory_used ?? d.episodic ?? 0, memory_limit: d.memory_limit ?? 500 }))
+      .catch(() => {});
+  }, [clone?.clone_id]);
+
   // Gmail
   const [gmailConnecting, setGmailConnecting] = useState(false);
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
@@ -34,10 +45,14 @@ export default function TrainPage() {
 
   // Connector status
   const [connectorStatus, setConnectorStatus] = useState<{
-    gmail: { connected: boolean };
-    github: { connected: boolean };
-    notion: { connected: boolean };
+    gmail: { connected: boolean; configured?: boolean };
+    github: { connected: boolean; configured?: boolean };
+    notion: { connected: boolean; configured?: boolean };
+    slack?: { configured?: boolean };
   } | null>(null);
+
+  // Connector errors
+  const [connectorError, setConnectorError] = useState<Record<string, string | null>>({});
 
   // Slack
   const [slackConnecting, setSlackConnecting] = useState(false);
@@ -48,7 +63,11 @@ export default function TrainPage() {
     getSlackStatus(clone.clone_id).then(setSlackStatus).catch(() => {});
     fetch(`/api/ingestion/status?clone_id=${clone.clone_id}`)
       .then((r) => r.json())
-      .then(setConnectorStatus)
+      .then((d) => {
+        setConnectorStatus(d);
+        // Propagate Slack configured state
+        if (d.slack) setSlackStatus((prev) => prev ? { ...prev, configured: d.slack.configured } : null);
+      })
       .catch(() => {});
   }, [clone?.clone_id]);
 
@@ -82,25 +101,33 @@ export default function TrainPage() {
     );
   }
 
+  function setErr(key: string, msg: string | null) {
+    setConnectorError((prev) => ({ ...prev, [key]: msg }));
+  }
+
   async function handleGmailConnect() {
     if (!clone) return;
     setGmailConnecting(true);
+    setErr("gmail", null);
     try {
       const url = await getGmailAuthUrl(clone.clone_id);
       window.location.href = url;
-    } catch {
+    } catch (e) {
       setGmailConnecting(false);
+      setErr("gmail", e instanceof Error ? e.message : "Failed to connect");
     }
   }
 
   async function handleGithubConnect() {
     if (!clone) return;
     setGithubConnecting(true);
+    setErr("github", null);
     try {
       const url = await getGithubAuthUrl(clone.clone_id);
       window.location.href = url;
-    } catch {
+    } catch (e) {
       setGithubConnecting(false);
+      setErr("github", e instanceof Error ? e.message : "Failed to connect");
     }
   }
 
@@ -115,11 +142,13 @@ export default function TrainPage() {
   async function handleNotionConnect() {
     if (!clone) return;
     setNotionConnecting(true);
+    setErr("notion", null);
     try {
       const url = await getNotionAuthUrl(clone.clone_id);
       window.location.href = url;
-    } catch {
+    } catch (e) {
       setNotionConnecting(false);
+      setErr("notion", e instanceof Error ? e.message : "Failed to connect");
     }
   }
 
@@ -232,6 +261,11 @@ export default function TrainPage() {
         </div>
       </div>
 
+      {/* Memory usage bar */}
+      {memoryStats && (
+        <MemoryUsageBar used={memoryStats.memory_used} limit={memoryStats.memory_limit} />
+      )}
+
       {/* Connector grid */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
 
@@ -249,13 +283,20 @@ export default function TrainPage() {
           ) : syncStarted ? (
             <IngestionJobBanner jobId={null} />
           ) : (
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {!connectorStatus?.gmail.connected ? (
-                <button onClick={handleGmailConnect} disabled={gmailConnecting} className="btn btn--primary btn--sm">
-                  {gmailConnecting ? "Redirecting…" : "Connect →"}
-                </button>
-              ) : (
-                <button onClick={handleGmailSync} className="btn btn--sm">Sync now</button>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {connectorStatus && connectorStatus.gmail.configured === false ? (
+                  <button disabled className="btn btn--primary btn--sm" style={{ opacity: 0.3, cursor: "not-allowed" }}>Connect →</button>
+                ) : !connectorStatus?.gmail.connected ? (
+                  <button onClick={handleGmailConnect} disabled={gmailConnecting} className="btn btn--primary btn--sm">
+                    {gmailConnecting ? "Redirecting…" : "Connect →"}
+                  </button>
+                ) : (
+                  <button onClick={handleGmailSync} className="btn btn--sm">Sync now</button>
+                )}
+              </div>
+              {connectorError["gmail"] && (
+                <p style={{ fontSize: 11, color: "rgba(248,113,113,0.7)", margin: 0 }}>{connectorError["gmail"]}</p>
               )}
             </div>
           )}
@@ -269,16 +310,23 @@ export default function TrainPage() {
           description="Threads where you actually decide things."
           connected={slackStatus?.connected}
         >
-          {slackStatus?.connected ? (
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <span style={{ fontSize: 12, color: "rgba(255,255,255,0.40)" }}>{slackStatus.team_name ?? "Connected"}</span>
-              <button onClick={async () => { if (!clone) return; setSlackConnecting(true); try { window.location.href = await getSlackInstallUrl(clone.clone_id); } catch { setSlackConnecting(false); } }} disabled={slackConnecting} style={{ fontSize: 12, color: "rgba(255,255,255,0.25)", background: "none", border: "none", cursor: "pointer", padding: 0 }}>Reconnect</button>
-            </div>
-          ) : (
-            <button onClick={async () => { if (!clone) return; setSlackConnecting(true); try { window.location.href = await getSlackInstallUrl(clone.clone_id); } catch { setSlackConnecting(false); } }} disabled={slackConnecting} className="btn btn--primary btn--sm">
-              {slackConnecting ? "Redirecting…" : "Connect →"}
-            </button>
-          )}
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {connectorStatus && connectorStatus.slack?.configured === false ? (
+              <button disabled className="btn btn--primary btn--sm" style={{ opacity: 0.3, cursor: "not-allowed" }}>Connect →</button>
+            ) : slackStatus?.connected ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <span style={{ fontSize: 12, color: "rgba(255,255,255,0.40)" }}>{slackStatus.team_name ?? "Connected"}</span>
+                <button onClick={async () => { if (!clone) return; setSlackConnecting(true); setErr("slack", null); try { window.location.href = await getSlackInstallUrl(clone.clone_id); } catch (e) { setSlackConnecting(false); setErr("slack", e instanceof Error ? e.message : "Failed"); } }} disabled={slackConnecting} style={{ fontSize: 12, color: "rgba(255,255,255,0.25)", background: "none", border: "none", cursor: "pointer", padding: 0 }}>Reconnect</button>
+              </div>
+            ) : (
+              <button onClick={async () => { if (!clone) return; setSlackConnecting(true); setErr("slack", null); try { window.location.href = await getSlackInstallUrl(clone.clone_id); } catch (e) { setSlackConnecting(false); setErr("slack", e instanceof Error ? e.message : "Failed"); } }} disabled={slackConnecting} className="btn btn--primary btn--sm">
+                {slackConnecting ? "Redirecting…" : "Connect →"}
+              </button>
+            )}
+            {connectorError["slack"] && (
+              <p style={{ fontSize: 11, color: "rgba(248,113,113,0.7)", margin: 0 }}>{connectorError["slack"]}</p>
+            )}
+          </div>
         </SourceCard>
 
         {/* Notion */}
@@ -292,13 +340,20 @@ export default function TrainPage() {
           {notionJobId ? (
             <IngestionJobBanner jobId={notionJobId} onComplete={() => setNotionJobId(null)} />
           ) : (
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {!connectorStatus?.notion.connected ? (
-                <button onClick={handleNotionConnect} disabled={notionConnecting} className="btn btn--primary btn--sm">
-                  {notionConnecting ? "Redirecting…" : "Connect →"}
-                </button>
-              ) : (
-                <button onClick={handleNotionSync} className="btn btn--sm">Sync now</button>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {connectorStatus && connectorStatus.notion.configured === false ? (
+                  <button disabled className="btn btn--primary btn--sm" style={{ opacity: 0.3, cursor: "not-allowed" }}>Connect →</button>
+                ) : !connectorStatus?.notion.connected ? (
+                  <button onClick={handleNotionConnect} disabled={notionConnecting} className="btn btn--primary btn--sm">
+                    {notionConnecting ? "Redirecting…" : "Connect →"}
+                  </button>
+                ) : (
+                  <button onClick={handleNotionSync} className="btn btn--sm">Sync now</button>
+                )}
+              </div>
+              {connectorError["notion"] && (
+                <p style={{ fontSize: 11, color: "rgba(248,113,113,0.7)", margin: 0 }}>{connectorError["notion"]}</p>
               )}
             </div>
           )}
@@ -315,13 +370,20 @@ export default function TrainPage() {
           {githubJobId ? (
             <IngestionJobBanner jobId={githubJobId} onComplete={() => setGithubJobId(null)} />
           ) : (
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {!connectorStatus?.github.connected ? (
-                <button onClick={handleGithubConnect} disabled={githubConnecting} className="btn btn--primary btn--sm">
-                  {githubConnecting ? "Redirecting…" : "Connect →"}
-                </button>
-              ) : (
-                <button onClick={handleGithubSync} className="btn btn--sm">Sync now</button>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {connectorStatus && connectorStatus.github.configured === false ? (
+                  <button disabled className="btn btn--primary btn--sm" style={{ opacity: 0.3, cursor: "not-allowed" }}>Connect →</button>
+                ) : !connectorStatus?.github.connected ? (
+                  <button onClick={handleGithubConnect} disabled={githubConnecting} className="btn btn--primary btn--sm">
+                    {githubConnecting ? "Redirecting…" : "Connect →"}
+                  </button>
+                ) : (
+                  <button onClick={handleGithubSync} className="btn btn--sm">Sync now</button>
+                )}
+              </div>
+              {connectorError["github"] && (
+                <p style={{ fontSize: 11, color: "rgba(248,113,113,0.7)", margin: 0 }}>{connectorError["github"]}</p>
               )}
             </div>
           )}
@@ -391,6 +453,9 @@ export default function TrainPage() {
           </div>
         </SourceCard>
 
+        {/* Voice */}
+        <VoiceTrainPanel cloneId={clone.clone_id} />
+
         {/* YouTube / Podcast — stub */}
         <SourceCard
           icon={<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><rect x="2" y="5" width="16" height="11" rx="2.5" stroke="currentColor" strokeWidth="1.4"/><path d="M8.5 8.5l4 2-4 2V8.5z" fill="currentColor" opacity="0.7"/></svg>}
@@ -439,6 +504,354 @@ export default function TrainPage() {
       {/* Full-width: Memory Inspector */}
       <MemoryInspector cloneId={clone.clone_id} />
 
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Voice training panel (Web Speech API — no extra API keys)
+// ---------------------------------------------------------------------------
+
+type SpeechRecognitionEvent = {
+  results: { [i: number]: { [j: number]: { transcript: string }; isFinal: boolean } };
+  resultIndex: number;
+};
+type SpeechRecognitionErrorEvent = { error: string };
+
+declare global {
+  interface Window {
+    SpeechRecognition?: new () => SpeechRecognitionInstance;
+    webkitSpeechRecognition?: new () => SpeechRecognitionInstance;
+  }
+}
+
+interface SpeechRecognitionInstance {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  start(): void;
+  stop(): void;
+  onresult: ((e: SpeechRecognitionEvent) => void) | null;
+  onerror: ((e: SpeechRecognitionErrorEvent) => void) | null;
+  onend: (() => void) | null;
+}
+
+function chunkTranscript(text: string): string[] {
+  // Split on sentence boundaries; group into ~250-word chunks
+  const sentences = text.match(/[^.!?]+[.!?]+/g) ?? [text];
+  const chunks: string[] = [];
+  let current = "";
+  for (const s of sentences) {
+    const joined = (current + " " + s).trim();
+    if (joined.split(/\s+/).length > 250 && current) {
+      chunks.push(current.trim());
+      current = s;
+    } else {
+      current = joined;
+    }
+  }
+  if (current.trim()) chunks.push(current.trim());
+  return chunks.filter((c) => c.split(/\s+/).length >= 5);
+}
+
+function VoiceTrainPanel({ cloneId }: { cloneId: string }) {
+  const [open, setOpen] = useState(false);
+  const [recording, setRecording] = useState(false);
+  const [interim, setInterim] = useState("");
+  const [transcript, setTranscript] = useState("");
+  const [ingesting, setIngesting] = useState(false);
+  const [result, setResult] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
+  const finalRef = useRef("");
+
+  const supported = typeof window !== "undefined" && !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+
+  function startRecording() {
+    if (!supported) return;
+    setError(null);
+    setResult(null);
+    setTranscript("");
+    setInterim("");
+    finalRef.current = "";
+
+    const SR = window.SpeechRecognition ?? window.webkitSpeechRecognition!;
+    const rec = new SR();
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.lang = "en-US";
+
+    rec.onresult = (e: SpeechRecognitionEvent) => {
+      let interimText = "";
+      for (let i = e.resultIndex; i < Object.keys(e.results).length; i++) {
+        const res = e.results[i];
+        if (res.isFinal) {
+          finalRef.current += res[0].transcript + " ";
+          setTranscript(finalRef.current);
+        } else {
+          interimText += res[0].transcript;
+        }
+      }
+      setInterim(interimText);
+    };
+
+    rec.onerror = (e: SpeechRecognitionErrorEvent) => {
+      if (e.error !== "no-speech") setError(`Mic error: ${e.error}`);
+    };
+
+    rec.onend = () => {
+      setRecording(false);
+      setInterim("");
+    };
+
+    recognitionRef.current = rec;
+    rec.start();
+    setRecording(true);
+  }
+
+  function stopRecording() {
+    recognitionRef.current?.stop();
+    setRecording(false);
+  }
+
+  async function handleIngest() {
+    const text = finalRef.current.trim();
+    if (!text) return;
+    const chunks = chunkTranscript(text);
+    if (chunks.length === 0) { setError("Too short — speak at least a few sentences."); return; }
+    setIngesting(true);
+    setError(null);
+    try {
+      let total = 0;
+      for (const chunk of chunks) {
+        const res = await fetch("/api/ingestion/text", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ clone_id: cloneId, text: chunk, source: "voice" }),
+        });
+        const d = await res.json();
+        total += d.chunks_stored ?? 0;
+      }
+      setResult(`${total} chunk${total !== 1 ? "s" : ""} stored`);
+      setTranscript("");
+      finalRef.current = "";
+    } catch {
+      setError("Ingestion failed");
+    } finally {
+      setIngesting(false);
+    }
+  }
+
+  function handleClear() {
+    setTranscript("");
+    setInterim("");
+    setResult(null);
+    setError(null);
+    finalRef.current = "";
+  }
+
+  const wordCount = (transcript + " " + interim).trim().split(/\s+/).filter(Boolean).length;
+
+  return (
+    <>
+      {/* Inline card in the grid — clicking opens the panel */}
+      <div
+        style={{
+          gridColumn: "span 1",
+          padding: "18px 20px", borderRadius: 16, cursor: "pointer",
+          background: open ? "rgba(255,255,255,0.05)" : "rgba(255,255,255,0.02)",
+          border: open ? "1px solid rgba(255,255,255,0.14)" : "1px solid rgba(255,255,255,0.07)",
+          display: "flex", flexDirection: "column", gap: 10,
+          transition: "all 200ms",
+        }}
+        onClick={() => !open && setOpen(true)}
+      >
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span style={{
+              width: 34, height: 34, borderRadius: 10, flexShrink: 0,
+              background: recording ? "rgba(239,68,68,0.12)" : "rgba(255,255,255,0.05)",
+              border: `1px solid ${recording ? "rgba(239,68,68,0.30)" : "rgba(255,255,255,0.10)"}`,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              color: recording ? "rgba(239,68,68,0.80)" : "rgba(255,255,255,0.50)",
+              transition: "all 300ms",
+            }}>
+              {recording ? (
+                <span style={{ width: 8, height: 8, borderRadius: 2, background: "rgba(239,68,68,0.85)", animation: "voice-pulse 1s ease-in-out infinite" }} />
+              ) : (
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                  <rect x="4.5" y="1" width="5" height="8" rx="2.5" stroke="currentColor" strokeWidth="1.3"/>
+                  <path d="M2 7a5 5 0 0010 0" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+                  <path d="M7 12v2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+                </svg>
+              )}
+            </span>
+            <div>
+              <p style={{ fontSize: 13, fontWeight: 500, color: "rgba(255,255,255,0.75)", margin: 0 }}>Voice</p>
+              <p style={{ fontSize: 11, color: "rgba(255,255,255,0.30)", margin: "2px 0 0" }}>
+                {recording ? "Recording…" : "Speak to train"}
+              </p>
+            </div>
+          </div>
+          {open && (
+            <button onClick={(e) => { e.stopPropagation(); stopRecording(); setOpen(false); }}
+              style={{ width: 24, height: 24, borderRadius: 6, border: "1px solid rgba(255,255,255,0.09)", background: "rgba(255,255,255,0.05)", color: "rgba(255,255,255,0.35)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, lineHeight: 1 }}>
+              ×
+            </button>
+          )}
+        </div>
+
+        {open && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }} onClick={(e) => e.stopPropagation()}>
+            {!supported && (
+              <p style={{ fontSize: 12, color: "rgba(248,113,113,0.70)", margin: 0 }}>
+                Voice input not supported in this browser. Try Chrome or Edge.
+              </p>
+            )}
+
+            {/* Live transcript */}
+            {(transcript || interim || recording) && (
+              <div style={{
+                minHeight: 80, maxHeight: 200, overflowY: "auto",
+                padding: "10px 12px", borderRadius: 10,
+                background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)",
+                fontSize: 13, color: "rgba(255,255,255,0.65)", lineHeight: 1.6,
+              }}>
+                {transcript}
+                {interim && <span style={{ color: "rgba(255,255,255,0.30)" }}>{interim}</span>}
+                {recording && !transcript && !interim && (
+                  <span style={{ color: "rgba(255,255,255,0.25)" }}>Listening…</span>
+                )}
+              </div>
+            )}
+
+            {wordCount > 0 && (
+              <p style={{ fontSize: 11, color: "rgba(255,255,255,0.28)", margin: 0 }}>
+                {wordCount} words · {chunkTranscript(transcript).length} chunk{chunkTranscript(transcript).length !== 1 ? "s" : ""} estimated
+              </p>
+            )}
+
+            {/* Controls */}
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              {!recording ? (
+                <button
+                  onClick={startRecording}
+                  disabled={!supported}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 6,
+                    padding: "7px 14px", borderRadius: 9, fontSize: 12, fontWeight: 500,
+                    background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.14)",
+                    color: "rgba(255,255,255,0.75)", cursor: "pointer", fontFamily: "inherit",
+                    opacity: !supported ? 0.4 : 1,
+                  }}
+                >
+                  <svg width="11" height="11" viewBox="0 0 14 14" fill="none">
+                    <rect x="4.5" y="1" width="5" height="8" rx="2.5" stroke="currentColor" strokeWidth="1.3"/>
+                    <path d="M2 7a5 5 0 0010 0" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+                    <path d="M7 12v2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+                  </svg>
+                  Start recording
+                </button>
+              ) : (
+                <button
+                  onClick={stopRecording}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 6,
+                    padding: "7px 14px", borderRadius: 9, fontSize: 12, fontWeight: 500,
+                    background: "rgba(239,68,68,0.10)", border: "1px solid rgba(239,68,68,0.28)",
+                    color: "rgba(239,68,68,0.80)", cursor: "pointer", fontFamily: "inherit",
+                    animation: "voice-pulse 1.5s ease-in-out infinite",
+                  }}
+                >
+                  <span style={{ width: 8, height: 8, borderRadius: 2, background: "currentColor" }} />
+                  Stop
+                </button>
+              )}
+              {transcript && !recording && (
+                <button
+                  onClick={handleIngest}
+                  disabled={ingesting}
+                  style={{
+                    padding: "7px 14px", borderRadius: 9, fontSize: 12, fontWeight: 500,
+                    background: ingesting ? "rgba(255,255,255,0.04)" : "rgba(26,115,232,0.18)",
+                    border: `1px solid ${ingesting ? "rgba(255,255,255,0.08)" : "rgba(26,115,232,0.35)"}`,
+                    color: ingesting ? "rgba(255,255,255,0.30)" : "rgba(107,174,255,0.85)",
+                    cursor: ingesting ? "default" : "pointer", fontFamily: "inherit",
+                  }}
+                >
+                  {ingesting ? "Ingesting…" : "Train from this"}
+                </button>
+              )}
+              {transcript && !recording && (
+                <button onClick={handleClear}
+                  style={{ fontSize: 11, color: "rgba(255,255,255,0.25)", background: "none", border: "none", cursor: "pointer", padding: 0 }}>
+                  Clear
+                </button>
+              )}
+            </div>
+
+            {result && (
+              <p style={{ fontSize: 12, color: "rgba(52,211,153,0.70)", margin: 0 }}>{result} — transcript ingested</p>
+            )}
+            {error && (
+              <p style={{ fontSize: 12, color: "rgba(248,113,113,0.70)", margin: 0 }}>{error}</p>
+            )}
+          </div>
+        )}
+      </div>
+
+      <style>{`
+        @keyframes voice-pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.5; }
+        }
+      `}</style>
+    </>
+  );
+}
+
+function MemoryUsageBar({ used, limit }: { used: number; limit: number }) {
+  const pct = Math.min((used / limit) * 100, 100);
+  const isNear = pct >= 80;
+  const isAt = pct >= 100;
+  const barColor = isAt ? "rgba(248,113,113,0.70)" : isNear ? "rgba(251,191,36,0.70)" : "rgba(52,211,153,0.60)";
+
+  return (
+    <div style={{
+      padding: "14px 18px", borderRadius: 14,
+      background: isAt ? "rgba(248,113,113,0.05)" : "rgba(255,255,255,0.02)",
+      border: `1px solid ${isAt ? "rgba(248,113,113,0.15)" : isNear ? "rgba(251,191,36,0.12)" : "rgba(255,255,255,0.07)"}`,
+    }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+        <p style={{ fontSize: 12, fontWeight: 500, color: "rgba(255,255,255,0.55)", margin: 0 }}>Memory usage</p>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <span style={{ fontSize: 12, color: "rgba(255,255,255,0.35)" }}>
+            <span style={{ color: "rgba(255,255,255,0.70)", fontWeight: 500 }}>{used.toLocaleString()}</span>
+            {" / "}{limit.toLocaleString()} chunks
+          </span>
+          {isAt && (
+            <a href="/dashboard/billing" style={{
+              fontSize: 11, fontWeight: 500, padding: "3px 10px", borderRadius: 8,
+              background: "rgba(248,113,113,0.12)", border: "1px solid rgba(248,113,113,0.25)",
+              color: "rgba(248,113,113,0.80)", textDecoration: "none",
+            }}>
+              Upgrade plan
+            </a>
+          )}
+          {isNear && !isAt && (
+            <a href="/dashboard/billing" style={{
+              fontSize: 11, fontWeight: 500, padding: "3px 10px", borderRadius: 8,
+              background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.20)",
+              color: "rgba(251,191,36,0.70)", textDecoration: "none",
+            }}>
+              Upgrade plan
+            </a>
+          )}
+        </div>
+      </div>
+      <div style={{ height: 4, borderRadius: 999, background: "rgba(255,255,255,0.06)", overflow: "hidden" }}>
+        <div style={{ height: "100%", width: `${pct}%`, borderRadius: 999, background: barColor, transition: "width 600ms ease" }} />
+      </div>
     </div>
   );
 }

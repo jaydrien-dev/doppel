@@ -184,6 +184,30 @@ TIER_MONTHLY_LIMITS: dict[str, int] = {
     "enterprise_max": 5000,
 }
 
+# Maximum episodic memory chunks per clone per tier
+TIER_MEMORY_LIMITS: dict[str, int] = {
+    "free": 500,
+    "personal": 5_000,
+    "enterprise_pro": 30_000,
+    "enterprise_max": 200_000,
+}
+
+# Weekly plan credits per tier — resets every Monday, unused do NOT roll over
+TIER_WEEKLY_CREDITS: dict[str, int] = {
+    "free": 0,
+    "personal": 100,
+    "enterprise_pro": 500,
+    "enterprise_max": 2_000,
+}
+
+# Tier rank for comparing (higher = better)
+_TIER_RANK: dict[str, int] = {
+    "free": 0,
+    "personal": 1,
+    "enterprise_pro": 2,
+    "enterprise_max": 3,
+}
+
 # Creator revenue share by billing tier
 REV_SHARE: dict[str, float] = {
     "free": 0.70,
@@ -238,6 +262,122 @@ async def _check_rate_limit(clone_id: UUID, session: AsyncSession) -> None:
                 detail=f"Daily query limit of {daily_limit} reached for this clone. Try again tomorrow.",
                 headers={"Retry-After": "86400"},
             )
+
+
+async def _check_memory_limit(clone_id: UUID, chunks_to_add: int, session: AsyncSession) -> None:
+    """Raise HTTP 402 if adding chunks_to_add would exceed this clone's tier memory limit."""
+    tier_row = await session.execute(
+        sql_text("SELECT subscription_tier FROM clone_identity WHERE clone_id = :id"),
+        {"id": str(clone_id)},
+    )
+    tier = (tier_row.mappings().first() or {}).get("subscription_tier") or "free"
+    limit = TIER_MEMORY_LIMITS.get(tier, TIER_MEMORY_LIMITS["free"])
+
+    count_row = await session.execute(
+        sql_text("SELECT COUNT(*) FROM episodic_memory WHERE clone_id = :id AND is_excluded = FALSE"),
+        {"id": str(clone_id)},
+    )
+    current = count_row.scalar() or 0
+
+    if current + chunks_to_add > limit:
+        raise HTTPException(
+            status_code=402,
+            detail=f"Memory limit reached ({current}/{limit} chunks on the {tier} plan). Upgrade your plan to store more.",
+        )
+
+
+async def _get_user_tier(user_id: str, session: AsyncSession) -> str:
+    """Return the highest subscription_tier among all clones owned by this user."""
+    row = await session.execute(
+        sql_text("SELECT subscription_tier FROM clone_identity WHERE user_id = :uid"),
+        {"uid": user_id},
+    )
+    tiers = [r["subscription_tier"] or "free" for r in row.mappings()]
+    if not tiers:
+        return "free"
+    return max(tiers, key=lambda t: _TIER_RANK.get(t, 0))
+
+
+async def _refresh_plan_credits(user_id: str, session: AsyncSession) -> int:
+    """
+    Lazily refresh plan_credits for user if the week has rolled over.
+    Returns current plan credit balance.
+    Weekly credits are non-cumulative — unused credits are discarded on rollover.
+    """
+    tier = await _get_user_tier(user_id, session)
+    weekly = TIER_WEEKLY_CREDITS.get(tier, 0)
+
+    row = await session.execute(
+        sql_text("SELECT credits, week_start FROM plan_credits WHERE user_id = :uid"),
+        {"uid": user_id},
+    )
+    rec = row.mappings().first()
+
+    current_week = (await session.execute(
+        sql_text("SELECT date_trunc('week', NOW()) AS w"),
+    )).scalar()
+
+    if rec is None:
+        # First time — create row with this week's allowance
+        await session.execute(
+            sql_text("""
+                INSERT INTO plan_credits (user_id, credits, week_start, updated_at)
+                VALUES (:uid, :credits, :week, NOW())
+                ON CONFLICT (user_id) DO NOTHING
+            """),
+            {"uid": user_id, "credits": weekly, "week": current_week},
+        )
+        return weekly
+    elif rec["week_start"] < current_week:
+        # New week — reset (do NOT carry over unused credits)
+        await session.execute(
+            sql_text("""
+                UPDATE plan_credits
+                SET credits = :credits, week_start = :week, updated_at = NOW()
+                WHERE user_id = :uid
+            """),
+            {"uid": user_id, "credits": weekly, "week": current_week},
+        )
+        return weekly
+    else:
+        return int(rec["credits"])
+
+
+async def _deduct_personal_credits(user_id: str, cost: int, session: AsyncSession) -> None:
+    """
+    Deduct `cost` credits from the caller's personal balance.
+    Plan (weekly) credits are consumed first; bought credits are used for the remainder.
+    Raises HTTP 402 if combined balance is insufficient.
+    """
+    plan_bal = await _refresh_plan_credits(user_id, session)
+
+    bought_row = await session.execute(
+        sql_text("SELECT credits_remaining FROM query_credits WHERE user_id = :uid"),
+        {"uid": user_id},
+    )
+    bought_bal = int((bought_row.mappings().first() or {}).get("credits_remaining") or 0)
+
+    total = plan_bal + bought_bal
+    if total < cost:
+        raise HTTPException(
+            status_code=402,
+            detail=f"Insufficient credits (need {cost}, have {total})",
+        )
+
+    # Drain plan credits first
+    plan_used = min(plan_bal, cost)
+    bought_used = cost - plan_used
+
+    if plan_used > 0:
+        await session.execute(
+            sql_text("UPDATE plan_credits SET credits = credits - :used, updated_at = NOW() WHERE user_id = :uid"),
+            {"used": plan_used, "uid": user_id},
+        )
+    if bought_used > 0:
+        await session.execute(
+            sql_text("UPDATE query_credits SET credits_remaining = credits_remaining - :used, updated_at = NOW() WHERE user_id = :uid"),
+            {"used": bought_used, "uid": user_id},
+        )
 
 
 async def _check_clone_access(
@@ -1567,12 +1707,28 @@ async def get_credits_balance(
     user_id = request.headers.get("X-User-Id")
     if not user_id:
         raise HTTPException(status_code=401, detail="Authentication required")
-    row = await session.execute(
+
+    bought_row = await session.execute(
         sql_text("SELECT credits_remaining FROM query_credits WHERE user_id = :uid"),
         {"uid": user_id},
     )
-    record = row.mappings().first()
-    return {"credits_remaining": record["credits_remaining"] if record else 0}
+    bought = int((bought_row.mappings().first() or {}).get("credits_remaining") or 0)
+
+    plan = await _refresh_plan_credits(user_id, session)
+    await session.commit()
+
+    tier = await _get_user_tier(user_id, session)
+    weekly_allowance = TIER_WEEKLY_CREDITS.get(tier, 0)
+
+    return {
+        "plan_credits": plan,
+        "bought_credits": bought,
+        "weekly_allowance": weekly_allowance,
+        "total": plan + bought,
+        # backwards-compat alias
+        "credits_remaining": plan + bought,
+        "balance": plan + bought,
+    }
 
 
 @app.get("/credits/packs")
@@ -2034,17 +2190,7 @@ async def chat_stream(
                 {"cost": credits_cost, "oid": org_id_s},
             )
         else:
-            bal_row = await session.execute(
-                sql_text("SELECT credits_remaining FROM query_credits WHERE user_id = :uid"),
-                {"uid": caller_user_id},
-            )
-            bal_rec = bal_row.mappings().first()
-            if not bal_rec or bal_rec["credits_remaining"] < credits_cost:
-                raise HTTPException(status_code=402, detail=f"Insufficient credits (need {credits_cost})")
-            await session.execute(
-                sql_text("UPDATE query_credits SET credits_remaining = credits_remaining - :cost, updated_at = NOW() WHERE user_id = :uid"),
-                {"cost": credits_cost, "uid": caller_user_id},
-            )
+            await _deduct_personal_credits(caller_user_id, credits_cost, session)
         await session.execute(
             sql_text("INSERT INTO query_transactions (user_id, clone_id, credits_used, response_mode) VALUES (:uid, :cid, :cost, :mode)"),
             {"uid": caller_user_id, "cid": str(body.clone_id), "cost": credits_cost, "mode": body.response_mode},
@@ -2180,18 +2326,7 @@ async def chat(
                 {"cost": credits_cost, "oid": org_id},
             )
         else:
-            # Deduct from caller's individual credits
-            bal_row = await session.execute(
-                sql_text("SELECT credits_remaining FROM query_credits WHERE user_id = :uid"),
-                {"uid": caller_user_id},
-            )
-            bal_rec = bal_row.mappings().first()
-            if not bal_rec or bal_rec["credits_remaining"] < credits_cost:
-                raise HTTPException(status_code=402, detail=f"Insufficient credits (need {credits_cost})")
-            await session.execute(
-                sql_text("UPDATE query_credits SET credits_remaining = credits_remaining - :cost, updated_at = NOW() WHERE user_id = :uid"),
-                {"cost": credits_cost, "uid": caller_user_id},
-            )
+            await _deduct_personal_credits(caller_user_id, credits_cost, session)
         # Record transaction
         await session.execute(
             sql_text("INSERT INTO query_transactions (user_id, clone_id, credits_used, response_mode) VALUES (:uid, :cid, :cost, :mode)"),
@@ -3938,6 +4073,7 @@ async def ingest(
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     """Add a single content chunk to episodic memory."""
+    await _check_memory_limit(body.clone_id, 1, session)
     chunk_id = await episodic_store.store_chunk(
         session=session,
         clone_id=body.clone_id,
@@ -3975,7 +4111,25 @@ def _price_to_tier() -> dict[str, str]:
 
 class CheckoutRequest(BaseModel):
     user_id: str
-    price_id: str
+    tier: str           # personal | enterprise_pro | enterprise_max
+    period: str         # monthly | yearly
+    price_id: str = ""  # legacy — ignored if tier+period provided
+
+
+_TIER_PERIOD_TO_PRICE: dict[tuple[str, str], str] = {}
+
+
+def _resolve_price_id(tier: str, period: str) -> str:
+    """Look up Stripe price ID from settings for a given tier+period combo."""
+    mapping = {
+        ("personal", "monthly"):       settings.stripe_personal_monthly_price_id,
+        ("personal", "yearly"):        settings.stripe_personal_yearly_price_id,
+        ("enterprise_pro", "monthly"): settings.stripe_ent_pro_monthly_price_id,
+        ("enterprise_pro", "yearly"):  settings.stripe_ent_pro_yearly_price_id,
+        ("enterprise_max", "monthly"): settings.stripe_ent_max_monthly_price_id,
+        ("enterprise_max", "yearly"):  settings.stripe_ent_max_yearly_price_id,
+    }
+    return mapping.get((tier, period), "")
 
 
 @app.post("/billing/checkout-session")
@@ -3987,13 +4141,20 @@ async def create_checkout_session(
     import stripe as stripe_lib
 
     if not settings.stripe_secret_key:
-        raise HTTPException(status_code=503, detail="Stripe not configured")
+        raise HTTPException(status_code=503, detail="Stripe not configured — set STRIPE_SECRET_KEY in .env")
 
     stripe_lib.api_key = settings.stripe_secret_key
 
-    # Validate price_id belongs to a known plan
-    if body.price_id not in _price_to_tier():
-        raise HTTPException(status_code=422, detail="Unknown price_id")
+    # Resolve price ID server-side from tier+period (preferred) or legacy price_id field
+    price_id = _resolve_price_id(body.tier, body.period) if body.tier else body.price_id
+    if not price_id:
+        raise HTTPException(
+            status_code=422,
+            detail=f"No Stripe price configured for {body.tier}/{body.period}. "
+                   "Add STRIPE_{TIER}_{PERIOD}_PRICE_ID to your .env file.",
+        )
+    if price_id not in _price_to_tier():
+        raise HTTPException(status_code=422, detail="Price ID not recognised — check Stripe dashboard")
 
     # Fetch clone to get / create Stripe customer
     row = await session.execute(
@@ -4023,7 +4184,7 @@ async def create_checkout_session(
 
     checkout = stripe_lib.checkout.Session.create(
         customer=customer_id,
-        line_items=[{"price": body.price_id, "quantity": 1}],
+        line_items=[{"price": price_id, "quantity": 1}],
         mode="subscription",
         success_url=f"{settings.app_url}/dashboard/billing?success=1",
         cancel_url=f"{settings.app_url}/dashboard/billing?canceled=1",
@@ -4935,6 +5096,7 @@ async def ingest_text(
     chunks = chunk_text(body.text, max_chars=settings.ingestion_chunk_max_chars)
     if not chunks:
         raise HTTPException(status_code=400, detail="Text too short or empty after processing.")
+    await _check_memory_limit(body.clone_id, len(chunks), session)
 
     chunks = [redact_pii(c) for c in chunks]
     embeddings = await embed_batch(chunks)
@@ -5066,6 +5228,7 @@ async def ingest_file(
     await load_clone_keys(session, clone_uuid)
 
     chunks = chunk_text(text, max_chars=settings.ingestion_chunk_max_chars)
+    await _check_memory_limit(clone_uuid, len(chunks), session)
     chunks = [redact_pii(c) for c in chunks]
     embeddings = await embed_batch(chunks)
     formality = estimate_formality(text)
@@ -5386,6 +5549,13 @@ async def get_brain_stats(
 
     total = sum(int(row.get(k) or 0) for k in ("episodic", "semantic", "procedural", "relational"))
 
+    tier_row = await session.execute(
+        sql_text("SELECT subscription_tier FROM clone_identity WHERE clone_id = :cid"),
+        {"cid": str(clone_id)},
+    )
+    tier = (tier_row.mappings().first() or {}).get("subscription_tier") or "free"
+    memory_limit = TIER_MEMORY_LIMITS.get(tier, TIER_MEMORY_LIMITS["free"])
+
     return {
         "total": total,
         "episodic": int(row.get("episodic") or 0),
@@ -5393,6 +5563,8 @@ async def get_brain_stats(
         "procedural": int(row.get("procedural") or 0),
         "relational": int(row.get("relational") or 0),
         "sources": sources,
+        "memory_limit": memory_limit,
+        "memory_used": int(row.get("episodic") or 0),
     }
 
 
@@ -5529,6 +5701,7 @@ class MemoryUpdateRequest(BaseModel):
     clone_id: UUID
     is_pinned: bool | None = None
     is_excluded: bool | None = None
+    content: str | None = None
 
 
 @app.patch("/brain/memories/{memory_id}", status_code=200)
@@ -5546,9 +5719,13 @@ async def update_memory(
     if body.is_excluded is not None:
         parts.append("is_excluded = :is_excluded")
         params["is_excluded"] = body.is_excluded
+    if body.content is not None:
+        # Replace content and clear embedding so it's re-computed on next retrieval
+        parts.append("content = :content, embedding = NULL")
+        params["content"] = body.content
 
     if not parts:
-        raise HTTPException(status_code=422, detail="Provide is_pinned or is_excluded")
+        raise HTTPException(status_code=422, detail="Provide is_pinned, is_excluded, or content")
 
     result = await session.execute(
         sql_text(
@@ -5561,6 +5738,299 @@ async def update_memory(
         raise HTTPException(status_code=404, detail="Memory not found")
     await session.commit()
     return {"status": "updated"}
+
+
+@app.delete("/brain/memories/{memory_id}", status_code=200)
+async def delete_memory(
+    memory_id: UUID,
+    clone_id: UUID = Query(...),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Hard-delete a single episodic memory chunk."""
+    result = await session.execute(
+        sql_text("DELETE FROM episodic_memory WHERE id = :mid AND clone_id = :cid"),
+        {"mid": str(memory_id), "cid": str(clone_id)},
+    )
+    if result.rowcount == 0:
+        raise HTTPException(status_code=404, detail="Memory not found")
+    await session.commit()
+    return {"status": "deleted"}
+
+
+# ---------------------------------------------------------------------------
+# Brain — semantic memory CRUD
+# ---------------------------------------------------------------------------
+
+@app.get("/brain/semantic")
+async def list_semantic(
+    clone_id: UUID = Query(...),
+    search: str | None = Query(default=None),
+    limit: int = Query(default=50, le=200),
+    offset: int = Query(default=0, ge=0),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """List semantic memory facts for a clone."""
+    params: dict = {"cid": str(clone_id), "limit": limit, "offset": offset}
+    where_parts = ["clone_id = :cid"]
+    if search:
+        where_parts.append("fact ILIKE :search")
+        params["search"] = f"%{search}%"
+    where = " AND ".join(where_parts)
+
+    rows = await session.execute(
+        sql_text(f"""
+            SELECT id, fact, domain, confidence, created_at, updated_at
+            FROM semantic_memory
+            WHERE {where}
+            ORDER BY confidence DESC, updated_at DESC
+            LIMIT :limit OFFSET :offset
+        """),
+        params,
+    )
+    facts = [
+        {
+            "id": str(r["id"]),
+            "fact": r["fact"],
+            "domain": r["domain"],
+            "confidence": round(float(r["confidence"] or 0), 2),
+            "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+        }
+        for r in rows.mappings()
+    ]
+    total_row = await session.execute(
+        sql_text(f"SELECT COUNT(*) AS n FROM semantic_memory WHERE {where}"),
+        {k: v for k, v in params.items() if k not in ("limit", "offset")},
+    )
+    total = int((total_row.mappings().first() or {}).get("n") or 0)
+    return {"facts": facts, "total": total, "offset": offset, "limit": limit}
+
+
+class SemanticUpdateRequest(BaseModel):
+    clone_id: UUID
+    fact: str | None = None
+    domain: str | None = None
+    confidence: float | None = None
+
+
+@app.patch("/brain/semantic/{fact_id}", status_code=200)
+async def update_semantic(
+    fact_id: UUID,
+    body: SemanticUpdateRequest,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Replace content of a semantic fact (embedding is cleared — will be re-computed on next retrieval)."""
+    parts, params = [], {"fid": str(fact_id), "cid": str(body.clone_id)}
+    if body.fact is not None:
+        parts.append("fact = :fact, embedding = NULL, updated_at = NOW()")
+        params["fact"] = body.fact
+    if body.domain is not None:
+        parts.append("domain = :domain")
+        params["domain"] = body.domain
+    if body.confidence is not None:
+        parts.append("confidence = :confidence")
+        params["confidence"] = body.confidence
+    if not parts:
+        raise HTTPException(status_code=422, detail="Nothing to update")
+    result = await session.execute(
+        sql_text(f"UPDATE semantic_memory SET {', '.join(parts)} WHERE id = :fid AND clone_id = :cid"),
+        params,
+    )
+    if result.rowcount == 0:
+        raise HTTPException(status_code=404, detail="Fact not found")
+    await session.commit()
+    return {"status": "updated"}
+
+
+@app.delete("/brain/semantic/{fact_id}", status_code=200)
+async def delete_semantic(
+    fact_id: UUID,
+    clone_id: UUID = Query(...),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Hard-delete a semantic fact."""
+    result = await session.execute(
+        sql_text("DELETE FROM semantic_memory WHERE id = :fid AND clone_id = :cid"),
+        {"fid": str(fact_id), "cid": str(clone_id)},
+    )
+    if result.rowcount == 0:
+        raise HTTPException(status_code=404, detail="Fact not found")
+    await session.commit()
+    return {"status": "deleted"}
+
+
+# ---------------------------------------------------------------------------
+# Brain — activity report (who asked what, frequency, themes)
+# ---------------------------------------------------------------------------
+
+@app.get("/brain/activity-report")
+async def get_activity_report(
+    clone_id: UUID = Query(...),
+    days: int = Query(default=30, ge=1, le=365),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Return query analytics for a clone owner: volume over time, top questioners, top questions, themes."""
+    cid = str(clone_id)
+
+    # Daily query volume
+    volume_rows = await session.execute(
+        sql_text("""
+            SELECT DATE(created_at) AS day, COUNT(*) AS count
+            FROM reasoning_traces
+            WHERE clone_id = :cid
+              AND created_at >= NOW() - MAKE_INTERVAL(days => :days)
+            GROUP BY DATE(created_at)
+            ORDER BY day ASC
+        """),
+        {"cid": cid, "days": days},
+    )
+    queries_by_day = [
+        {"day": str(r["day"]), "count": int(r["count"])}
+        for r in volume_rows.mappings()
+    ]
+
+    # Summary totals
+    totals_row = await session.execute(
+        sql_text("""
+            SELECT COUNT(*)                                         AS total_queries,
+                   COUNT(DISTINCT brain_input->>'sender_id')        AS unique_questioners,
+                   COUNT(DISTINCT session_id)                       AS total_sessions,
+                   ROUND(AVG(latency_ms)::numeric, 0)               AS avg_latency_ms
+            FROM reasoning_traces
+            WHERE clone_id = :cid
+              AND created_at >= NOW() - MAKE_INTERVAL(days => :days)
+        """),
+        {"cid": cid, "days": days},
+    )
+    totals = dict(totals_row.mappings().first() or {})
+
+    # Top questioners (by message count)
+    questioner_rows = await session.execute(
+        sql_text("""
+            SELECT brain_input->>'sender_id'    AS sender_id,
+                   COUNT(*)                     AS query_count,
+                   MAX(created_at)              AS last_active
+            FROM reasoning_traces
+            WHERE clone_id = :cid
+              AND created_at >= NOW() - MAKE_INTERVAL(days => :days)
+              AND brain_input->>'sender_id' IS NOT NULL
+              AND brain_input->>'sender_id' != ''
+            GROUP BY brain_input->>'sender_id'
+            ORDER BY query_count DESC
+            LIMIT 15
+        """),
+        {"cid": cid, "days": days},
+    )
+    top_questioners = [
+        {
+            "sender_id": r["sender_id"],
+            "query_count": int(r["query_count"]),
+            "last_active": r["last_active"].isoformat() if r["last_active"] else None,
+        }
+        for r in questioner_rows.mappings()
+    ]
+
+    # Top questions (most-repeated exact messages)
+    question_rows = await session.execute(
+        sql_text("""
+            SELECT brain_input->>'message' AS message, COUNT(*) AS count
+            FROM reasoning_traces
+            WHERE clone_id = :cid
+              AND created_at >= NOW() - MAKE_INTERVAL(days => :days)
+              AND brain_input->>'message' IS NOT NULL
+            GROUP BY brain_input->>'message'
+            ORDER BY count DESC, MAX(created_at) DESC
+            LIMIT 25
+        """),
+        {"cid": cid, "days": days},
+    )
+    top_questions = [
+        {"message": r["message"], "count": int(r["count"])}
+        for r in question_rows.mappings()
+    ]
+
+    # Recurring themes — from episodic memory chunks sourced from chat
+    theme_rows = await session.execute(
+        sql_text("""
+            SELECT t AS theme, COUNT(*) AS count
+            FROM episodic_memory, unnest(topics) AS t
+            WHERE clone_id = :cid AND source = 'chat' AND is_excluded = false AND t != ''
+            GROUP BY t
+            ORDER BY count DESC
+            LIMIT 20
+        """),
+        {"cid": cid},
+    )
+    themes = [
+        {"theme": r["theme"], "count": int(r["count"])}
+        for r in theme_rows.mappings()
+    ]
+
+    return {
+        "period_days": days,
+        "total_queries": int(totals.get("total_queries") or 0),
+        "unique_questioners": int(totals.get("unique_questioners") or 0),
+        "total_sessions": int(totals.get("total_sessions") or 0),
+        "avg_latency_ms": int(totals.get("avg_latency_ms") or 0),
+        "queries_by_day": queries_by_day,
+        "top_questioners": top_questioners,
+        "top_questions": top_questions,
+        "themes": themes,
+    }
+
+
+@app.get("/brain/activity-report/export")
+async def export_activity_report(
+    clone_id: UUID = Query(...),
+    days: int = Query(default=30, ge=1, le=365),
+    session: AsyncSession = Depends(get_session),
+):
+    """Export raw query log as CSV."""
+    import csv, io
+    from fastapi.responses import StreamingResponse
+
+    rows = await session.execute(
+        sql_text("""
+            SELECT created_at,
+                   session_id,
+                   brain_input->>'sender_id'    AS sender_id,
+                   brain_input->>'message'      AS message,
+                   LEFT(response, 200)          AS response_preview,
+                   confidence,
+                   latency_ms,
+                   path,
+                   needs_escalation
+            FROM reasoning_traces
+            WHERE clone_id = :cid
+              AND created_at >= NOW() - MAKE_INTERVAL(days => :days)
+            ORDER BY created_at DESC
+            LIMIT 10000
+        """),
+        {"cid": str(clone_id), "days": days},
+    )
+    records = rows.mappings().all()
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["timestamp", "session_id", "sender_id", "message", "response_preview", "confidence", "latency_ms", "path", "needs_escalation"])
+    for r in records:
+        writer.writerow([
+            r["created_at"].isoformat() if r["created_at"] else "",
+            str(r["session_id"]) if r["session_id"] else "",
+            r["sender_id"] or "",
+            r["message"] or "",
+            (r["response_preview"] or "").replace("\n", " "),
+            round(float(r["confidence"] or 0), 3),
+            r["latency_ms"] or "",
+            r["path"] or "",
+            r["needs_escalation"],
+        ])
+
+    buf.seek(0)
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=activity-report-{days}d.csv"},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -6084,15 +6554,16 @@ async def create_org(
     body: CreateOrgRequest,
     session: AsyncSession = Depends(get_session),
 ) -> dict:
-    """Create a new org (team workspace)."""
+    """Create a new org (team workspace). Requires enterprise_pro or enterprise_max plan."""
 
-    row = await session.execute(
-        sql_text("SELECT clone_id FROM clone_identity WHERE user_id = :uid LIMIT 1"),
+    tier_row = await session.execute(
+        sql_text("SELECT subscription_tier, clone_id FROM clone_identity WHERE user_id = :uid LIMIT 1"),
         {"uid": body.user_id},
     )
-    record = row.mappings().first()
-    if not record:
-        raise HTTPException(status_code=404, detail="No clone found for this user")
+    record = tier_row.mappings().first()
+    tier = (record or {}).get("subscription_tier") or "free"
+    if tier not in ("enterprise_pro", "enterprise_max"):
+        raise HTTPException(status_code=403, detail="Creating an organisation requires an Enterprise plan.")
 
     try:
         row2 = await session.execute(
@@ -6104,13 +6575,14 @@ async def create_org(
             {"name": body.name, "slug": body.slug, "uid": body.user_id},
         )
         org = row2.mappings().first()
-        # Auto-add owner as admin member
+        # Auto-add owner as admin member (clone_id may be null if user has no clone yet)
+        clone_id = record.get("clone_id") if record else None
         await session.execute(
             sql_text("""
                 INSERT INTO org_memberships (org_id, user_id, clone_id, role)
                 VALUES (:oid, :uid, :cid, 'admin')
             """),
-            {"oid": str(org["id"]), "uid": body.user_id, "cid": str(record["clone_id"])},
+            {"oid": str(org["id"]), "uid": body.user_id, "cid": str(clone_id) if clone_id else None},
         )
         await session.commit()
     except Exception as e:
@@ -6819,6 +7291,182 @@ async def join_org(
     }
 
 
+class JoinByTokenRequest(BaseModel):
+    user_id: str
+    token: str
+
+
+@app.get("/org/join-token")
+async def get_org_join_token(
+    user_id: str = Query(...),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Return (or lazily create) the shareable join-link token for the caller's org. Admin only."""
+    # Resolve org + check admin
+    row = await session.execute(
+        sql_text("""
+            SELECT o.id AS org_id, m.role
+            FROM orgs o
+            JOIN org_memberships m ON m.org_id = o.id
+            WHERE m.user_id = :uid
+            LIMIT 1
+        """),
+        {"uid": user_id},
+    )
+    rec = row.mappings().first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Not in an org")
+    if rec["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin required")
+
+    org_id = str(rec["org_id"])
+
+    # Fetch existing token
+    tok_row = await session.execute(
+        sql_text("SELECT token, use_count FROM org_join_tokens WHERE org_id = :oid LIMIT 1"),
+        {"oid": org_id},
+    )
+    tok = tok_row.mappings().first()
+    if not tok:
+        # Create one
+        tok_row2 = await session.execute(
+            sql_text("""
+                INSERT INTO org_join_tokens (org_id, role, created_by)
+                VALUES (:oid, 'member', :uid)
+                RETURNING token, use_count
+            """),
+            {"oid": org_id, "uid": user_id},
+        )
+        tok = tok_row2.mappings().first()
+        await session.commit()
+
+    return {"token": tok["token"], "use_count": int(tok["use_count"])}
+
+
+@app.post("/org/join-token/reset")
+async def reset_org_join_token(
+    body: dict,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Revoke existing token and issue a new one. Admin only."""
+    uid = body.get("user_id", "")
+    row = await session.execute(
+        sql_text("""
+            SELECT o.id AS org_id, m.role
+            FROM orgs o JOIN org_memberships m ON m.org_id = o.id
+            WHERE m.user_id = :uid LIMIT 1
+        """),
+        {"uid": uid},
+    )
+    rec = row.mappings().first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Not in an org")
+    if rec["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin required")
+
+    org_id = str(rec["org_id"])
+    await session.execute(
+        sql_text("DELETE FROM org_join_tokens WHERE org_id = :oid"),
+        {"oid": org_id},
+    )
+    tok_row = await session.execute(
+        sql_text("""
+            INSERT INTO org_join_tokens (org_id, role, created_by)
+            VALUES (:oid, 'member', :uid)
+            RETURNING token
+        """),
+        {"oid": org_id, "uid": uid},
+    )
+    new_token = tok_row.mappings().first()["token"]
+    await session.commit()
+    return {"token": new_token}
+
+
+@app.get("/org/by-token/{token}")
+async def get_org_by_token(
+    token: str,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Public endpoint — look up org info by join token (for the /join/[token] landing page)."""
+    row = await session.execute(
+        sql_text("""
+            SELECT o.id, o.name, o.slug,
+                   t.use_count,
+                   (SELECT COUNT(*) FROM org_memberships WHERE org_id = o.id) AS member_count
+            FROM org_join_tokens t
+            JOIN orgs o ON o.id = t.org_id
+            WHERE t.token = :tok
+        """),
+        {"tok": token},
+    )
+    rec = row.mappings().first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Invalid or expired invite link")
+    return {
+        "org_id": str(rec["id"]),
+        "name": rec["name"],
+        "slug": rec["slug"],
+        "member_count": int(rec["member_count"]),
+    }
+
+
+@app.post("/org/join-by-token")
+async def join_org_by_token(
+    body: JoinByTokenRequest,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Join an org via a shareable token link."""
+    row = await session.execute(
+        sql_text("""
+            SELECT t.org_id, t.role, o.name, o.slug, o.owner_user_id
+            FROM org_join_tokens t
+            JOIN orgs o ON o.id = t.org_id
+            WHERE t.token = :tok
+        """),
+        {"tok": body.token},
+    )
+    rec = row.mappings().first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Invalid or expired invite link")
+
+    org_id = str(rec["org_id"])
+
+    # Already a member?
+    existing = await session.execute(
+        sql_text("SELECT 1 FROM org_memberships WHERE org_id = :oid AND user_id = :uid"),
+        {"oid": org_id, "uid": body.user_id},
+    )
+    if existing.first():
+        return {"status": "already_member", "org": {"id": org_id, "name": rec["name"], "slug": rec["slug"]}}
+
+    # Resolve clone_id (nullable)
+    clone_row = await session.execute(
+        sql_text("SELECT clone_id FROM clone_identity WHERE user_id = :uid LIMIT 1"),
+        {"uid": body.user_id},
+    )
+    clone_rec = clone_row.mappings().first()
+
+    await session.execute(
+        sql_text("""
+            INSERT INTO org_memberships (org_id, user_id, clone_id, role)
+            VALUES (:oid, :uid, :cid, :role)
+            ON CONFLICT (org_id, user_id) DO NOTHING
+        """),
+        {
+            "oid": org_id, "uid": body.user_id,
+            "cid": str(clone_rec["clone_id"]) if clone_rec else None,
+            "role": rec["role"],
+        },
+    )
+    await session.execute(
+        sql_text("UPDATE org_join_tokens SET use_count = use_count + 1 WHERE token = :tok"),
+        {"tok": body.token},
+    )
+    await session.commit()
+
+    return {"status": "joined", "org": {"id": org_id, "name": rec["name"], "slug": rec["slug"]}}
+
+
 class OrgSearchRequest(BaseModel):
     user_id: str
     query: str
@@ -7251,9 +7899,10 @@ async def ingestion_connector_status(
     for r in rows.mappings():
         connected[r["provider"]] = {"connected_at": r["created_at"].isoformat() if r["created_at"] else None}
     return {
-        "gmail": {"connected": "gmail" in connected, **connected.get("gmail", {})},
-        "github": {"connected": "github" in connected, **connected.get("github", {})},
-        "notion": {"connected": "notion" in connected, **connected.get("notion", {})},
+        "gmail": {"connected": "gmail" in connected, "configured": bool(settings.google_client_id), **connected.get("gmail", {})},
+        "github": {"connected": "github" in connected, "configured": bool(settings.github_client_id), **connected.get("github", {})},
+        "notion": {"connected": "notion" in connected, "configured": bool(settings.notion_client_id), **connected.get("notion", {})},
+        "slack": {"configured": bool(settings.slack_client_id)},
     }
 
 

@@ -59,7 +59,7 @@ export async function updateClone(
 
 export async function patchMemory(
   id: string,
-  updates: { clone_id: string; is_pinned?: boolean; is_excluded?: boolean }
+  updates: { clone_id: string; is_pinned?: boolean; is_excluded?: boolean; content?: string }
 ): Promise<{ status: string }> {
   return apiFetch(`/api/brain/memories/${id}`, {
     method: "PATCH",
