@@ -1825,6 +1825,8 @@ async def create_credits_checkout(
         payment_method_types=["card"],
         mode="payment",
         line_items=[line_item],
+        billing_address_collection="required",
+        invoice_creation={"enabled": True},
         metadata={"user_id": user_id, "credits": str(pack["credits"]), "pack_id": pack_id},
         success_url=f"{settings.app_url}/dashboard/credits?success=1",
         cancel_url=f"{settings.app_url}/dashboard/credits?cancelled=1",
@@ -3373,6 +3375,8 @@ async def bundle_checkout(
     session_obj = stripe_lib.checkout.Session.create(
         payment_method_types=["card"],
         mode="payment",
+        billing_address_collection="required",
+        invoice_creation={"enabled": True},
         line_items=[{
             "price_data": {
                 "currency": "usd",
@@ -3860,6 +3864,8 @@ async def consumer_bundle_checkout(
     session_obj = stripe_lib.checkout.Session.create(
         payment_method_types=["card"],
         mode="payment",
+        billing_address_collection="required",
+        invoice_creation={"enabled": True},
         line_items=[{
             "price_data": {
                 "currency": "usd",
@@ -4102,6 +4108,8 @@ async def create_checkout_session(
         customer=customer_id,
         line_items=[{"price": price_id, "quantity": 1}],
         mode="subscription",
+        billing_address_collection="required",
+        customer_update={"address": "auto"},
         success_url=f"{settings.app_url}/dashboard/billing?success=1",
         cancel_url=f"{settings.app_url}/dashboard/billing?canceled=1",
         metadata={"user_id": body.user_id, "tier": body.tier},
