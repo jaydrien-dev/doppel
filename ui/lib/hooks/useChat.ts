@@ -88,9 +88,15 @@ export function useChat({ cloneId, contextType = "chat", sessionId: initialSessi
           }),
         });
 
-        if (!res.ok || !res.body) {
-          throw new Error(`HTTP ${res.status}`);
+        if (!res.ok) {
+          let detail = `Request failed (${res.status})`;
+          try {
+            const errBody = await res.clone().json();
+            detail = errBody.detail ?? errBody.error ?? detail;
+          } catch { /* body wasn't JSON */ }
+          throw new Error(detail);
         }
+        if (!res.body) throw new Error("No response body");
 
         const reader = res.body.getReader();
         const decoder = new TextDecoder();

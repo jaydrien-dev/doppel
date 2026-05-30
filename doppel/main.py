@@ -4104,7 +4104,7 @@ async def create_checkout_session(
         mode="subscription",
         success_url=f"{settings.app_url}/dashboard/billing?success=1",
         cancel_url=f"{settings.app_url}/dashboard/billing?canceled=1",
-        metadata={"user_id": body.user_id},
+        metadata={"user_id": body.user_id, "tier": body.tier},
     )
 
     return {"url": checkout.url}
@@ -4165,16 +4165,26 @@ async def stripe_webhook(request: Request) -> dict:
     async with AsyncSessionLocal() as session:
         if event["type"] == "checkout.session.completed":
             obj = event["data"]["object"]
-            user_id = obj.get("metadata", {}).get("user_id")
+            meta = obj.get("metadata", {})
+            user_id = meta.get("user_id")
             subscription_id = obj.get("subscription")
+            tier = meta.get("tier")  # set at checkout creation time
             if user_id and subscription_id:
                 await session.execute(
                     sql_text("""
                         UPDATE clone_identity
                         SET stripe_subscription_id = :sid
+                            {tier_clause}
                         WHERE user_id = :uid
-                    """),
-                    {"sid": subscription_id, "uid": user_id},
+                    """.replace(
+                        "{tier_clause}",
+                        ", subscription_tier = :tier" if tier else ""
+                    )),
+                    {
+                        "sid": subscription_id,
+                        "uid": user_id,
+                        **({"tier": tier} if tier else {}),
+                    },
                 )
                 await session.commit()
 
@@ -6523,8 +6533,8 @@ async def create_org(
     )
     record = tier_row.mappings().first()
     tier = (record or {}).get("subscription_tier") or "free"
-    if tier not in ("enterprise_pro", "enterprise_max"):
-        raise HTTPException(status_code=403, detail="Creating an organisation requires an Enterprise plan.")
+    if tier not in ("personal", "enterprise_pro", "enterprise_max"):
+        raise HTTPException(status_code=403, detail="Creating an organisation requires a paid plan.")
 
     try:
         row2 = await session.execute(

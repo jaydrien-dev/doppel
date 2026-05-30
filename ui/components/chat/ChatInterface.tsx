@@ -1476,7 +1476,19 @@ export function ChatInterface({
 
           {error && (
             <div style={{ textAlign: "center", padding: "8px 0" }}>
-              <p style={{ fontSize: 12, color: "var(--fg-dark-3)" }}>{error}</p>
+              <p style={{ fontSize: 12, color: (error.toLowerCase().includes("credit") || error.toLowerCase().includes("login required")) ? "rgba(248,113,113,0.70)" : "var(--fg-dark-3)" }}>
+                {error}
+                {error.toLowerCase().includes("credit") && (
+                  <a href="/dashboard/billing" style={{ marginLeft: 8, color: "rgba(255,255,255,0.50)", textDecoration: "underline", textUnderlineOffset: 2 }}>
+                    Buy credits →
+                  </a>
+                )}
+                {error.toLowerCase().includes("login required") && (
+                  <a href="/sign-in" style={{ marginLeft: 8, color: "rgba(255,255,255,0.50)", textDecoration: "underline", textUnderlineOffset: 2 }}>
+                    Sign in →
+                  </a>
+                )}
+              </p>
             </div>
           )}
         </div>

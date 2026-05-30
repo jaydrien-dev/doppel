@@ -475,7 +475,7 @@ function CreateOrgGate({ onCreated }: { onCreated: () => void }) {
       .catch(() => setTier("free"));
   }, [user?.id]);
 
-  const isEnterprise = tier === "enterprise_pro" || tier === "enterprise_max";
+  const isEnterprise = tier === "personal" || tier === "enterprise_pro" || tier === "enterprise_max";
 
   async function handleCreate() {
     if (!name.trim()) return;
