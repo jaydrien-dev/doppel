@@ -4564,13 +4564,14 @@ async def admin_list_users(
     try:
         rows = await session.execute(
             sql_text("""
-                SELECT ci.user_id, ci.display_name, ci.handle,
+                SELECT DISTINCT ON (ci.user_id)
+                       ci.user_id, ci.display_name, ci.handle,
                        COALESCE(ci.subscription_tier, 'free') AS subscription_tier,
                        ci.stripe_customer_id, ci.created_at,
                        COALESCE(qc.credits_remaining, 0) AS credits_remaining
                 FROM clone_identity ci
                 LEFT JOIN query_credits qc ON qc.user_id = ci.user_id
-                ORDER BY ci.created_at DESC
+                ORDER BY ci.user_id, ci.created_at DESC
                 LIMIT :lim OFFSET :off
             """),
             {"lim": limit, "off": offset},
@@ -6643,6 +6644,27 @@ async def create_org(
         raise HTTPException(status_code=500, detail="Internal server error")
 
     return {"org_id": str(org["id"]), "name": body.name, "slug": body.slug}
+
+
+@app.delete("/org")
+async def delete_org(
+    user_id: str = Query(...),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Delete the org the user owns. Only the owner can delete."""
+    row = await session.execute(
+        sql_text("SELECT id FROM orgs WHERE owner_user_id = :uid LIMIT 1"),
+        {"uid": user_id},
+    )
+    rec = row.mappings().first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="No org found or you are not the owner")
+    await session.execute(
+        sql_text("DELETE FROM orgs WHERE id = :oid"),
+        {"oid": str(rec["id"])},
+    )
+    await session.commit()
+    return {"ok": True}
 
 
 @app.get("/org")

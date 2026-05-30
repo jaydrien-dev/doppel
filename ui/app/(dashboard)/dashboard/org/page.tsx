@@ -457,7 +457,6 @@ function CloneAccessPanel({
 // ---------------------------------------------------------------------------
 function CreateOrgGate({ onCreated }: { onCreated: () => void }) {
   const { user } = useUser();
-  const router = useRouter();
   const [tier, setTier] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [creating, setCreating] = useState(false);
@@ -477,12 +476,6 @@ function CreateOrgGate({ onCreated }: { onCreated: () => void }) {
 
   async function handleCreate() {
     if (!name.trim()) return;
-    // Gate: profile must be set up first
-    const profileRes = await fetch("/api/user/profile").then((r) => r.json()).catch(() => ({ profile_complete: false }));
-    if (!profileRes.profile_complete) {
-      router.push("/account-setup");
-      return;
-    }
     setCreating(true); setErr(null);
     const slug = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
     try {
@@ -510,10 +503,20 @@ function CreateOrgGate({ onCreated }: { onCreated: () => void }) {
         <div style={{ padding: "48px 0", textAlign: "center" }}>
           <p style={{ fontSize: 13, color: "rgba(255,255,255,0.28)" }}>Loading…</p>
         </div>
+      ) : tier === "free" ? (
+        <div style={{ padding: "48px 32px", borderRadius: 16, border: "1px solid rgba(255,255,255,0.07)", background: "rgba(255,255,255,0.02)", maxWidth: 480 }}>
+          <p style={{ fontSize: 14, color: "rgba(255,255,255,0.50)", marginBottom: 6 }}>You&apos;re not in any organisation.</p>
+          <p style={{ fontSize: 12, color: "rgba(255,255,255,0.25)", marginBottom: 20, lineHeight: 1.6 }}>
+            Free accounts can join organisations via invite link. Ask your admin to share one, or upgrade to create your own.
+          </p>
+          <Link href="/dashboard/billing" style={{ display: "inline-block", padding: "9px 20px", borderRadius: 10, fontSize: 13, fontWeight: 500, textDecoration: "none", background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.12)", color: "rgba(255,255,255,0.65)" }}>
+            Upgrade to create one →
+          </Link>
+        </div>
       ) : !isEnterprise ? (
-        <div style={{ padding: "48px 0", textAlign: "center", borderRadius: 16, border: "1px solid rgba(255,255,255,0.07)", background: "rgba(255,255,255,0.02)" }}>
-          <p style={{ fontSize: 14, color: "rgba(255,255,255,0.40)", marginBottom: 6 }}>Organisations require an Enterprise plan.</p>
-          <p style={{ fontSize: 12, color: "rgba(255,255,255,0.22)", marginBottom: 24 }}>Upgrade to Enterprise Pro or Max to create a team workspace.</p>
+        <div style={{ padding: "48px 32px", borderRadius: 16, border: "1px solid rgba(255,255,255,0.07)", background: "rgba(255,255,255,0.02)", maxWidth: 480 }}>
+          <p style={{ fontSize: 14, color: "rgba(255,255,255,0.40)", marginBottom: 6 }}>Creating an organisation requires a paid plan.</p>
+          <p style={{ fontSize: 12, color: "rgba(255,255,255,0.22)", marginBottom: 24 }}>Upgrade to Personal, Pro, or Max to create a team workspace.</p>
           <Link href="/dashboard/billing" style={{ display: "inline-block", padding: "9px 20px", borderRadius: 10, fontSize: 13, fontWeight: 500, textDecoration: "none", background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.12)", color: "rgba(255,255,255,0.65)" }}>
             View plans →
           </Link>
@@ -579,13 +582,24 @@ function InviteLinkSection() {
   const [useCount, setUseCount] = useState(0);
   const [resetting, setResetting] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [fetchErr, setFetchErr] = useState(false);
 
-  useEffect(() => {
-    fetch("/api/org/join-token")
-      .then((r) => r.json())
-      .then((d) => { setToken(d.token ?? null); setUseCount(d.use_count ?? 0); })
-      .catch(() => {});
-  }, []);
+  async function loadToken() {
+    setFetchErr(false);
+    try {
+      const res = await fetch("/api/org/join-token");
+      if (!res.ok) { setFetchErr(true); return; }
+      const d = await res.json();
+      if (d.token) {
+        setToken(d.token); setUseCount(d.use_count ?? 0);
+      } else {
+        // No token yet — create one immediately
+        await handleReset();
+      }
+    } catch { setFetchErr(true); }
+  }
+
+  useEffect(() => { loadToken(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const joinUrl = token
     ? `${typeof window !== "undefined" ? window.location.origin : ""}/join/${token}`
@@ -603,9 +617,9 @@ function InviteLinkSection() {
     try {
       const res = await fetch("/api/org/join-token", { method: "POST" });
       const d = await res.json();
-      setToken(d.token ?? null);
-      setUseCount(0);
-    } finally { setResetting(false); }
+      if (d.token) { setToken(d.token); setUseCount(0); setFetchErr(false); }
+    } catch { setFetchErr(true); }
+    finally { setResetting(false); }
   }
 
   return (
@@ -619,7 +633,7 @@ function InviteLinkSection() {
         <div style={{ display: "flex", gap: 8 }}>
           <input
             readOnly
-            value={token ? joinUrl : "Generating…"}
+            value={fetchErr ? "Failed to load — click ↻ to retry" : token ? joinUrl : "Generating…"}
             style={{
               flex: 1, padding: "9px 14px", borderRadius: 10, fontSize: 12,
               background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)",
@@ -1035,6 +1049,103 @@ export default function OrgAdminPage() {
                 currentUserId={user!.id}
               />
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* Danger zone — delete org */}
+      {org.is_owner && <DeleteOrgSection orgName={org.name} onDeleted={() => { setOrg(null); setMembers([]); setClones([]); }} />}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Delete org
+// ---------------------------------------------------------------------------
+function DeleteOrgSection({ orgName, onDeleted }: { orgName: string; onDeleted: () => void }) {
+  const router = useRouter();
+  const [showModal, setShowModal] = useState(false);
+  const [confirm, setConfirm] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function handleDelete() {
+    if (confirm !== orgName) return;
+    setDeleting(true); setErr(null);
+    try {
+      const res = await fetch("/api/org", { method: "DELETE" });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.detail ?? "Failed");
+      setShowModal(false);
+      onDeleted();
+      router.push("/dashboard");
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Something went wrong");
+    } finally { setDeleting(false); }
+  }
+
+  return (
+    <div style={{ marginTop: 48 }}>
+      <div
+        style={{
+          borderRadius: 14, padding: "20px 24px",
+          background: "rgba(248,113,113,0.04)", border: "1px solid rgba(248,113,113,0.12)",
+        }}
+      >
+        <p style={{ fontSize: 10, fontWeight: 500, letterSpacing: "0.18em", textTransform: "uppercase", color: "rgba(248,113,113,0.50)", marginBottom: 4 }}>
+          Danger zone
+        </p>
+        <p style={{ fontSize: 12, color: "rgba(255,255,255,0.28)", marginBottom: 14, lineHeight: 1.6 }}>
+          Permanently delete this organisation and remove all members. Clone data is not deleted.
+        </p>
+        <button
+          onClick={() => setShowModal(true)}
+          style={{
+            padding: "8px 16px", borderRadius: 10, fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "inherit",
+            background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.20)", color: "rgba(248,113,113,0.70)",
+          }}
+        >
+          Delete organisation
+        </button>
+      </div>
+
+      {showModal && (
+        <div
+          style={{ position: "fixed", inset: 0, zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.72)", backdropFilter: "blur(8px)" }}
+          onClick={(e) => { if (e.target === e.currentTarget) { setShowModal(false); setConfirm(""); } }}
+        >
+          <div style={{ borderRadius: 16, padding: 28, width: "100%", maxWidth: 440, background: "rgba(14,14,14,0.98)", border: "1px solid rgba(248,113,113,0.20)", display: "flex", flexDirection: "column", gap: 14 }}>
+            <p style={{ fontSize: 15, fontWeight: 500, color: "rgba(255,255,255,0.85)", margin: 0 }}>Delete organisation</p>
+            <p style={{ fontSize: 13, color: "rgba(255,255,255,0.35)", lineHeight: 1.6, margin: 0 }}>
+              All members will lose access. This cannot be undone.
+            </p>
+            <label style={{ fontSize: 12, color: "rgba(255,255,255,0.35)" }}>
+              Type <span style={{ fontFamily: "ui-monospace, Menlo, monospace", color: "rgba(255,255,255,0.60)" }}>{orgName}</span> to confirm
+            </label>
+            <input
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+              placeholder={orgName}
+              className="input"
+              autoFocus
+            />
+            {err && <p style={{ fontSize: 12, color: "rgba(248,113,113,0.70)", margin: 0 }}>{err}</p>}
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                onClick={handleDelete}
+                disabled={confirm !== orgName || deleting}
+                style={{
+                  flex: 1, borderRadius: 12, padding: "10px 0", fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "inherit",
+                  background: "rgba(248,113,113,0.12)", border: "1px solid rgba(248,113,113,0.25)", color: "rgba(248,113,113,0.80)",
+                  opacity: (confirm !== orgName || deleting) ? 0.4 : 1,
+                }}
+              >
+                {deleting ? "Deleting…" : "Delete organisation"}
+              </button>
+              <button onClick={() => { setShowModal(false); setConfirm(""); }} className="btn btn--ghost" style={{ padding: "10px 20px" }}>
+                Cancel
+              </button>
+            </div>
           </div>
         </div>
       )}

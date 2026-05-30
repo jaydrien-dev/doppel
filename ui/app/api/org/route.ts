@@ -21,3 +21,10 @@ export async function POST(req: NextRequest) {
   });
   return NextResponse.json(await res.json(), { status: res.status });
 }
+
+export async function DELETE() {
+  const { userId } = await auth();
+  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const res = await fetch(`${FASTAPI}/org?user_id=${encodeURIComponent(userId)}`, { method: "DELETE" });
+  return NextResponse.json(await res.json(), { status: res.status });
+}
