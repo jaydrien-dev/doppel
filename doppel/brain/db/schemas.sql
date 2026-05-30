@@ -624,6 +624,7 @@ CREATE TABLE IF NOT EXISTS stripe_credit_sessions (
 ALTER TABLE clone_identity ADD COLUMN IF NOT EXISTS is_verified BOOLEAN DEFAULT FALSE;
 ALTER TABLE clone_identity ADD COLUMN IF NOT EXISTS verified_at TIMESTAMPTZ;
 ALTER TABLE clone_identity ADD COLUMN IF NOT EXISTS verification_note TEXT;
+ALTER TABLE clone_identity ADD COLUMN IF NOT EXISTS admin_tier_override BOOLEAN NOT NULL DEFAULT FALSE;
 
 -- -------------------------------------------------------------------------
 -- Persistent consumer memory (clone remembers individual users across sessions)
@@ -641,6 +642,22 @@ CREATE TABLE IF NOT EXISTS consumer_profiles (
     UNIQUE(clone_id, consumer_user_id)
 );
 CREATE INDEX IF NOT EXISTS consumer_profiles_clone_idx ON consumer_profiles (clone_id, consumer_user_id);
+
+-- -------------------------------------------------------------------------
+-- User profiles (one per Clerk user — separate from clone identity)
+-- -------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS user_profiles (
+    user_id         TEXT PRIMARY KEY,
+    full_name       TEXT,
+    bio             TEXT,
+    location        TEXT,
+    website         TEXT,
+    dob             TEXT,
+    phone           TEXT,
+    profile_complete BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 
 -- -------------------------------------------------------------------------
 -- Knowledge bundles (creator-packaged deep briefings, one-time purchase)

@@ -1692,6 +1692,74 @@ async def rate_clone(
 # Credits (pay-to-query)
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# User profiles — one per Clerk user, separate from clone identity
+# ---------------------------------------------------------------------------
+
+class UserProfileUpdate(BaseModel):
+    full_name: str | None = None
+    bio: str | None = None
+    location: str | None = None
+    website: str | None = None
+    dob: str | None = None
+    phone: str | None = None
+
+
+@app.get("/user/profile")
+async def get_user_profile(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    user_id = request.headers.get("X-User-Id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    row = await session.execute(
+        sql_text("SELECT * FROM user_profiles WHERE user_id = :uid"),
+        {"uid": user_id},
+    )
+    rec = row.mappings().first()
+    if not rec:
+        return {"profile_complete": False, "user_id": user_id}
+    return dict(rec)
+
+
+@app.patch("/user/profile")
+async def update_user_profile(
+    body: UserProfileUpdate,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    user_id = request.headers.get("X-User-Id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    await session.execute(
+        sql_text("""
+            INSERT INTO user_profiles (user_id, full_name, bio, location, website, dob, phone, profile_complete)
+            VALUES (:uid, :full_name, :bio, :location, :website, :dob, :phone, TRUE)
+            ON CONFLICT (user_id) DO UPDATE SET
+                full_name        = EXCLUDED.full_name,
+                bio              = EXCLUDED.bio,
+                location         = EXCLUDED.location,
+                website          = EXCLUDED.website,
+                dob              = EXCLUDED.dob,
+                phone            = EXCLUDED.phone,
+                profile_complete = TRUE,
+                updated_at       = NOW()
+        """),
+        {
+            "uid": user_id,
+            "full_name": body.full_name,
+            "bio": body.bio,
+            "location": body.location,
+            "website": body.website,
+            "dob": body.dob,
+            "phone": body.phone,
+        },
+    )
+    await session.commit()
+    return {"ok": True}
+
+
 _CREDIT_PACKS = [
     {"id": "pack_100",  "credits": 100,  "price_usd": 5.00,  "label": "Starter",  "price_id_attr": "stripe_credits_starter_price_id"},
     {"id": "pack_500",  "credits": 500,  "price_usd": 23.00, "label": "Standard", "price_id_attr": "stripe_credits_standard_price_id"},
@@ -4210,6 +4278,7 @@ async def stripe_webhook(request: Request) -> dict:
                         SET subscription_tier = :tier,
                             stripe_subscription_id = :sid
                         WHERE stripe_customer_id = :cid
+                          AND (admin_tier_override IS NULL OR admin_tier_override = FALSE)
                     """),
                     {"tier": tier, "sid": sub["id"], "cid": customer_id},
                 )
@@ -4225,6 +4294,7 @@ async def stripe_webhook(request: Request) -> dict:
                         SET subscription_tier = 'free',
                             stripe_subscription_id = NULL
                         WHERE stripe_customer_id = :cid
+                          AND (admin_tier_override IS NULL OR admin_tier_override = FALSE)
                     """),
                     {"cid": customer_id},
                 )
@@ -4357,7 +4427,9 @@ async def admin_set_plan(
     result = await session.execute(
         sql_text("""
             UPDATE clone_identity
-            SET subscription_tier = :tier, updated_at = now()
+            SET subscription_tier = :tier,
+                admin_tier_override = TRUE,
+                updated_at = now()
             WHERE user_id = :uid
         """),
         {"tier": tier, "uid": clerk_user_id},

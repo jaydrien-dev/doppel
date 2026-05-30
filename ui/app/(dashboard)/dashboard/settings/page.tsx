@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { useUser } from "@clerk/nextjs";
 import { useClone } from "@/lib/hooks/useClone";
 import { useOrg } from "@/lib/hooks/useOrg";
 
@@ -573,167 +572,6 @@ function GdprPanel({ cloneHandle }: { cloneHandle: string | null }) {
 
 
 // ---------------------------------------------------------------------------
-// Profile settings panel
-// ---------------------------------------------------------------------------
-function ProfilePanel() {
-  const { user, isLoaded } = useUser();
-  const [firstName, setFirstName] = useState("");
-  const [lastName, setLastName] = useState("");
-  const [dob, setDob] = useState("");
-  const [phone, setPhone] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [deleteConfirm, setDeleteConfirm] = useState("");
-  const [deleting, setDeleting] = useState(false);
-
-  useEffect(() => {
-    if (!user) return;
-    setFirstName(user.firstName ?? "");
-    setLastName(user.lastName ?? "");
-    const meta = user.unsafeMetadata as { dob?: string; phone?: string } | undefined;
-    setDob(meta?.dob ?? "");
-    setPhone(meta?.phone ?? "");
-  }, [user]);
-
-  async function handleSave() {
-    if (!user) return;
-    setSaving(true);
-    try {
-      await user.update({
-        firstName: firstName.trim() || undefined,
-        lastName: lastName.trim() || undefined,
-        unsafeMetadata: { dob: dob.trim(), phone: phone.trim() },
-      });
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2500);
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function handleDelete() {
-    if (!user || deleteConfirm !== "DELETE") return;
-    setDeleting(true);
-    try {
-      await user.delete();
-    } catch {
-      setDeleting(false);
-    }
-  }
-
-  if (!isLoaded) return null;
-
-  return (
-    <>
-      <div className="card" style={{ display: "flex", flexDirection: "column", gap: 20, marginBottom: 20 }}>
-        <p className="db-eyebrow" style={{ margin: 0 }}>Profile</p>
-
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-          <div>
-            <label style={{ display: "block", fontSize: 12, color: "rgba(255,255,255,0.35)", marginBottom: 6 }}>First name</label>
-            <input value={firstName} onChange={(e) => setFirstName(e.target.value)} placeholder="Jane" className="input" />
-          </div>
-          <div>
-            <label style={{ display: "block", fontSize: 12, color: "rgba(255,255,255,0.35)", marginBottom: 6 }}>Last name</label>
-            <input value={lastName} onChange={(e) => setLastName(e.target.value)} placeholder="Smith" className="input" />
-          </div>
-        </div>
-
-        <div>
-          <label style={{ display: "block", fontSize: 12, color: "rgba(255,255,255,0.35)", marginBottom: 6 }}>Email address</label>
-          <input
-            value={user?.primaryEmailAddress?.emailAddress ?? ""}
-            readOnly
-            className="input"
-            style={{ color: "rgba(255,255,255,0.35)", cursor: "not-allowed" }}
-          />
-          <p style={{ fontSize: 11, color: "rgba(255,255,255,0.20)", marginTop: 4, marginBottom: 0 }}>
-            Email changes are managed through account security settings.
-          </p>
-        </div>
-
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-          <div>
-            <label style={{ display: "block", fontSize: 12, color: "rgba(255,255,255,0.35)", marginBottom: 6 }}>Date of birth</label>
-            <input type="date" value={dob} onChange={(e) => setDob(e.target.value)} className="input" style={{ colorScheme: "dark" }} />
-          </div>
-          <div>
-            <label style={{ display: "block", fontSize: 12, color: "rgba(255,255,255,0.35)", marginBottom: 6 }}>Phone</label>
-            <input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+1 (555) 000-0000" className="input" />
-          </div>
-        </div>
-
-        <div>
-          <button onClick={handleSave} disabled={saving} className="btn btn--primary">
-            {saving ? "Saving…" : saved ? "Saved" : "Save profile"}
-          </button>
-        </div>
-      </div>
-
-      <div style={{ borderRadius: 16, padding: 24, marginBottom: 32, background: "rgba(248,113,113,0.04)", border: "1px solid rgba(248,113,113,0.12)" }}>
-        <p style={{ fontSize: 10, fontWeight: 500, letterSpacing: "0.18em", textTransform: "uppercase", color: "rgba(248,113,113,0.50)", marginBottom: 4 }}>
-          Danger zone
-        </p>
-        <p style={{ fontSize: 12, color: "rgba(255,255,255,0.30)", marginBottom: 16 }}>
-          Permanently delete your account, all clones, and associated data. This cannot be undone.
-        </p>
-        <button
-          onClick={() => setShowDeleteModal(true)}
-          style={{
-            borderRadius: 12, padding: "8px 16px", fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "inherit",
-            background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.20)", color: "rgba(248,113,113,0.70)",
-          }}
-        >
-          Delete account
-        </button>
-      </div>
-
-      {showDeleteModal && (
-        <div
-          style={{ position: "fixed", inset: 0, zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.72)", backdropFilter: "blur(8px)" }}
-          onClick={(e) => { if (e.target === e.currentTarget) setShowDeleteModal(false); }}
-        >
-          <div style={{ borderRadius: 16, padding: 28, width: "100%", maxWidth: 440, background: "#111", border: "1px solid rgba(248,113,113,0.20)", display: "flex", flexDirection: "column", gap: 16 }}>
-            <p style={{ fontSize: 15, fontWeight: 500, color: "rgba(255,255,255,0.85)", margin: 0 }}>Delete account</p>
-            <p style={{ fontSize: 13, color: "rgba(255,255,255,0.40)", lineHeight: 1.6, margin: 0 }}>
-              This permanently deletes your account, all clones, training data, and earnings history. There is no recovery.
-            </p>
-            <label style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", display: "block" }}>
-              Type <span style={{ fontFamily: "ui-monospace, Menlo, monospace", color: "rgba(255,255,255,0.60)" }}>DELETE</span> to confirm
-            </label>
-            <input
-              value={deleteConfirm}
-              onChange={(e) => setDeleteConfirm(e.target.value)}
-              placeholder="DELETE"
-              className="input"
-              style={{ fontFamily: "ui-monospace, Menlo, monospace" }}
-              autoFocus
-            />
-            <div style={{ display: "flex", gap: 8 }}>
-              <button
-                onClick={handleDelete}
-                disabled={deleteConfirm !== "DELETE" || deleting}
-                style={{
-                  flex: 1, borderRadius: 12, padding: "10px 0", fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "inherit",
-                  background: "rgba(248,113,113,0.12)", border: "1px solid rgba(248,113,113,0.25)", color: "rgba(248,113,113,0.80)",
-                  opacity: (deleteConfirm !== "DELETE" || deleting) ? 0.4 : 1,
-                }}
-              >
-                {deleting ? "Deleting…" : "Delete my account"}
-              </button>
-              <button onClick={() => { setShowDeleteModal(false); setDeleteConfirm(""); }} className="btn btn--ghost" style={{ padding: "10px 20px" }}>
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Main settings page
 // ---------------------------------------------------------------------------
 export default function SettingsPage() {
@@ -867,7 +705,23 @@ export default function SettingsPage() {
 
       <div style={{ maxWidth: 640 }}>
 
-        <ProfilePanel />
+        <div
+          style={{
+            display: "flex", alignItems: "center", justifyContent: "space-between",
+            padding: "16px 20px", borderRadius: 14, marginBottom: 24,
+            background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)",
+          }}
+        >
+          <div>
+            <p style={{ fontSize: 13, fontWeight: 500, color: "rgba(255,255,255,0.70)", margin: 0 }}>Profile</p>
+            <p style={{ fontSize: 12, color: "rgba(255,255,255,0.30)", margin: "2px 0 0" }}>
+              Name, bio, location, and account deletion.
+            </p>
+          </div>
+          <Link href="/dashboard/profile" className="btn" style={{ whiteSpace: "nowrap", flexShrink: 0 }}>
+            Edit profile →
+          </Link>
+        </div>
 
         <p className="db-eyebrow" style={{ marginBottom: 8 }}>API keys</p>
         <p style={{ fontSize: 12, color: "rgba(255,255,255,0.30)", marginBottom: 24 }}>

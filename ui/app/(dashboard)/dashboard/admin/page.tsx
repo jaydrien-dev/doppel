@@ -238,17 +238,23 @@ function AdminContent() {
 
   async function setTier(userId: string, tier: Tier) {
     setUpdating(userId);
+    setError(null);
     try {
       const res = await fetch(`/api/admin/users/${userId}/plan`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ tier }),
       });
+      const data = await res.json();
       if (res.ok) {
         setUsers((prev) =>
           prev.map((u) => (u.user_id === userId ? { ...u, subscription_tier: tier } : u))
         );
+      } else {
+        setError(`Plan update failed: ${data.detail ?? data.error ?? res.status}`);
       }
+    } catch (e) {
+      setError(`Plan update failed: ${String(e)}`);
     } finally {
       setUpdating(null);
     }

@@ -22,7 +22,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <ClerkProvider signInFallbackRedirectUrl="/home" signUpFallbackRedirectUrl="/onboarding">
+    <ClerkProvider signInFallbackRedirectUrl="/home" signUpFallbackRedirectUrl="/account-setup">
       <html lang="en" className={`${plusJakartaSans.variable} h-full`}>
         <body className="min-h-full antialiased">{children}</body>
       </html>

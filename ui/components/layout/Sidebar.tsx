@@ -167,6 +167,16 @@ const SURFACES: NavItem[] = [
 
 const ACCOUNT: NavItem[] = [
   {
+    href: "/dashboard/profile",
+    label: "Profile",
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+        <circle cx="8" cy="5.5" r="2.5" fill="currentColor" opacity="0.75"/>
+        <path d="M2.5 14c0-3.04 2.46-5.5 5.5-5.5s5.5 2.46 5.5 5.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" opacity="0.55"/>
+      </svg>
+    ),
+  },
+  {
     href: "/dashboard/billing",
     label: "Billing",
     icon: (

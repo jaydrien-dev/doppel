@@ -327,6 +327,15 @@ export default function ClonesPage() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<FilterTab>("all");
 
+  async function goToOnboarding(path = "/onboarding?new=1") {
+    const res = await fetch("/api/user/profile").then((r) => r.json()).catch(() => ({ profile_complete: false }));
+    if (!res.profile_complete) {
+      router.push("/account-setup");
+    } else {
+      router.push(path);
+    }
+  }
+
   useEffect(() => {
     fetch("/api/clones/mine")
       .then((r) => r.json())
@@ -363,7 +372,7 @@ export default function ClonesPage() {
           <h1 className="db-h1">My Clones</h1>
         </div>
         <button
-          onClick={() => router.push("/onboarding?new=1")}
+          onClick={() => goToOnboarding("/onboarding?new=1")}
           disabled={atLimit}
           className="btn btn--primary"
           style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
@@ -438,7 +447,7 @@ export default function ClonesPage() {
           {filter === "all" ? (
             <>
               <p style={{ fontSize: 13, color: "rgba(255,255,255,0.40)", marginBottom: 16 }}>No clones yet.</p>
-              <button onClick={() => router.push("/onboarding")} className="btn btn--primary">
+              <button onClick={() => goToOnboarding("/onboarding")} className="btn btn--primary">
                 Create your first clone
               </button>
             </>

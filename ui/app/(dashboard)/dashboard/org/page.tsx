@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useUser } from "@clerk/nextjs";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -456,21 +457,18 @@ function CloneAccessPanel({
 // ---------------------------------------------------------------------------
 function CreateOrgGate({ onCreated }: { onCreated: () => void }) {
   const { user } = useUser();
+  const router = useRouter();
   const [tier, setTier] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [creating, setCreating] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
-    // Check clone tier
-    fetch("/api/clones")
+    fetch("/api/clones/mine")
       .then((r) => r.json())
       .then((d) => {
-        const clones: { subscription_tier?: string }[] = d.clones ?? [];
-        const tiers = clones.map((c) => c.subscription_tier ?? "free");
-        const rank: Record<string, number> = { free: 0, personal: 1, enterprise_pro: 2, enterprise_max: 3 };
-        const best = tiers.reduce((a, b) => (rank[a] ?? 0) >= (rank[b] ?? 0) ? a : b, "free");
-        setTier(best);
+        // /api/clones/mine returns { tier, clones } — use the top-level tier directly
+        setTier(d.tier ?? "free");
       })
       .catch(() => setTier("free"));
   }, [user?.id]);
@@ -479,6 +477,12 @@ function CreateOrgGate({ onCreated }: { onCreated: () => void }) {
 
   async function handleCreate() {
     if (!name.trim()) return;
+    // Gate: profile must be set up first
+    const profileRes = await fetch("/api/user/profile").then((r) => r.json()).catch(() => ({ profile_complete: false }));
+    if (!profileRes.profile_complete) {
+      router.push("/account-setup");
+      return;
+    }
     setCreating(true); setErr(null);
     const slug = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
     try {
