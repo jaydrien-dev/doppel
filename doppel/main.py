@@ -2117,6 +2117,126 @@ async def delete_my_key(
 
 
 # ---------------------------------------------------------------------------
+# Shared chat helpers — credit deduction + consumer context injection
+# ---------------------------------------------------------------------------
+
+async def _handle_chat_credits_and_context(
+    body: BrainInput,
+    caller_user_id: str | None,
+    session: AsyncSession,
+) -> BrainInput:
+    """
+    Shared pre-processing for /brain/chat and /brain/chat/stream:
+    1. Deducts credits (personal or org pool) if clone has a price.
+    2. Increments query counter.
+    3. Injects consumer profile context into body metadata.
+    4. Injects consumer brain memories into body metadata.
+    Returns the (possibly updated) BrainInput.
+    """
+    price_row = await session.execute(
+        sql_text("SELECT user_id, price_per_query, is_listed, subscription_tier FROM clone_identity WHERE clone_id = :cid"),
+        {"cid": str(body.clone_id)},
+    )
+    price_rec = price_row.mappings().first()
+    caller_is_owner = bool(caller_user_id and price_rec and caller_user_id == price_rec["user_id"])
+    is_paid = (
+        price_rec
+        and float(price_rec["price_per_query"]) > 0
+        and not (caller_is_owner and body.owner_mode)
+    )
+
+    if is_paid:
+        if not caller_user_id:
+            raise HTTPException(status_code=401, detail="Login required to query this clone")
+        multiplier = CREDITS_MULTIPLIER.get(body.response_mode, 1)
+        credits_cost = int(float(price_rec["price_per_query"])) * multiplier
+
+        org_pair = (await session.execute(
+            sql_text("""
+                SELECT om_caller.org_id AS org_id
+                FROM org_memberships om_caller
+                JOIN org_memberships om_owner ON om_owner.org_id = om_caller.org_id
+                WHERE om_caller.user_id = :caller AND om_owner.user_id = :owner
+                LIMIT 1
+            """),
+            {"caller": caller_user_id, "owner": price_rec["user_id"]},
+        )).mappings().first()
+
+        if org_pair:
+            org_id = str(org_pair["org_id"])
+            pool_rec = (await session.execute(
+                sql_text("SELECT credits FROM org_credit_pools WHERE org_id = :oid"),
+                {"oid": org_id},
+            )).mappings().first()
+            if not pool_rec or pool_rec["credits"] < credits_cost:
+                raise HTTPException(status_code=402, detail=f"Org credit pool insufficient (need {credits_cost}). Ask your admin to top up the pool.")
+            await session.execute(
+                sql_text("UPDATE org_credit_pools SET credits = credits - :cost, updated_at = NOW() WHERE org_id = :oid"),
+                {"cost": credits_cost, "oid": org_id},
+            )
+        else:
+            await _deduct_personal_credits(caller_user_id, credits_cost, session)
+
+        await session.execute(
+            sql_text("INSERT INTO query_transactions (user_id, clone_id, credits_used, response_mode) VALUES (:uid, :cid, :cost, :mode)"),
+            {"uid": caller_user_id, "cid": str(body.clone_id), "cost": credits_cost, "mode": body.response_mode},
+        )
+        if not caller_is_owner:
+            creator_tier = price_rec["subscription_tier"] or "free"
+            creator_earn = credits_cost * 0.04 * REV_SHARE.get(creator_tier, 0.70)
+            await session.execute(
+                sql_text("""
+                    UPDATE clone_identity
+                    SET total_queries = total_queries + 1,
+                        total_earnings_usd = total_earnings_usd + :earn
+                    WHERE clone_id = :cid
+                """),
+                {"earn": creator_earn, "cid": str(body.clone_id)},
+            )
+        await session.commit()
+    elif price_rec:
+        await session.execute(
+            sql_text("UPDATE clone_identity SET total_queries = total_queries + 1 WHERE clone_id = :cid"),
+            {"cid": str(body.clone_id)},
+        )
+        await session.commit()
+
+    # Consumer profile: inject cross-session summary
+    if caller_user_id:
+        try:
+            async with session.begin_nested():
+                profile_row = await session.execute(
+                    sql_text("SELECT summary FROM consumer_profiles WHERE clone_id = :cid AND consumer_user_id = :uid"),
+                    {"cid": str(body.clone_id), "uid": caller_user_id},
+                )
+                profile_rec = profile_row.mappings().first()
+                if profile_rec and profile_rec["summary"]:
+                    body = body.model_copy(update={"metadata": {**body.metadata, "consumer_context": profile_rec["summary"]}})
+                await session.execute(
+                    sql_text("""
+                        INSERT INTO consumer_profiles (clone_id, consumer_user_id, total_sessions, total_messages, last_session_at)
+                        VALUES (:cid, :uid, 1, 1, NOW())
+                        ON CONFLICT (clone_id, consumer_user_id) DO UPDATE
+                        SET total_messages = consumer_profiles.total_messages + 1,
+                            last_session_at = NOW()
+                    """),
+                    {"cid": str(body.clone_id), "uid": caller_user_id},
+                )
+            await session.commit()
+        except Exception as _cp_err:
+            _log.warning("consumer_profiles update skipped: %s", _cp_err)
+            await session.rollback()
+
+    # Consumer brain: relevant memories about this caller
+    if caller_user_id:
+        consumer_brain_ctx = await _retrieve_consumer_brain(caller_user_id, body.message, session)
+        if consumer_brain_ctx:
+            body = body.model_copy(update={"metadata": {**body.metadata, "consumer_brain": consumer_brain_ctx}})
+
+    return body
+
+
+# ---------------------------------------------------------------------------
 # Health
 # ---------------------------------------------------------------------------
 
@@ -2145,112 +2265,11 @@ async def chat_stream(
     caller_user_id = request.headers.get("X-User-Id")
     await _check_clone_access(body.clone_id, caller_user_id, None, session)
     await _check_rate_limit(body.clone_id, session)
-
-    # Credit deduction (mirrors /brain/chat — must happen before streaming starts)
-    price_row = await session.execute(
-        sql_text("SELECT user_id, price_per_query, is_listed, subscription_tier FROM clone_identity WHERE clone_id = :cid"),
-        {"cid": str(body.clone_id)},
-    )
-    price_rec = price_row.mappings().first()
-    caller_is_owner = bool(caller_user_id and price_rec and caller_user_id == price_rec["user_id"])
-    # Deduct credits when price > 0 AND (caller is not the owner, OR owner is testing as consumer)
-    is_paid = (
-        price_rec
-        and float(price_rec["price_per_query"]) > 0
-        and not (caller_is_owner and body.owner_mode)
-    )
-    if is_paid:
-        if not caller_user_id:
-            raise HTTPException(status_code=401, detail="Login required to query this clone")
-        multiplier = CREDITS_MULTIPLIER.get(body.response_mode, 1)
-        credits_cost = int(float(price_rec["price_per_query"])) * multiplier
-
-        # Check if this is an intra-org interaction
-        org_pair_s = (await session.execute(
-            sql_text("""
-                SELECT om_caller.org_id AS org_id
-                FROM org_memberships om_caller
-                JOIN org_memberships om_owner ON om_owner.org_id = om_caller.org_id
-                WHERE om_caller.user_id = :caller AND om_owner.user_id = :owner
-                LIMIT 1
-            """),
-            {"caller": caller_user_id, "owner": price_rec["user_id"]},
-        )).mappings().first()
-
-        if org_pair_s:
-            org_id_s = str(org_pair_s["org_id"])
-            pool_rec_s = (await session.execute(
-                sql_text("SELECT credits FROM org_credit_pools WHERE org_id = :oid"),
-                {"oid": org_id_s},
-            )).mappings().first()
-            if not pool_rec_s or pool_rec_s["credits"] < credits_cost:
-                raise HTTPException(status_code=402, detail=f"Org credit pool insufficient (need {credits_cost}). Ask your admin to top up the pool.")
-            await session.execute(
-                sql_text("UPDATE org_credit_pools SET credits = credits - :cost, updated_at = NOW() WHERE org_id = :oid"),
-                {"cost": credits_cost, "oid": org_id_s},
-            )
-        else:
-            await _deduct_personal_credits(caller_user_id, credits_cost, session)
-        await session.execute(
-            sql_text("INSERT INTO query_transactions (user_id, clone_id, credits_used, response_mode) VALUES (:uid, :cid, :cost, :mode)"),
-            {"uid": caller_user_id, "cid": str(body.clone_id), "cost": credits_cost, "mode": body.response_mode},
-        )
-        # Earnings: credits × $0.04/credit × tier rev share (skip when owner is self-testing)
-        if not caller_is_owner:
-            creator_tier = (price_rec["subscription_tier"] or "free")
-            creator_earn = credits_cost * 0.04 * REV_SHARE.get(creator_tier, 0.70)
-            await session.execute(
-                sql_text("""
-                    UPDATE clone_identity
-                    SET total_queries = total_queries + 1,
-                        total_earnings_usd = total_earnings_usd + :earn
-                    WHERE clone_id = :cid
-                """),
-                {"earn": creator_earn, "cid": str(body.clone_id)},
-            )
-        await session.commit()
-    elif price_rec:
-        await session.execute(
-            sql_text("UPDATE clone_identity SET total_queries = total_queries + 1 WHERE clone_id = :cid"),
-            {"cid": str(body.clone_id)},
-        )
-        await session.commit()
-
-    # Consumer brain: retrieve relevant memories about the caller
+    body = await _handle_chat_credits_and_context(body, caller_user_id, session)
     if caller_user_id:
-        consumer_brain_ctx = await _retrieve_consumer_brain(caller_user_id, body.message, session)
-        if consumer_brain_ctx:
-            body = body.model_copy(update={"metadata": {**body.metadata, "consumer_brain": consumer_brain_ctx}})
-
-    # Consumer profile: inject cross-session summary so clone remembers the person
-    if caller_user_id:
-        try:
-            async with session.begin_nested():   # savepoint — failure rolls back only this block
-                profile_row = await session.execute(
-                    sql_text("SELECT summary FROM consumer_profiles WHERE clone_id = :cid AND consumer_user_id = :uid"),
-                    {"cid": str(body.clone_id), "uid": caller_user_id},
-                )
-                profile_rec = profile_row.mappings().first()
-                if profile_rec and profile_rec["summary"]:
-                    body = body.model_copy(update={"metadata": {**body.metadata, "consumer_context": profile_rec["summary"]}})
-                await session.execute(
-                    sql_text("""
-                        INSERT INTO consumer_profiles (clone_id, consumer_user_id, total_sessions, total_messages, last_session_at)
-                        VALUES (:cid, :uid, 1, 1, NOW())
-                        ON CONFLICT (clone_id, consumer_user_id) DO UPDATE
-                        SET total_messages = consumer_profiles.total_messages + 1,
-                            last_session_at = NOW()
-                    """),
-                    {"cid": str(body.clone_id), "uid": caller_user_id},
-                )
-            await session.commit()
-            asyncio.create_task(
-                _maybe_update_consumer_profile(str(body.clone_id), caller_user_id, str(body.session_id))
-            )
-        except Exception as _cp_err:
-            _log.warning("consumer_profiles update skipped: %s", _cp_err)
-            await session.rollback()
-
+        asyncio.create_task(
+            _maybe_update_consumer_profile(str(body.clone_id), caller_user_id, str(body.session_id))
+        )
     await load_clone_keys(session, body.clone_id)
     brain = DoppelBrain(session=session, clone_id=body.clone_id)
     try:
@@ -2280,108 +2299,7 @@ async def chat(
     caller_user_id = request.headers.get("X-User-Id")
     await _check_clone_access(body.clone_id, caller_user_id, None, session)
     await _check_rate_limit(body.clone_id, session)
-
-    # Marketplace credit check: if clone has a price and caller isn't the owner, deduct credits
-    price_row = await session.execute(
-        sql_text("SELECT user_id, price_per_query, is_listed, subscription_tier FROM clone_identity WHERE clone_id = :cid"),
-        {"cid": str(body.clone_id)},
-    )
-    price_rec = price_row.mappings().first()
-    caller_is_owner = bool(caller_user_id and price_rec and caller_user_id == price_rec["user_id"])
-    # Deduct credits when price > 0 AND (caller is not the owner, OR owner is testing as consumer)
-    is_paid = (
-        price_rec
-        and float(price_rec["price_per_query"]) > 0
-        and not (caller_is_owner and body.owner_mode)
-    )
-    if is_paid:
-        if not caller_user_id:
-            raise HTTPException(status_code=401, detail="Login required to query this clone")
-        multiplier = CREDITS_MULTIPLIER.get(body.response_mode, 1)
-        credits_cost = int(float(price_rec["price_per_query"])) * multiplier
-
-        # Check if this is an intra-org interaction (caller and clone owner in same org)
-        org_pair = (await session.execute(
-            sql_text("""
-                SELECT om_caller.org_id AS org_id
-                FROM org_memberships om_caller
-                JOIN org_memberships om_owner ON om_owner.org_id = om_caller.org_id
-                WHERE om_caller.user_id = :caller AND om_owner.user_id = :owner
-                LIMIT 1
-            """),
-            {"caller": caller_user_id, "owner": price_rec["user_id"]},
-        )).mappings().first()
-
-        if org_pair:
-            # Deduct from org shared credit pool
-            org_id = str(org_pair["org_id"])
-            pool_rec = (await session.execute(
-                sql_text("SELECT credits FROM org_credit_pools WHERE org_id = :oid"),
-                {"oid": org_id},
-            )).mappings().first()
-            if not pool_rec or pool_rec["credits"] < credits_cost:
-                raise HTTPException(status_code=402, detail=f"Org credit pool insufficient (need {credits_cost}). Ask your admin to top up the pool.")
-            await session.execute(
-                sql_text("UPDATE org_credit_pools SET credits = credits - :cost, updated_at = NOW() WHERE org_id = :oid"),
-                {"cost": credits_cost, "oid": org_id},
-            )
-        else:
-            await _deduct_personal_credits(caller_user_id, credits_cost, session)
-        # Record transaction
-        await session.execute(
-            sql_text("INSERT INTO query_transactions (user_id, clone_id, credits_used, response_mode) VALUES (:uid, :cid, :cost, :mode)"),
-            {"uid": caller_user_id, "cid": str(body.clone_id), "cost": credits_cost, "mode": body.response_mode},
-        )
-        # Earnings: credits × $0.04/credit × tier rev share (skip when owner self-tests)
-        if not caller_is_owner:
-            creator_tier = (price_rec["subscription_tier"] or "free")
-            creator_earn = credits_cost * 0.04 * REV_SHARE.get(creator_tier, 0.70)
-            await session.execute(
-                sql_text("""
-                    UPDATE clone_identity
-                    SET total_queries = total_queries + 1,
-                        total_earnings_usd = total_earnings_usd + :earn
-                    WHERE clone_id = :cid
-                """),
-                {"earn": creator_earn, "cid": str(body.clone_id)},
-            )
-        await session.commit()
-    elif price_rec:
-        # Free query — still increment total_queries
-        await session.execute(
-            sql_text("UPDATE clone_identity SET total_queries = total_queries + 1 WHERE clone_id = :cid"),
-            {"cid": str(body.clone_id)},
-        )
-        await session.commit()
-
-    # Consumer memory: inject profile context for authenticated consumers
-    if caller_user_id:
-        profile_row = await session.execute(
-            sql_text("SELECT summary, total_sessions FROM consumer_profiles WHERE clone_id = :cid AND consumer_user_id = :uid"),
-            {"cid": str(body.clone_id), "uid": caller_user_id},
-        )
-        profile_rec = profile_row.mappings().first()
-        if profile_rec and profile_rec["summary"]:
-            body = body.model_copy(update={"metadata": {**body.metadata, "consumer_context": profile_rec["summary"]}})
-        # Update message count and last_session_at
-        await session.execute(
-            sql_text("""
-                INSERT INTO consumer_profiles (clone_id, consumer_user_id, total_sessions, total_messages, last_session_at)
-                VALUES (:cid, :uid, 1, 1, NOW())
-                ON CONFLICT (clone_id, consumer_user_id) DO UPDATE
-                SET total_messages = consumer_profiles.total_messages + 1,
-                    last_session_at = NOW()
-            """),
-            {"cid": str(body.clone_id), "uid": caller_user_id},
-        )
-        await session.commit()
-
-    # Consumer brain: retrieve relevant memories about the caller
-    if caller_user_id:
-        consumer_brain_ctx = await _retrieve_consumer_brain(caller_user_id, body.message, session)
-        if consumer_brain_ctx:
-            body = body.model_copy(update={"metadata": {**body.metadata, "consumer_brain": consumer_brain_ctx}})
-
+    body = await _handle_chat_credits_and_context(body, caller_user_id, session)
     await load_clone_keys(session, body.clone_id)
     brain = DoppelBrain(session=session, clone_id=body.clone_id)
     try:
@@ -2391,8 +2309,6 @@ async def chat(
     except Exception as e:
         _log.error("brain.process failed clone_id=%s: %s", body.clone_id, e, exc_info=True)
         raise HTTPException(status_code=500, detail="Brain processing error")
-
-    # Fire-and-forget: update consumer profile summary after every 5 messages
     if caller_user_id:
         asyncio.create_task(
             _maybe_update_consumer_profile(str(body.clone_id), caller_user_id, str(body.session_id))
@@ -5241,6 +5157,7 @@ async def ingest_file(
             authored_by_user=True,
             context_type="document",
             created_at=now,
+            source_ref=filename,
         )
         await _store_chunk_with_embedding(
             session=session,
@@ -5757,6 +5674,53 @@ async def delete_memory(
     return {"status": "deleted"}
 
 
+@app.get("/brain/uploads")
+async def list_uploads(
+    clone_id: UUID = Query(...),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """List distinct uploaded files (source_ref) with their chunk counts and ingestion time."""
+    rows = await session.execute(
+        sql_text("""
+            SELECT source_ref, COUNT(*) AS chunk_count, MAX(ingested_at) AS last_ingested_at
+            FROM episodic_memory
+            WHERE clone_id = :cid
+              AND source = 'upload'
+              AND source_ref IS NOT NULL
+            GROUP BY source_ref
+            ORDER BY MAX(ingested_at) DESC
+        """),
+        {"cid": str(clone_id)},
+    )
+    return {
+        "uploads": [
+            {
+                "source_ref": r["source_ref"],
+                "chunk_count": r["chunk_count"],
+                "last_ingested_at": r["last_ingested_at"].isoformat() if r["last_ingested_at"] else None,
+            }
+            for r in rows.mappings()
+        ]
+    }
+
+
+@app.delete("/brain/memories", status_code=200)
+async def delete_memories_by_source_ref(
+    clone_id: UUID = Query(...),
+    source_ref: str = Query(...),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Delete all episodic memory chunks for a given source_ref (e.g. filename)."""
+    result = await session.execute(
+        sql_text(
+            "DELETE FROM episodic_memory WHERE clone_id = :cid AND source_ref = :ref"
+        ),
+        {"cid": str(clone_id), "ref": source_ref},
+    )
+    await session.commit()
+    return {"status": "deleted", "chunks_removed": result.rowcount}
+
+
 # ---------------------------------------------------------------------------
 # Brain — semantic memory CRUD
 # ---------------------------------------------------------------------------
@@ -6037,7 +6001,6 @@ async def export_activity_report(
 # MEETING BOT — Recall.ai integration
 # ---------------------------------------------------------------------------
 
-import httpx as _httpx
 
 @app.websocket("/meetings/stream")
 async def meeting_stream_ws(
@@ -6418,7 +6381,6 @@ async def set_rate_limit(
 # External access tokens for programmatic clone API usage.
 # ---------------------------------------------------------------------------
 
-import secrets as _secrets
 
 
 class CreateDevKeyRequest(BaseModel):
@@ -6479,10 +6441,9 @@ async def create_dev_key(
     if not record:
         raise HTTPException(status_code=404, detail="No clone found for this user")
 
-    import hashlib as _hashlib
     clone_id = record["clone_id"]
-    raw_key = "dak_" + _secrets.token_urlsafe(32)
-    key_hash = _hashlib.sha256(raw_key.encode()).hexdigest()
+    raw_key = "dak_" + secrets.token_urlsafe(32)
+    key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
     key_preview = raw_key[:12] + "…"
 
     row2 = await session.execute(
@@ -7586,9 +7547,6 @@ async def update_org_policies(
 # Designed for external apps and SDK usage.
 # ---------------------------------------------------------------------------
 
-import hashlib as _hashlib
-
-
 async def _auth_dev_key(
     request: Request,
     session: AsyncSession,
@@ -7600,7 +7558,7 @@ async def _auth_dev_key(
         raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
 
     raw_key = auth_header.removeprefix("Bearer ").strip()
-    key_hash = _hashlib.sha256(raw_key.encode()).hexdigest()
+    key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
 
     row = await session.execute(
         sql_text("""
@@ -7940,7 +7898,7 @@ async def slack_callback(
     clone_id = state
 
     # Exchange code for token
-    async with _httpx.AsyncClient(timeout=15) as client:
+    async with httpx.AsyncClient(timeout=15) as client:
         resp = await client.post(
             "https://slack.com/api/oauth.v2.access",
             data={
@@ -8024,8 +7982,6 @@ async def slack_events(
     Handle Slack events API webhooks.
     Supports: url_verification challenge, app_mention events.
     """
-    import hashlib as _hs
-    import hmac as _hm
     import time as _tm
 
     body_bytes = await request.body()
@@ -8036,13 +7992,13 @@ async def slack_events(
         if abs(_tm.time() - int(timestamp or 0)) > 300:
             raise HTTPException(status_code=403, detail="Request too old")
         sig_base = f"v0:{timestamp}:{body_bytes.decode()}"
-        expected = "v0=" + _hm.new(
+        expected = "v0=" + hmac.new(
             settings.slack_signing_secret.encode(),
             sig_base.encode(),
-            _hs.sha256,
+            hashlib.sha256,
         ).hexdigest()
         received = request.headers.get("X-Slack-Signature", "")
-        if not _hm.compare_digest(expected, received):
+        if not hmac.compare_digest(expected, received):
             raise HTTPException(status_code=403, detail="Invalid signature")
 
     payload = json.loads(body_bytes)
@@ -8109,7 +8065,7 @@ async def _respond_in_slack(
         # Fetch recent channel history for context (best-effort)
         thread_context: list[str] = []
         try:
-            async with _httpx.AsyncClient(timeout=10) as hx:
+            async with httpx.AsyncClient(timeout=10) as hx:
                 hist_resp = await hx.get(
                     "https://slack.com/api/conversations.history",
                     headers={"Authorization": f"Bearer {bot_token}"},
@@ -8182,7 +8138,7 @@ async def _respond_in_slack(
                     ],
                 })
 
-        async with _httpx.AsyncClient(timeout=15) as client:
+        async with httpx.AsyncClient(timeout=15) as client:
             await client.post(
                 "https://slack.com/api/chat.postMessage",
                 headers={"Authorization": f"Bearer {bot_token}", "Content-Type": "application/json"},
@@ -8331,8 +8287,7 @@ async def _run_code_review_proposals(clone_id: UUID) -> None:
             "X-GitHub-Api-Version": "2022-11-28",
         }
 
-        import httpx as _httpx_local
-        async with _httpx_local.AsyncClient(timeout=20, headers=headers) as client:
+        async with httpx.AsyncClient(timeout=20, headers=headers) as client:
             # Get authenticated user
             me = (await client.get("https://api.github.com/user")).json()
             username = me.get("login", "")

@@ -22,8 +22,11 @@ CREATE TABLE IF NOT EXISTS episodic_memory (
     created_at      TIMESTAMPTZ,            -- original creation time in source system
     ingested_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     is_pinned       BOOLEAN NOT NULL DEFAULT FALSE,
-    is_excluded     BOOLEAN NOT NULL DEFAULT FALSE
+    is_excluded     BOOLEAN NOT NULL DEFAULT FALSE,
+    source_ref      TEXT                            -- original filename for uploads, thread_id for slack, etc.
 );
+
+ALTER TABLE episodic_memory ADD COLUMN IF NOT EXISTS source_ref TEXT;
 
 CREATE INDEX IF NOT EXISTS episodic_embedding_idx
     ON episodic_memory USING ivfflat (embedding vector_cosine_ops)

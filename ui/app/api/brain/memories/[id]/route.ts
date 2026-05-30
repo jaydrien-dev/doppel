@@ -13,6 +13,7 @@ export async function PATCH(
   const body = await req.json();
   const res = await backendFetch(`/brain/memories/${id}`, {
     method: "PATCH",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
   const data = await res.json();

@@ -191,10 +191,10 @@ async def _store_chunk_with_embedding(
         text("""
             INSERT INTO episodic_memory
               (id, clone_id, content, embedding, source, authored_by_user,
-               context_type, entities, topics, formality_score, created_at)
+               context_type, entities, topics, formality_score, created_at, source_ref)
             VALUES
               (:id, :clone_id, :content, :embedding, :source, :authored_by_user,
-               :context_type, :entities, :topics, :formality_score, :created_at)
+               :context_type, :entities, :topics, :formality_score, :created_at, :source_ref)
         """),
         {
             "id": str(chunk_id),
@@ -208,5 +208,6 @@ async def _store_chunk_with_embedding(
             "topics": topics,
             "formality_score": formality,
             "created_at": item.created_at,
+            "source_ref": item.source_ref,
         },
     )

@@ -7,7 +7,7 @@ import type { MemoryChunk } from "@/lib/types";
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
-type Tab = "pinned" | "all" | "semantic";
+type Tab = "pinned" | "all" | "semantic" | "files";
 
 const SOURCE_LABEL: Record<string, string> = {
   gmail: "Gmail",
@@ -404,6 +404,128 @@ function SemanticList({ cloneId }: { cloneId: string }) {
 }
 
 // ---------------------------------------------------------------------------
+// Uploaded files list — replace by source_ref
+// ---------------------------------------------------------------------------
+type UploadEntry = { source_ref: string; chunk_count: number; last_ingested_at: string | null };
+
+function FilesList({ cloneId }: { cloneId: string }) {
+  const { data, isLoading, mutate } = useSWR<{ uploads: UploadEntry[] }>(
+    `/api/brain/uploads?clone_id=${cloneId}`,
+    fetcher,
+    { revalidateOnFocus: false }
+  );
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [replacing, setReplacing] = useState<string | null>(null); // source_ref being replaced
+  const [status, setStatus] = useState<Record<string, string>>({}); // source_ref → message
+
+  function rel(iso: string): string {
+    const diff = (Date.now() - new Date(iso).getTime()) / 1000;
+    if (diff < 60) return "just now";
+    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+    return `${Math.floor(diff / 86400)}d ago`;
+  }
+
+  function triggerReplace(sourceRef: string) {
+    setReplacing(sourceRef);
+    fileInputRef.current?.click();
+  }
+
+  async function handleFileSelected(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file || !replacing) return;
+    const sourceRef = replacing;
+    e.target.value = "";
+    setReplacing(null);
+    setStatus((s) => ({ ...s, [sourceRef]: "Replacing…" }));
+
+    await fetch(`/api/brain/memories?clone_id=${cloneId}&source_ref=${encodeURIComponent(sourceRef)}`, { method: "DELETE" });
+
+    const fd = new FormData();
+    fd.append("clone_id", cloneId);
+    fd.append("file", file);
+    const res = await fetch("/fastapi/ingestion/file", { method: "POST", body: fd });
+    let d: Record<string, unknown> = {};
+    try { d = await res.json(); } catch { d = {}; }
+
+    if (res.ok) {
+      setStatus((s) => ({ ...s, [sourceRef]: `Replaced — ${d.chunks_stored} chunks` }));
+      mutate();
+    } else {
+      setStatus((s) => ({ ...s, [sourceRef]: String(d.detail ?? d.error ?? "Failed") }));
+    }
+  }
+
+  async function handleDelete(sourceRef: string) {
+    setStatus((s) => ({ ...s, [sourceRef]: "Deleting…" }));
+    await fetch(`/api/brain/memories?clone_id=${cloneId}&source_ref=${encodeURIComponent(sourceRef)}`, { method: "DELETE" });
+    mutate();
+  }
+
+  if (isLoading) return <div style={{ padding: "20px", fontSize: 13, color: "rgba(255,255,255,0.30)" }}>Loading…</div>;
+
+  const uploads = data?.uploads ?? [];
+
+  if (uploads.length === 0) {
+    return (
+      <div style={{ padding: "28px 20px", textAlign: "center" }}>
+        <p style={{ fontSize: 13, color: "rgba(255,255,255,0.30)" }}>No uploaded files yet.</p>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <input ref={fileInputRef} type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv,.txt,.md,.json,.html" style={{ display: "none" }} onChange={handleFileSelected} />
+      {uploads.map((entry, idx) => {
+        const msg = status[entry.source_ref];
+        const isReplacing = msg === "Replacing…" || msg === "Deleting…";
+        return (
+          <div key={entry.source_ref} style={{
+            borderTop: idx === 0 ? "none" : "1px solid rgba(255,255,255,0.04)",
+            padding: "11px 20px",
+            display: "flex", alignItems: "center", gap: 10,
+          }}>
+            <span style={{ fontSize: 10, fontFamily: "monospace", color: "rgba(255,255,255,0.20)", flexShrink: 0 }}>
+              {entry.source_ref.split(".").pop()?.toUpperCase()}
+            </span>
+            <span style={{ flex: 1, fontSize: 13, color: "rgba(255,255,255,0.70)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {entry.source_ref}
+            </span>
+            <span style={{ fontSize: 11, color: "rgba(255,255,255,0.25)", flexShrink: 0 }}>
+              {entry.chunk_count} chunk{entry.chunk_count !== 1 ? "s" : ""}
+            </span>
+            {entry.last_ingested_at && (
+              <span style={{ fontSize: 11, color: "rgba(255,255,255,0.20)", flexShrink: 0 }}>
+                {rel(entry.last_ingested_at)}
+              </span>
+            )}
+            {msg && msg !== "Replacing…" && msg !== "Deleting…" && (
+              <span style={{ fontSize: 11, color: msg.startsWith("Replaced") ? "rgba(52,211,153,0.60)" : "rgba(248,113,113,0.60)", flexShrink: 0 }}>
+                {msg}
+              </span>
+            )}
+            {isReplacing && <span style={{ fontSize: 11, color: "rgba(255,255,255,0.30)", flexShrink: 0 }}>{msg}</span>}
+            {!isReplacing && (
+              <>
+                <button onClick={() => triggerReplace(entry.source_ref)}
+                  style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", background: "none", border: "none", cursor: "pointer", padding: 0, flexShrink: 0 }}>
+                  Replace
+                </button>
+                <button onClick={() => handleDelete(entry.source_ref)}
+                  style={{ fontSize: 11, color: "rgba(248,113,113,0.40)", background: "none", border: "none", cursor: "pointer", padding: 0, flexShrink: 0 }}>
+                  Delete
+                </button>
+              </>
+            )}
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main export
 // ---------------------------------------------------------------------------
 export function MemoryInspector({ cloneId }: { cloneId: string }) {
@@ -425,7 +547,7 @@ export function MemoryInspector({ cloneId }: { cloneId: string }) {
   if (tab === "all") params.set("include_excluded", "true");
   if (search && tab !== "semantic") params.set("search", search);
 
-  const url = tab === "semantic" ? null : `/api/brain/memories?${params}`;
+  const url = (tab === "semantic" || tab === "files") ? null : `/api/brain/memories?${params}`;
 
   const { data, isLoading, mutate } = useSWR<{ memories: MemoryChunk[]; total: number }>(
     url, fetcher, { revalidateOnFocus: false }
@@ -445,12 +567,14 @@ export function MemoryInspector({ cloneId }: { cloneId: string }) {
             <p style={{ fontSize: 12, color: "rgba(255,255,255,0.30)", marginTop: 3 }}>
               {tab === "semantic"
                 ? "Structured facts — edit or delete individual entries"
+                : tab === "files"
+                ? "Uploaded files — replace all chunks from a file at once"
                 : "Pin important facts · Hide sensitive content · Edit or delete chunks"}
             </p>
           </div>
           {/* Tab switcher */}
           <div className="glass" style={{ borderRadius: 12, padding: 4, display: "flex", gap: 2 }}>
-            {(["pinned", "all", "semantic"] as const).map((t) => (
+            {(["pinned", "all", "semantic", "files"] as const).map((t) => (
               <button key={t} onClick={() => { setTab(t); setPage(0); setSearchInput(""); }}
                 className={tab === t ? "glass-md" : ""}
                 style={{
@@ -459,14 +583,14 @@ export function MemoryInspector({ cloneId }: { cloneId: string }) {
                   color: tab === t ? "rgba(255,255,255,0.80)" : "rgba(255,255,255,0.35)",
                   transition: "color 0.15s",
                 }}>
-                {t === "pinned" ? "Pinned" : t === "all" ? "All" : "Facts"}
+                {t === "pinned" ? "Pinned" : t === "all" ? "All" : t === "semantic" ? "Facts" : "Files"}
               </button>
             ))}
           </div>
         </div>
 
         {/* Search — only for episodic tabs */}
-        {tab !== "semantic" && (
+        {tab !== "semantic" && tab !== "files" && (
           <div style={{ position: "relative" }}>
             <svg style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "rgba(255,255,255,0.25)", pointerEvents: "none" }}
               width="12" height="12" viewBox="0 0 12 12" fill="none">
@@ -488,8 +612,11 @@ export function MemoryInspector({ cloneId }: { cloneId: string }) {
       {/* Semantic tab */}
       {tab === "semantic" && <SemanticList cloneId={cloneId} />}
 
+      {/* Files tab */}
+      {tab === "files" && <FilesList cloneId={cloneId} />}
+
       {/* Episodic tabs */}
-      {tab !== "semantic" && (
+      {tab !== "semantic" && tab !== "files" && (
         <>
           {isLoading && <div style={{ padding: "20px", fontSize: 13, color: "rgba(255,255,255,0.30)" }}>Loading…</div>}
           {!isLoading && memories.length === 0 && (

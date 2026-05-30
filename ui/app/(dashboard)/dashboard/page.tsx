@@ -97,9 +97,9 @@ function StatsBar({ cloneId }: { cloneId: string }) {
 // ---------------------------------------------------------------------------
 // Recent queries
 // ---------------------------------------------------------------------------
-function RecentQueries() {
+function RecentQueries({ cloneId }: { cloneId: string }) {
   const { data, isLoading } = useSWR<{ traces: ActivityTrace[] }>(
-    `/api/activity?limit=8`,
+    `/api/activity?clone_id=${cloneId}&limit=8`,
     fetcher,
     { refreshInterval: 30_000 }
   );
@@ -280,7 +280,7 @@ export default function DashboardPage() {
               View all →
             </Link>
           </div>
-          <RecentQueries />
+          <RecentQueries cloneId={clone.clone_id} />
         </div>
 
         {/* Right: sources */}

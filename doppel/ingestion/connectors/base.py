@@ -23,6 +23,7 @@ class RawItem(BaseModel):
     context_type: str = "email_reply"   # email_reply | message | document | decision
     created_at: datetime
     metadata: dict = {}                 # subject, recipients, thread_id, etc.
+    source_ref: str | None = None       # filename for uploads, thread_id for slack, etc.
 
 
 class BaseConnector(ABC):
