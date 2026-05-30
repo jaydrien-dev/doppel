@@ -4554,7 +4554,7 @@ async def admin_run_migration() -> dict:
 @app.get("/admin/users")
 async def admin_list_users(
     caller_user_id: str = Query(...),
-    limit: int = Query(default=50, le=200),
+    limit: int = Query(default=200, le=1000),
     offset: int = Query(default=0),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
@@ -4567,6 +4567,7 @@ async def admin_list_users(
                 SELECT DISTINCT ON (ci.user_id)
                        ci.user_id, ci.display_name, ci.handle,
                        COALESCE(ci.subscription_tier, 'free') AS subscription_tier,
+                       COALESCE(ci.admin_tier_override, FALSE) AS admin_tier_override,
                        ci.stripe_customer_id, ci.created_at,
                        COALESCE(qc.credits_remaining, 0) AS credits_remaining
                 FROM clone_identity ci
@@ -4585,6 +4586,7 @@ async def admin_list_users(
             "display_name": r["display_name"],
             "handle": r["handle"],
             "subscription_tier": r["subscription_tier"] or "free",
+            "admin_tier_override": bool(r["admin_tier_override"]),
             "stripe_customer_id": r["stripe_customer_id"],
             "created_at": r["created_at"].isoformat() if r["created_at"] else None,
             "credits_remaining": r["credits_remaining"],

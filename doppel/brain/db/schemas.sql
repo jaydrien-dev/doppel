@@ -317,7 +317,7 @@ CREATE TABLE IF NOT EXISTS org_credit_pools (
 
 -- Shareable join-link tokens for orgs (admin generates once; any signed-in user can use)
 CREATE TABLE IF NOT EXISTS org_join_tokens (
-    token      TEXT PRIMARY KEY DEFAULT encode(gen_random_bytes(16), 'hex'),
+    token      TEXT PRIMARY KEY,
     org_id     UUID NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
     role       TEXT NOT NULL DEFAULT 'member',
     created_by TEXT NOT NULL,

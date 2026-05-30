@@ -30,7 +30,7 @@ export async function GET(request: Request) {
   const backendMap: Record<string, BackendUser> = {};
   try {
     const res = await backendFetch(
-      `/admin/users?caller_user_id=${userId}&limit=500&offset=0`
+      `/admin/users?caller_user_id=${userId}&limit=200&offset=0`
     );
     if (res.ok) {
       const data = await res.json();
