@@ -1,48 +1,68 @@
 import { auth, clerkClient } from "@clerk/nextjs/server";
 import { backendFetch } from "@/lib/backendFetch";
 
+type BackendUser = {
+  user_id: string;
+  display_name?: string;
+  handle?: string;
+  subscription_tier?: string;
+  credits_remaining?: number;
+  clone_count?: number;
+  admin_tier_override?: boolean;
+  stripe_customer_id?: string;
+  created_at?: string | null;
+};
+
 export async function GET(request: Request) {
   const { userId } = await auth();
   if (!userId) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
   const { searchParams } = new URL(request.url);
-  const limit = searchParams.get("limit") ?? "50";
-  const offset = searchParams.get("offset") ?? "0";
+  const limit = parseInt(searchParams.get("limit") ?? "500");
+  const offset = parseInt(searchParams.get("offset") ?? "0");
 
-  const fastApiUrl = process.env.FASTAPI_URL ?? "http://localhost:8000";
-  const res = await backendFetch(
-    `/admin/users?caller_user_id=${userId}&limit=${limit}&offset=${offset}`
-  );
-  if (!res.ok) {
-    const data = await res.json();
-    // Include backend URL (host only) for easier debugging
-    const urlHost = (() => { try { return new URL(fastApiUrl).host; } catch { return fastApiUrl; } })();
-    return Response.json({ ...data, _backend: urlHost }, { status: res.status });
+  // Fetch all Clerk users — source of truth for who exists
+  const client = await clerkClient();
+  const clerkResponse = await client.users.getUserList({ limit: 500, offset });
+  const clerkUsers = clerkResponse.data;
+
+  // Fetch backend data — high limit so we get everyone
+  const backendMap: Record<string, BackendUser> = {};
+  try {
+    const res = await backendFetch(
+      `/admin/users?caller_user_id=${userId}&limit=500&offset=0`
+    );
+    if (res.ok) {
+      const data = await res.json();
+      for (const row of (data.users ?? []) as BackendUser[]) {
+        backendMap[row.user_id] = row;
+      }
+    }
+  } catch {
+    // Non-fatal — still return Clerk users with empty backend data
   }
 
-  const data = await res.json();
-  const users: { user_id: string }[] = data.users ?? [];
+  // Merge: every Clerk user gets a row; backend data enriches it
+  const users = clerkUsers.slice(0, limit).map((cu) => {
+    const b = backendMap[cu.id] ?? {};
+    const clerkName =
+      [cu.firstName, cu.lastName].filter(Boolean).join(" ") ||
+      cu.username ||
+      null;
+    return {
+      user_id: cu.id,
+      display_name: b.display_name ?? clerkName ?? cu.id,
+      handle: b.handle ?? "",
+      subscription_tier: b.subscription_tier ?? "free",
+      credits_remaining: b.credits_remaining ?? 0,
+      clone_count: b.clone_count ?? 0,
+      admin_tier_override: b.admin_tier_override ?? false,
+      stripe_customer_id: b.stripe_customer_id ?? null,
+      created_at: b.created_at ?? null,
+      clerk_name: clerkName,
+      clerk_email: cu.emailAddresses[0]?.emailAddress ?? null,
+    };
+  });
 
-  // Enrich with real names/emails from Clerk
-  const client = await clerkClient();
-  const enriched = await Promise.all(
-    users.map(async (u) => {
-      try {
-        const clerkUser = await client.users.getUser(u.user_id);
-        return {
-          ...u,
-          clerk_name:
-            [clerkUser.firstName, clerkUser.lastName].filter(Boolean).join(" ") ||
-            clerkUser.username ||
-            null,
-          clerk_email:
-            clerkUser.emailAddresses[0]?.emailAddress ?? null,
-        };
-      } catch {
-        return { ...u, clerk_name: null, clerk_email: null };
-      }
-    })
-  );
-
-  return Response.json({ ...data, users: enriched });
+  return Response.json({ users, total: clerkResponse.totalCount });
 }

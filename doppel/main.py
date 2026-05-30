@@ -7401,14 +7401,15 @@ async def get_org_join_token(
     )
     tok = tok_row.mappings().first()
     if not tok:
-        # Create one
+        # Create one — generate token in Python to avoid pgcrypto dependency
+        new_token = secrets.token_hex(16)
         tok_row2 = await session.execute(
             sql_text("""
-                INSERT INTO org_join_tokens (org_id, role, created_by)
-                VALUES (:oid, 'member', :uid)
+                INSERT INTO org_join_tokens (token, org_id, role, created_by)
+                VALUES (:tok, :oid, 'member', :uid)
                 RETURNING token, use_count
             """),
-            {"oid": org_id, "uid": user_id},
+            {"tok": new_token, "oid": org_id, "uid": user_id},
         )
         tok = tok_row2.mappings().first()
         await session.commit()
@@ -7442,13 +7443,14 @@ async def reset_org_join_token(
         sql_text("DELETE FROM org_join_tokens WHERE org_id = :oid"),
         {"oid": org_id},
     )
+    new_token_val = secrets.token_hex(16)
     tok_row = await session.execute(
         sql_text("""
-            INSERT INTO org_join_tokens (org_id, role, created_by)
-            VALUES (:oid, 'member', :uid)
+            INSERT INTO org_join_tokens (token, org_id, role, created_by)
+            VALUES (:tok, :oid, 'member', :uid)
             RETURNING token
         """),
-        {"oid": org_id, "uid": uid},
+        {"tok": new_token_val, "oid": org_id, "uid": uid},
     )
     new_token = tok_row.mappings().first()["token"]
     await session.commit()
