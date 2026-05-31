@@ -6750,6 +6750,54 @@ async def get_org_members(
     return {"members": members, "org_id": str(org_id)}
 
 
+class AddOrgMemberRequest(BaseModel):
+    admin_user_id: str
+    target_user_id: str
+    role: str = "member"
+
+
+@app.post("/org/members")
+async def add_org_member(
+    body: AddOrgMemberRequest,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Directly add a user to the org by user_id. Caller must be org admin."""
+    # Verify caller is admin
+    admin_row = await session.execute(
+        sql_text("""
+            SELECT o.id AS org_id
+            FROM orgs o
+            JOIN org_memberships m ON m.org_id = o.id
+            WHERE m.user_id = :uid AND m.role = 'admin'
+            LIMIT 1
+        """),
+        {"uid": body.admin_user_id},
+    )
+    rec = admin_row.mappings().first()
+    if not rec:
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    org_id = str(rec["org_id"])
+
+    # Check if already a member
+    existing = await session.execute(
+        sql_text("SELECT 1 FROM org_memberships WHERE org_id = :oid AND user_id = :uid"),
+        {"oid": org_id, "uid": body.target_user_id},
+    )
+    if existing.first():
+        return {"status": "already_member", "user_id": body.target_user_id}
+
+    await session.execute(
+        sql_text("""
+            INSERT INTO org_memberships (org_id, user_id, role)
+            VALUES (:oid, :uid, :role)
+        """),
+        {"oid": org_id, "uid": body.target_user_id, "role": body.role},
+    )
+    await session.commit()
+    return {"status": "added", "user_id": body.target_user_id, "role": body.role}
+
+
 class UpdateMemberRoleRequest(BaseModel):
     admin_user_id: str   # must be org admin
     target_user_id: str

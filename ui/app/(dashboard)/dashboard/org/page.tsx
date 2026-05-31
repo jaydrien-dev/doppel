@@ -712,7 +712,7 @@ function MembersSection({
         body: JSON.stringify({ org_id: orgId, invited_email: inviteEmail.trim(), role: inviteRole }),
       });
       const d = await res.json();
-      setInviteMsg(res.ok ? `Invite sent to ${inviteEmail.trim()}.` : (d.detail ?? "Failed."));
+      setInviteMsg(res.ok ? (d.message ?? `Done.`) : (d.detail ?? d.error ?? "Failed."));
       if (res.ok) { setInviteEmail(""); onRefresh(); }
     } finally { setInviting(false); }
   }
@@ -800,7 +800,11 @@ function MembersSection({
             {inviting ? "Sending…" : "Invite"}
           </button>
         </div>
-        {inviteMsg && <p style={{ fontSize: 12, color: "rgba(52,211,153,0.75)", marginTop: 10 }}>{inviteMsg}</p>}
+        {inviteMsg && (
+          <p style={{ fontSize: 12, marginTop: 10, color: inviteMsg.startsWith("No account") || inviteMsg.includes("already") ? "rgba(255,255,255,0.40)" : "rgba(52,211,153,0.75)" }}>
+            {inviteMsg}
+          </p>
+        )}
       </div>
     </div>
   );
