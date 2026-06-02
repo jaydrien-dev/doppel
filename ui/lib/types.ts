@@ -149,6 +149,8 @@ export interface BrainStats {
   procedural: number;
   relational: number;
   sources: string[];
+  memory_used?: number;
+  memory_limit?: number;
 }
 
 // ---------------------------------------------------------------------------

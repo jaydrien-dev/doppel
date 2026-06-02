@@ -1216,25 +1216,25 @@ const PLANS = [
   {
     name: "Free", color: "#34D399", monthly: 0, yearly: 0,
     desc: "Build your clone. Share it. Yours forever.",
-    feats: ["2 clones", "500 memory items per clone", "50 queries / month", "Train from any source (Gmail, Notion, Slack…)", "Public chat link", "Sell on the marketplace · 70% rev share"],
+    feats: ["2 clones", "500 memory chunks per clone", "50 queries / month", "Train from any source (Gmail, Notion, Slack…)", "Public chat link", "Sell on the marketplace · 70% rev share"],
     cta: "Start free", featured: false,
   },
   {
     name: "Personal", color: "#1A73E8", monthly: 15, yearly: 150,
     desc: "Sell your knowledge. Earn on every query.",
-    feats: ["5 clones", "5,000 memory items per clone", "250 queries / month", "80% revenue share on consumer queries", "Priority marketplace listing", "API access", "Custom clone pricing"],
+    feats: ["5 clones", "5,000 memory chunks per clone", "250 queries / month", "80% revenue share on consumer queries", "Priority marketplace listing", "API access", "Custom clone pricing"],
     cta: "Get Personal", featured: false,
   },
   {
     name: "Pro", color: "#A78BFA", monthly: 49, yearly: 490, featured: true, perSeat: true,
     desc: "Scale your knowledge across a team.",
-    feats: ["20 clones org-wide · everything in Personal", "30,000 memory items per clone", "1,250 queries / month", "Org-wide audit log", "Priority support"],
+    feats: ["20 clones org-wide · everything in Personal", "30,000 memory chunks per clone", "1,250 queries / month", "Org-wide audit log", "Priority support"],
     cta: "Get Pro",
   },
   {
     name: "Max", color: "#E91E63", monthly: 149, yearly: 1490, perSeat: true,
     desc: "Enterprise-grade. No compromises.",
-    feats: ["50 clones org-wide · everything in Pro", "200,000 memory items per clone", "5,000 queries / month", "SOC 2 Type II", "Guaranteed uptime SLA", "Dedicated CSM + priority support", "Custom contracts"],
+    feats: ["50 clones org-wide · everything in Pro", "200,000 memory chunks per clone", "5,000 queries / month", "SOC 2 Type II", "Guaranteed uptime SLA", "Dedicated CSM + priority support", "Custom contracts"],
     cta: "Talk to us", featured: false,
   },
 ];
