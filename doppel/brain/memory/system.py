@@ -37,7 +37,7 @@ class MemorySystem:
                 self._clone_id,
                 query,
                 limit=20,
-                authored_by_user_only=True,
+                authored_by_user_only=False,
             ),
             semantic.retrieve(
                 self._session,
