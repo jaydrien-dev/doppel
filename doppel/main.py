@@ -2272,17 +2272,19 @@ async def _handle_chat_credits_and_context(
         await session.commit()
 
     # Consumer profile: inject cross-session summary
+    # Uses a separate DB session so any schema errors (e.g. table not yet migrated)
+    # cannot corrupt the main request session.
     if caller_user_id:
         try:
-            async with session.begin_nested():
-                profile_row = await session.execute(
+            async with AsyncSessionLocal() as cp_session:
+                profile_row = await cp_session.execute(
                     sql_text("SELECT summary FROM consumer_profiles WHERE clone_id = :cid AND consumer_user_id = :uid"),
                     {"cid": str(body.clone_id), "uid": caller_user_id},
                 )
                 profile_rec = profile_row.mappings().first()
                 if profile_rec and profile_rec["summary"]:
                     body = body.model_copy(update={"metadata": {**body.metadata, "consumer_context": profile_rec["summary"]}})
-                await session.execute(
+                await cp_session.execute(
                     sql_text("""
                         INSERT INTO consumer_profiles (clone_id, consumer_user_id, total_sessions, total_messages, last_session_at)
                         VALUES (:cid, :uid, 1, 1, NOW())
@@ -2292,10 +2294,9 @@ async def _handle_chat_credits_and_context(
                     """),
                     {"cid": str(body.clone_id), "uid": caller_user_id},
                 )
-            await session.commit()
+                await cp_session.commit()
         except Exception as _cp_err:
             _log.warning("consumer_profiles update skipped: %s", _cp_err)
-            await session.rollback()
 
     # Consumer brain: relevant memories about this caller
     if caller_user_id:
@@ -2389,7 +2390,7 @@ async def chat(
 async def _retrieve_consumer_brain(
     consumer_user_id: str,
     message: str,
-    session: AsyncSession,
+    session: AsyncSession,  # kept for signature compat but not used — own session below
     top_k: int = 6,
 ) -> str | None:
     """Retrieve the most relevant consumer memories for a given message."""
@@ -2397,19 +2398,20 @@ async def _retrieve_consumer_brain(
         from doppel.brain.db.vector import embed_batch
         embeddings = await embed_batch([message])
         vec_literal = "[" + ",".join(str(v) for v in embeddings[0]) + "]"
-        rows = await session.execute(
-            sql_text("""
-                SELECT content, category,
-                       1 - (embedding <=> :emb::vector) AS similarity
-                FROM consumer_memory
-                WHERE consumer_user_id = :uid
-                  AND embedding IS NOT NULL
-                ORDER BY embedding <=> :emb::vector
-                LIMIT :k
-            """),
-            {"uid": consumer_user_id, "emb": vec_literal, "k": top_k},
-        )
-        results = rows.mappings().all()
+        async with AsyncSessionLocal() as cb_session:
+            rows = await cb_session.execute(
+                sql_text("""
+                    SELECT content, category,
+                           1 - (embedding <=> :emb::vector) AS similarity
+                    FROM consumer_memory
+                    WHERE consumer_user_id = :uid
+                      AND embedding IS NOT NULL
+                    ORDER BY embedding <=> :emb::vector
+                    LIMIT :k
+                """),
+                {"uid": consumer_user_id, "emb": vec_literal, "k": top_k},
+            )
+            results = rows.mappings().all()
         if not results:
             return None
         lines = [f"- [{r['category']}] {r['content']}" for r in results if r["similarity"] > 0.3]
