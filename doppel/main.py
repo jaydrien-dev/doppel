@@ -5732,9 +5732,13 @@ async def update_memory(
         parts.append("is_excluded = :is_excluded")
         params["is_excluded"] = body.is_excluded
     if body.content is not None:
-        # Replace content and clear embedding so it's re-computed on next retrieval
-        parts.append("content = :content, embedding = NULL")
+        # Re-embed immediately so the chunk is retrievable straight away
+        from doppel.brain.db.vector import embed
+        new_embedding = await embed(body.content)
+        vec_str = "[" + ",".join(str(v) for v in new_embedding) + "]"
+        parts.append("content = :content, embedding = :embedding")
         params["content"] = body.content
+        params["embedding"] = vec_str
 
     if not parts:
         raise HTTPException(status_code=422, detail="Provide is_pinned, is_excluded, or content")

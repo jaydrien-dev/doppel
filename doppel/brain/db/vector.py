@@ -54,7 +54,7 @@ async def similarity_search(
     e.g. "AND is_excluded = false".
     """
     vec_literal = "[" + ",".join(str(v) for v in query_embedding) + "]"
-    where_clause = f"clone_id = :clone_id {extra_where}"
+    where_clause = f"clone_id = :clone_id AND embedding IS NOT NULL {extra_where}"
 
     sql = text(f"""
         SELECT *,

@@ -76,7 +76,7 @@ async def retrieve(
     """
     query_embedding = await embed(query)
 
-    extra_where = "AND is_excluded = false"
+    extra_where = "AND is_excluded = false AND source != 'chat'"
     if authored_by_user_only:
         extra_where += " AND authored_by_user = true"
 
