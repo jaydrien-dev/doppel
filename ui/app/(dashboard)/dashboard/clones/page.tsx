@@ -287,9 +287,9 @@ function CloneCard({ clone, onDeleted }: { clone: CloneRow; onDeleted: () => voi
           Edit
         </Link>
         {clone.is_listed && (
-          <Link href={`/marketplace/${clone.handle}`} target="_blank" className="btn btn--sm" style={{ flex: 1, justifyContent: "center" }}>
+          <span className="btn btn--sm" style={{ flex: 1, justifyContent: "center", opacity: 0.35, pointerEvents: "none", cursor: "not-allowed" }}>
             Listing ↗
-          </Link>
+          </span>
         )}
         <button
           onClick={() => setShowDelete(true)}

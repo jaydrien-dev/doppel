@@ -2,6 +2,7 @@
 
 import { useClone } from "@/lib/hooks/useClone";
 import { MemoryInspector } from "@/components/dashboard/MemoryInspector";
+import { MemoryOmitter } from "@/components/dashboard/MemoryOmitter";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 
 export default function MemoryPage() {
@@ -28,7 +29,10 @@ export default function MemoryPage() {
           </p>
         </div>
       ) : (
-        <MemoryInspector cloneId={clone.clone_id} />
+        <>
+          <MemoryOmitter />
+          <MemoryInspector cloneId={clone.clone_id} />
+        </>
       )}
     </div>
   );

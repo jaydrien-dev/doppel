@@ -32,7 +32,7 @@ import os
 import pathlib
 import secrets
 from contextlib import asynccontextmanager
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from uuid import UUID, uuid4
 
 _log = logging.getLogger(__name__)
@@ -1402,6 +1402,116 @@ async def delete_consumer_profile(
     await session.execute(
         sql_text("DELETE FROM consumer_profiles WHERE clone_id = :cid AND consumer_user_id = :uid"),
         {"cid": str(cid_rec["clone_id"]), "uid": caller_user_id},
+    )
+    await session.commit()
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Memory Omitter — blocked-topic rules
+# ---------------------------------------------------------------------------
+
+@app.get("/clones/{handle}/omissions")
+async def get_omissions(
+    handle: str,
+    caller_user_id: str = Query(...),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Return the owner's blocked-topic rules."""
+    row = await session.execute(
+        sql_text("SELECT clone_id, user_id, admin_policies FROM clone_identity WHERE handle = :h"),
+        {"h": handle},
+    )
+    rec = row.mappings().first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Clone not found")
+    if str(rec["user_id"]) != caller_user_id:
+        raise HTTPException(status_code=403, detail="Not the clone owner")
+    policies = rec["admin_policies"] or {}
+    return {"rules": policies.get("blocked_topics") or []}
+
+
+class OmissionAddRequest(BaseModel):
+    pattern: str
+
+
+@app.post("/clones/{handle}/omissions")
+async def add_omission(
+    handle: str,
+    body: OmissionAddRequest,
+    caller_user_id: str = Query(...),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Add a blocked-topic rule and immediately exclude matching memory chunks."""
+    pattern = body.pattern.strip()
+    if not pattern:
+        raise HTTPException(status_code=422, detail="pattern required")
+
+    row = await session.execute(
+        sql_text("SELECT clone_id, user_id, admin_policies FROM clone_identity WHERE handle = :h"),
+        {"h": handle},
+    )
+    rec = row.mappings().first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Clone not found")
+    if str(rec["user_id"]) != caller_user_id:
+        raise HTTPException(status_code=403, detail="Not the clone owner")
+
+    clone_id = str(rec["clone_id"])
+
+    # Bulk-exclude matching chunks
+    result = await session.execute(
+        sql_text("""
+            UPDATE episodic_memory
+            SET is_excluded = TRUE
+            WHERE clone_id = :cid AND is_excluded = FALSE AND content ILIKE :pat
+        """),
+        {"cid": clone_id, "pat": f"%{pattern}%"},
+    )
+    affected = result.rowcount
+
+    # Persist rule
+    policies = dict(rec["admin_policies"] or {})
+    rules: list = list(policies.get("blocked_topics") or [])
+    if not any(r.get("pattern") == pattern for r in rules):
+        rules.append({
+            "pattern": pattern,
+            "created_at": datetime.utcnow().isoformat(),
+            "affected": affected,
+        })
+        policies["blocked_topics"] = rules
+        await session.execute(
+            sql_text("UPDATE clone_identity SET admin_policies = :p WHERE clone_id = :cid"),
+            {"p": json.dumps(policies), "cid": clone_id},
+        )
+
+    await session.commit()
+    return {"pattern": pattern, "affected": affected}
+
+
+@app.delete("/clones/{handle}/omissions")
+async def remove_omission(
+    handle: str,
+    pattern: str = Query(...),
+    caller_user_id: str = Query(...),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Remove a blocked-topic rule (excluded chunks are NOT automatically restored)."""
+    row = await session.execute(
+        sql_text("SELECT clone_id, user_id, admin_policies FROM clone_identity WHERE handle = :h"),
+        {"h": handle},
+    )
+    rec = row.mappings().first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Clone not found")
+    if str(rec["user_id"]) != caller_user_id:
+        raise HTTPException(status_code=403, detail="Not the clone owner")
+
+    policies = dict(rec["admin_policies"] or {})
+    policies["blocked_topics"] = [r for r in (policies.get("blocked_topics") or []) if r.get("pattern") != pattern]
+    await session.execute(
+        sql_text("UPDATE clone_identity SET admin_policies = :p WHERE clone_id = :cid"),
+        {"p": json.dumps(policies), "cid": str(rec["clone_id"])},
     )
     await session.commit()
     return {"ok": True}
