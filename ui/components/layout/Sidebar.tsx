@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { UserButton, useUser, useClerk } from "@clerk/nextjs";
@@ -188,6 +188,16 @@ const ACCOUNT: NavItem[] = [
     ),
   },
   {
+    href: "/dashboard/credits",
+    label: "Credits",
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+        <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.4" opacity="0.6"/>
+        <path d="M8 5v6M5.5 7h4a1 1 0 010 2H6" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" opacity="0.8"/>
+      </svg>
+    ),
+  },
+  {
     href: "/dashboard/api",
     label: "Developer",
     icon: (
@@ -341,6 +351,16 @@ function UserFooter() {
   const { clone } = useClone();
   const tier = clone?.subscription_tier ?? "free";
   const name = user?.firstName ?? user?.username ?? "Account";
+  const [credits, setCredits] = useState<{ plan: number; bought: number } | null>(null);
+
+  useEffect(() => {
+    fetch("/api/credits/balance")
+      .then((r) => r.json())
+      .then((d) => setCredits({ plan: d.plan_credits ?? 0, bought: d.bought_credits ?? 0 }))
+      .catch(() => {});
+  }, []);
+
+  const totalCredits = credits ? credits.plan + credits.bought : null;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "4px 4px 0" }}>
@@ -348,18 +368,30 @@ function UserFooter() {
         <UserButton appearance={{ elements: { avatarBox: "w-7 h-7 shrink-0" } }} />
         <div style={{ minWidth: 0, flex: 1 }}>
           <div className="sb__user-name">{name}</div>
-          <span
-            className="sb__user-tier"
-            style={
-              tier === "personal"
-                ? { background: "rgba(26,115,232,0.12)", color: "#6BAEFF" }
-                : tier === "enterprise_max"
-                ? { background: "rgba(251,191,36,0.10)", color: "#FCD34D" }
-                : {}
-            }
-          >
-            {TIER_LABEL[tier] ?? tier}
-          </span>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+            <span
+              className="sb__user-tier"
+              style={
+                tier === "personal"
+                  ? { background: "rgba(26,115,232,0.12)", color: "#6BAEFF" }
+                  : tier === "enterprise_max"
+                  ? { background: "rgba(251,191,36,0.10)", color: "#FCD34D" }
+                  : {}
+              }
+            >
+              {TIER_LABEL[tier] ?? tier}
+            </span>
+            {totalCredits !== null && (
+              <span style={{
+                fontSize: 10, padding: "2px 6px", borderRadius: 999,
+                background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)",
+                color: totalCredits > 0 ? "rgba(255,255,255,0.45)" : "rgba(248,113,113,0.55)",
+                fontVariantNumeric: "tabular-nums",
+              }}>
+                {totalCredits.toLocaleString()} cr
+              </span>
+            )}
+          </div>
         </div>
       </div>
       <button onClick={() => signOut({ redirectUrl: "/" })} className="sb__util">
