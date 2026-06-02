@@ -360,10 +360,10 @@ async def _persist_async(
                 },
             )
 
-            # Feed high-quality exchanges back into episodic memory so the clone
-            # learns from its own conversations (retrieval context for future queries).
+            # Feed high-quality exchanges back into episodic memory — training mode only.
+            # Consumer queries go to reasoning_traces only (activity reports), never memory.
             confidence = trace.confidence or 0.0
-            if not trace.needs_escalation and confidence >= 0.55 and len(final_response.strip()) > 20:
+            if brain_input.owner_mode and not trace.needs_escalation and confidence >= 0.55 and len(final_response.strip()) > 20:
                 try:
                     from doppel.brain.db.vector import embed_batch
                     from doppel.ingestion.pipeline import _store_chunk_with_embedding
