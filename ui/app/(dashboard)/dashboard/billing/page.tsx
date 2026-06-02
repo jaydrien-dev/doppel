@@ -37,6 +37,8 @@ const PLANS: {
     yearlyEnvKey: "",
     features: [
       "2 clones",
+      "500 memory items per clone",
+      "50 queries / month per clone",
       "Train from any source (Gmail, Notion, Slack…)",
       "Public /c/[handle] chat link",
       "Sell on the marketplace · 70% rev share",
@@ -55,6 +57,8 @@ const PLANS: {
     yearlyEnvKey: "NEXT_PUBLIC_STRIPE_PERSONAL_YEARLY_PRICE_ID",
     features: [
       "5 clones",
+      "5,000 memory items per clone",
+      "250 queries / month per clone",
       "80% revenue share on consumer queries",
       "Priority marketplace listing",
       "API access",
@@ -75,6 +79,8 @@ const PLANS: {
     yearlyEnvKey: "NEXT_PUBLIC_STRIPE_ENT_PRO_YEARLY_PRICE_ID",
     features: [
       "20 clones org-wide · everything in Personal per seat",
+      "30,000 memory items per clone",
+      "1,250 queries / month per clone",
       "Org-wide audit log",
       "Priority support",
     ],
@@ -93,6 +99,8 @@ const PLANS: {
     yearlyEnvKey: "",
     features: [
       "50 clones org-wide · everything in Pro",
+      "200,000 memory items per clone",
+      "5,000 queries / month per clone",
       "SOC 2 Type II",
       "Guaranteed uptime SLA",
       "Dedicated CSM + priority support",
