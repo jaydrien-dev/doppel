@@ -234,21 +234,33 @@ const ORG: NavItem[] = [
   },
 ];
 
-const GROUPS = [
-  { label: "Clone",       items: CLONE,       color: "#1A73E8" },
+const GROUPS: { label: string; items: NavItem[]; color: string; disabled?: boolean }[] = [
+  { label: "Clone",        items: CLONE,       color: "#1A73E8" },
   { label: "Organisation", items: ORG,         color: "#6BAEFF" },
-  { label: "Marketplace", items: MARKETPLACE, color: "#34A853" },
-  { label: "Surfaces",    items: SURFACES,    color: "#EA4335" },
-  { label: "Account",     items: ACCOUNT,     color: "#F59E0B" },
+  { label: "Marketplace",  items: MARKETPLACE, color: "#34A853", disabled: true },
+  { label: "Surfaces",     items: SURFACES,    color: "#EA4335" },
+  { label: "Account",      items: ACCOUNT,     color: "#F59E0B" },
 ];
 
-function NavGroup({ label, items, color }: { label: string; items: NavItem[]; color: string }) {
+function NavGroup({ label, items, color, disabled }: { label: string; items: NavItem[]; color: string; disabled?: boolean }) {
   const pathname = usePathname();
   return (
     <div className="sb__group">
-      <div className="sb__group-label" style={{ color }}>{label}</div>
+      <div className="sb__group-label" style={{ color: disabled ? "rgba(255,255,255,0.18)" : color }}>{label}</div>
       <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
         {items.map(({ href, label: itemLabel, icon }) => {
+          if (disabled) {
+            return (
+              <div
+                key={href}
+                className="sb__item"
+                style={{ opacity: 0.35, pointerEvents: "none", cursor: "not-allowed" }}
+              >
+                <span className="sb__item-icon">{icon}</span>
+                {itemLabel}
+              </div>
+            );
+          }
           const active =
             pathname === href ||
             (href !== "/dashboard" && pathname.startsWith(href));
@@ -284,7 +296,7 @@ export function Sidebar() {
       {/* Nav */}
       <nav style={{ flex: 1, overflowY: "auto" }}>
         {GROUPS.map((g) => (
-          <NavGroup key={g.label} label={g.label} items={g.items} color={g.color} />
+          <NavGroup key={g.label} label={g.label} items={g.items} color={g.color} disabled={g.disabled} />
         ))}
       </nav>
 

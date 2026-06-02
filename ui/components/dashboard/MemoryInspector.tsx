@@ -24,10 +24,14 @@ function MemoryRow({
   chunk,
   cloneId,
   onUpdated,
+  isSelected,
+  onSelect,
 }: {
   chunk: MemoryChunk;
   cloneId: string;
   onUpdated: () => void;
+  isSelected?: boolean;
+  onSelect?: (id: string, checked: boolean) => void;
 }) {
   const [saving, setSaving] = useState(false);
   const [hovered, setHovered] = useState(false);
@@ -128,6 +132,15 @@ function MemoryRow({
         </div>
       ) : (
         <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+          {/* Checkbox (bulk select) */}
+          {onSelect && (
+            <input
+              type="checkbox"
+              checked={isSelected ?? false}
+              onChange={(e) => onSelect(chunk.id, e.target.checked)}
+              style={{ marginTop: 3, flexShrink: 0, cursor: "pointer", width: 13, height: 13, accentColor: "rgba(255,255,255,0.55)" }}
+            />
+          )}
           {/* Pin button */}
           <button
             onClick={() => toggle("is_pinned", !chunk.is_pinned)}
@@ -535,6 +548,8 @@ export function MemoryInspector({ cloneId }: { cloneId: string }) {
   const [search, setSearch] = useState("");
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const LIMIT = 20;
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -557,6 +572,30 @@ export function MemoryInspector({ cloneId }: { cloneId: string }) {
   const total = data?.total ?? 0;
   const totalPages = Math.ceil(total / LIMIT);
 
+  const allPageSelected = memories.length > 0 && memories.every((c) => selected.has(c.id));
+
+  function toggleSelectAll() {
+    if (allPageSelected) {
+      setSelected((s) => { const n = new Set(s); memories.forEach((c) => n.delete(c.id)); return n; });
+    } else {
+      setSelected((s) => { const n = new Set(s); memories.forEach((c) => n.add(c.id)); return n; });
+    }
+  }
+
+  async function handleBulkDelete() {
+    if (selected.size === 0 || bulkDeleting) return;
+    setBulkDeleting(true);
+    try {
+      await Promise.all(Array.from(selected).map((id) =>
+        fetch(`/api/brain/memories/${id}?clone_id=${cloneId}`, { method: "DELETE" })
+      ));
+      setSelected(new Set());
+      mutate();
+    } finally {
+      setBulkDeleting(false);
+    }
+  }
+
   return (
     <div className="glass" style={{ borderRadius: 16, overflow: "hidden" }}>
       {/* Header */}
@@ -575,7 +614,7 @@ export function MemoryInspector({ cloneId }: { cloneId: string }) {
           {/* Tab switcher */}
           <div className="glass" style={{ borderRadius: 12, padding: 4, display: "flex", gap: 2 }}>
             {(["pinned", "all", "semantic", "files"] as const).map((t) => (
-              <button key={t} onClick={() => { setTab(t); setPage(0); setSearchInput(""); }}
+              <button key={t} onClick={() => { setTab(t); setPage(0); setSearchInput(""); setSelected(new Set()); }}
                 className={tab === t ? "glass-md" : ""}
                 style={{
                   padding: "5px 12px", borderRadius: 10, fontSize: 12, cursor: "pointer", border: "none",
@@ -588,6 +627,37 @@ export function MemoryInspector({ cloneId }: { cloneId: string }) {
             ))}
           </div>
         </div>
+
+        {/* Bulk actions — only for episodic tabs */}
+        {tab !== "semantic" && tab !== "files" && memories.length > 0 && (
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={allPageSelected}
+                onChange={toggleSelectAll}
+                style={{ cursor: "pointer", width: 13, height: 13, accentColor: "rgba(255,255,255,0.55)" }}
+              />
+              <span style={{ fontSize: 11, color: "rgba(255,255,255,0.35)" }}>
+                {selected.size > 0 ? `${selected.size} selected` : "Select all"}
+              </span>
+            </label>
+            {selected.size > 0 && (
+              <button
+                onClick={handleBulkDelete}
+                disabled={bulkDeleting}
+                style={{
+                  marginLeft: "auto", fontSize: 11, padding: "4px 12px", borderRadius: 7,
+                  cursor: bulkDeleting ? "not-allowed" : "pointer",
+                  background: "rgba(239,68,68,0.10)", border: "1px solid rgba(239,68,68,0.22)",
+                  color: "rgba(248,113,113,0.75)", fontFamily: "inherit", opacity: bulkDeleting ? 0.5 : 1,
+                }}
+              >
+                {bulkDeleting ? "Deleting…" : `Delete ${selected.size}`}
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Search — only for episodic tabs */}
         {tab !== "semantic" && tab !== "files" && (
@@ -632,7 +702,17 @@ export function MemoryInspector({ cloneId }: { cloneId: string }) {
             <div>
               {memories.map((chunk, idx) => (
                 <div key={chunk.id} style={{ borderTop: idx === 0 ? "none" : "1px solid rgba(255,255,255,0.04)" }}>
-                  <MemoryRow chunk={chunk} cloneId={cloneId} onUpdated={mutate} />
+                  <MemoryRow
+                    chunk={chunk}
+                    cloneId={cloneId}
+                    onUpdated={mutate}
+                    isSelected={selected.has(chunk.id)}
+                    onSelect={(id, checked) => setSelected((s) => {
+                      const n = new Set(s);
+                      checked ? n.add(id) : n.delete(id);
+                      return n;
+                    })}
+                  />
                 </div>
               ))}
             </div>
