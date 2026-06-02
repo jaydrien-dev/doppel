@@ -12,7 +12,6 @@ type FileUploadItem = {
 import { extractStyle, getGithubAuthUrl, getGmailAuthUrl, getNotionAuthUrl, getSlackInstallUrl, getSlackStatus, ingestText, triggerGithubSync, triggerGmailSync, triggerNotionSync } from "@/lib/api";
 import { IngestionJobBanner } from "@/components/dashboard/IngestionJobBanner";
 import { SeedQAPanel } from "@/components/dashboard/SeedQAPanel";
-import { MemoryInspector } from "@/components/dashboard/MemoryInspector";
 import { TopicCoverageCard } from "@/components/dashboard/TopicCoverageCard";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 
@@ -257,7 +256,7 @@ export default function TrainPage() {
       <div className="db-page-head">
         <div>
           <p className="db-eyebrow">Clone</p>
-          <h1 className="db-h1">Train</h1>
+          <h1 className="db-h1">Feed Data</h1>
         </div>
       </div>
 
@@ -500,9 +499,6 @@ export default function TrainPage() {
 
       {/* Full-width: Topic coverage */}
       <TopicCoverageCard cloneId={clone.clone_id} />
-
-      {/* Full-width: Memory Inspector */}
-      <MemoryInspector cloneId={clone.clone_id} />
 
     </div>
   );

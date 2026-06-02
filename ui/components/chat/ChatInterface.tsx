@@ -969,8 +969,8 @@ export function ChatInterface({
   // Feature menu
   const [featureMenuOpen, setFeatureMenuOpen] = useState(false);
 
-  // Training mode
-  const [trainingMode, setTrainingMode] = useState(false);
+  // Training mode — auto-enable when contextType is "training"
+  const [trainingMode, setTrainingMode] = useState(() => contextType === "training");
   const [trainingSaving, setTrainingSaving] = useState(false);
   const [trainingSaved, setTrainingSaved] = useState(false);
 

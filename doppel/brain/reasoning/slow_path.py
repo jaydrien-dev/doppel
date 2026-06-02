@@ -94,13 +94,16 @@ async def run_stream(
             f"Structure: (1) Core concept. (2) Example. (3) Hands-on exercise. Calibrate to their level."
         )
     if brain_input.context_type == "training":
-        _is_owner = brain_input.metadata.get("training_owner", False)
+        _is_owner = brain_input.metadata.get("training_owner", False) or brain_input.owner_mode
         if _is_owner:
             _slow_system += (
-                "\n\n## Training Mode — Knowledge Gap Filling\n"
-                "You are in active training with your creator. Identify gaps in your own knowledge and ask "
-                "focused questions to fill them. Be methodical: one topic at a time, probe deeply. "
-                "Every response ends with exactly one specific question. Draw knowledge out, don't lecture."
+                "\n\n## Training Mode — Active Knowledge Extraction\n"
+                "You are in a live training session with your creator. Extract as much knowledge, opinion, "
+                "lived experience, and nuance as possible. Rules: every response ends with exactly one "
+                "targeted question — no exceptions. Ask about concrete experiences, not abstractions. "
+                "Dig deeper after each answer. Keep your own text to 1-3 sentences. "
+                "Cover gaps: values, decisions under pressure, failures, contrarian views, how they think. "
+                "Push gently for specifics. Be warm but relentlessly curious."
             )
         else:
             _slow_system += (

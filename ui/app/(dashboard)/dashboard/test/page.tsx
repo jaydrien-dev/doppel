@@ -56,9 +56,8 @@ function ClonePicker({ clones, selected, onSelect }: {
   );
 }
 
-export default function TestPage() {
+export default function TrainChatPage() {
   const { clones, isLoading } = useClones();
-  const [mode, setMode] = useState<"owner" | "public">("owner");
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   if (isLoading) return <LoadingSpinner />;
@@ -81,32 +80,17 @@ export default function TestPage() {
     <div className="db-page" style={{ paddingBottom: 0, display: "flex", flexDirection: "column", height: "100%" }}>
       <div className="db-page-head">
         <div>
-          <p className="db-eyebrow">Creator only</p>
-          <h1 className="db-h1">Test your clone <em>before anyone else does.</em></h1>
+          <p className="db-eyebrow">Clone</p>
+          <h1 className="db-h1">Train</h1>
           <p style={{ marginTop: 10, fontSize: 13, color: "rgba(255,255,255,0.45)", maxWidth: 520, lineHeight: 1.6 }}>
-            <strong style={{ color: "rgba(255,255,255,0.65)", fontWeight: 500 }}>Training mode</strong> — approve, edit, or reject answers to teach the clone. No credits deducted.{" "}
-            <strong style={{ color: "rgba(255,255,255,0.65)", fontWeight: 500 }}>Consumer preview</strong> — see exactly what visitors experience. Credits deducted at the clone&apos;s rate.
+            Talk to your clone. It will ask targeted questions to fill its knowledge gaps. Every exchange is saved to memory.
           </p>
           <div style={{ marginTop: 12 }}>
             <ClonePicker clones={clones} selected={clone} onSelect={(c) => setSelectedId(c.clone_id)} />
           </div>
         </div>
-        {/* Mode toggle */}
-        <div style={{ display: "flex", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, padding: 3 }}>
-          {(["owner", "public"] as const).map((m) => (
-            <button key={m} onClick={() => setMode(m)} style={{
-              padding: "6px 14px", borderRadius: 9, border: "none",
-              background: mode === m ? "rgba(255,255,255,0.07)" : "transparent",
-              color: mode === m ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.4)",
-              fontFamily: "inherit", fontSize: 12, fontWeight: 500, cursor: "pointer",
-            }}>
-              {m === "owner" ? "Training mode" : "Consumer preview"}
-            </button>
-          ))}
-        </div>
       </div>
 
-      {/* Chat surface */}
       <div style={{ flex: 1, display: "flex", flexDirection: "column", maxWidth: 880, margin: "0 auto", width: "100%" }}>
         <div className="card" style={{ flex: 1, padding: 22, display: "flex", flexDirection: "column", minHeight: 440 }}>
           <ChatInterface
@@ -114,10 +98,10 @@ export default function TestPage() {
             cloneId={clone.clone_id}
             cloneName={clone.listing_title || clone.display_name}
             cloneAvatarUrl={clone.avatar_url}
-            contextType="chat"
-            ownerMode={mode === "owner"}
-            placeholder={mode === "owner" ? "Train your clone — ask it anything…" : "Preview as a consumer — credits will deduct…"}
-            pricePerQuery={mode === "owner" ? 0 : (clone.price_per_query ?? 0)}
+            contextType="training"
+            ownerMode={true}
+            placeholder="Start talking — your clone will ask questions to learn from you…"
+            pricePerQuery={0}
           />
         </div>
       </div>

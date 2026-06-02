@@ -45,7 +45,7 @@ const CLONE: NavItem[] = [
   },
   {
     href: "/dashboard/train",
-    label: "Train",
+    label: "Feed Data",
     icon: (
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
         <path d="M3 8h10M8 3v10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
@@ -64,8 +64,8 @@ const CLONE: NavItem[] = [
     ),
   },
   {
-    href: "/dashboard/brain",
-    label: "Brain",
+    href: "/dashboard/memory",
+    label: "Memory",
     icon: (
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
         <circle cx="8" cy="8" r="2.2" fill="currentColor" opacity="0.9"/>
@@ -79,7 +79,7 @@ const CLONE: NavItem[] = [
   },
   {
     href: "/dashboard/test",
-    label: "Test",
+    label: "Train",
     icon: (
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
         <path d="M5 13.5L7 9.5M9 9.5L11 13.5M4 5H12L10 9.5H6L4 5Z" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" opacity="0.7"/>

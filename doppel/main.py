@@ -2493,6 +2493,7 @@ async def get_traces(
                    response, latency_ms, needs_escalation, created_at
             FROM reasoning_traces
             WHERE clone_id = :clone_id
+              AND (brain_input->>'owner_mode')::boolean = TRUE
             ORDER BY created_at DESC
             LIMIT :limit OFFSET :offset
         """),
@@ -2531,6 +2532,7 @@ async def get_brain_quality(
                 COUNT(CASE WHEN needs_escalation = true        THEN 1 END)          AS escalations
             FROM reasoning_traces
             WHERE clone_id = :cid
+              AND (brain_input->>'owner_mode')::boolean = TRUE
         """),
         {"cid": str(clone_id)},
     )
@@ -2546,6 +2548,7 @@ async def get_brain_quality(
             FROM reasoning_traces
             WHERE clone_id = :cid
               AND created_at >= NOW() - INTERVAL '7 days'
+              AND (brain_input->>'owner_mode')::boolean = TRUE
             GROUP BY day
             ORDER BY day ASC
         """),
@@ -2662,17 +2665,7 @@ async def brain_summary(
     if is_paid:
         if not caller_user_id:
             raise HTTPException(status_code=401, detail="Login required")
-        bal_row = await session.execute(
-            sql_text("SELECT credits_remaining FROM query_credits WHERE user_id = :uid"),
-            {"uid": caller_user_id},
-        )
-        bal_rec = bal_row.mappings().first()
-        if not bal_rec or bal_rec["credits_remaining"] < 2:
-            raise HTTPException(status_code=402, detail="Insufficient credits (summary costs 2 credits)")
-        await session.execute(
-            sql_text("UPDATE query_credits SET credits_remaining = credits_remaining - 2 WHERE user_id = :uid"),
-            {"uid": caller_user_id},
-        )
+        await _deduct_personal_credits(caller_user_id, 2, session)
         await session.commit()
 
     # Fetch last 20 traces for this session
@@ -2852,14 +2845,15 @@ async def synthesis_query(body: dict, request: Request) -> dict:
         raise HTTPException(status_code=401, detail="Login required for synthesis")
 
     n = len(clone_ids)
+    # Pre-check balance (plan + bought combined) without deducting yet
     async with AsyncSessionLocal() as db:
-        bal_row = await db.execute(
+        _plan_bal = await _refresh_plan_credits(caller_user_id, db)
+        _bought_row = await db.execute(
             sql_text("SELECT credits_remaining FROM query_credits WHERE user_id = :uid"),
             {"uid": caller_user_id},
         )
-        bal_rec = bal_row.mappings().first()
-        bal = bal_rec["credits_remaining"] if bal_rec else 0
-        if bal < n:
+        _bought_bal = int((_bought_row.mappings().first() or {}).get("credits_remaining") or 0)
+        if _plan_bal + _bought_bal < n:
             raise HTTPException(status_code=402, detail=f"Insufficient credits (need {n})")
 
     async def _query_one(clone_id: str) -> dict:
@@ -2885,10 +2879,7 @@ async def synthesis_query(body: dict, request: Request) -> dict:
 
     if credits_used > 0:
         async with AsyncSessionLocal() as db:
-            await db.execute(
-                sql_text("UPDATE query_credits SET credits_remaining = credits_remaining - :n, updated_at = NOW() WHERE user_id = :uid"),
-                {"n": credits_used, "uid": caller_user_id},
-            )
+            await _deduct_personal_credits(caller_user_id, credits_used, db)
             await db.commit()
 
     from doppel.brain.context import get_anthropic_client
@@ -2927,13 +2918,13 @@ async def synthesis_deliberate(body: dict, request: Request) -> dict:
 
     total_credits = rounds * 2
     async with AsyncSessionLocal() as db:
-        bal_row = await db.execute(
+        _plan_bal = await _refresh_plan_credits(caller_user_id, db)
+        _bought_row = await db.execute(
             sql_text("SELECT credits_remaining FROM query_credits WHERE user_id = :uid"),
             {"uid": caller_user_id},
         )
-        bal_rec = bal_row.mappings().first()
-        bal = bal_rec["credits_remaining"] if bal_rec else 0
-        if bal < total_credits:
+        _bought_bal = int((_bought_row.mappings().first() or {}).get("credits_remaining") or 0)
+        if _plan_bal + _bought_bal < total_credits:
             raise HTTPException(status_code=402, detail=f"Insufficient credits (need {total_credits} for {rounds} rounds)")
 
     names: dict[str, str] = {}
@@ -2972,10 +2963,7 @@ async def synthesis_deliberate(body: dict, request: Request) -> dict:
             turns.append({"clone_id": cid, "name": names[cid], "message": result.response, "round": round_num})
 
     async with AsyncSessionLocal() as db:
-        await db.execute(
-            sql_text("UPDATE query_credits SET credits_remaining = credits_remaining - :n, updated_at = NOW() WHERE user_id = :uid"),
-            {"n": total_credits, "uid": caller_user_id},
-        )
+        await _deduct_personal_credits(caller_user_id, total_credits, db)
         await db.commit()
 
     from doppel.brain.context import get_anthropic_client
@@ -5941,6 +5929,7 @@ async def get_activity_report(
             FROM reasoning_traces
             WHERE clone_id = :cid
               AND created_at >= NOW() - MAKE_INTERVAL(days => :days)
+              AND (brain_input->>'owner_mode')::boolean = TRUE
             GROUP BY DATE(created_at)
             ORDER BY day ASC
         """),
@@ -5961,6 +5950,7 @@ async def get_activity_report(
             FROM reasoning_traces
             WHERE clone_id = :cid
               AND created_at >= NOW() - MAKE_INTERVAL(days => :days)
+              AND (brain_input->>'owner_mode')::boolean = TRUE
         """),
         {"cid": cid, "days": days},
     )
@@ -5977,6 +5967,7 @@ async def get_activity_report(
               AND created_at >= NOW() - MAKE_INTERVAL(days => :days)
               AND brain_input->>'sender_id' IS NOT NULL
               AND brain_input->>'sender_id' != ''
+              AND (brain_input->>'owner_mode')::boolean = TRUE
             GROUP BY brain_input->>'sender_id'
             ORDER BY query_count DESC
             LIMIT 15
@@ -6000,6 +5991,7 @@ async def get_activity_report(
             WHERE clone_id = :cid
               AND created_at >= NOW() - MAKE_INTERVAL(days => :days)
               AND brain_input->>'message' IS NOT NULL
+              AND (brain_input->>'owner_mode')::boolean = TRUE
             GROUP BY brain_input->>'message'
             ORDER BY count DESC, MAX(created_at) DESC
             LIMIT 25
@@ -6065,6 +6057,7 @@ async def export_activity_report(
             FROM reasoning_traces
             WHERE clone_id = :cid
               AND created_at >= NOW() - MAKE_INTERVAL(days => :days)
+              AND (brain_input->>'owner_mode')::boolean = TRUE
             ORDER BY created_at DESC
             LIMIT 10000
         """),

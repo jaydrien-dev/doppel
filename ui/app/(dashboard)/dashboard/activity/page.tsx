@@ -323,17 +323,20 @@ function ActionButtons({ trace, onFeedback }: {
   const [saving, setSaving] = useState(false);
   const [editing, setEditing] = useState(false);
   const [correction, setCorrection] = useState("");
-  const signal = trace.feedback_signal;
+  // Local signal state for immediate feedback — don't rely on prop propagation from parent
+  const [localSignal, setLocalSignal] = useState<FeedbackSignalType | null>(null);
+  const signal = localSignal ?? trace.feedback_signal;
 
   async function act(s: FeedbackSignalType, correctedText?: string) {
     if (saving) return;
     setSaving(true);
+    setLocalSignal(s); // show badge immediately on click
     try {
       await onFeedback(trace.id, s, correctedText);
       setEditing(false);
       setCorrection("");
     } catch {
-      // local state was already updated optimistically in onFeedback; ignore
+      setLocalSignal(null); // revert on API failure
     } finally {
       setSaving(false);
     }
@@ -369,8 +372,8 @@ function ActionButtons({ trace, onFeedback }: {
     </div>
   ) : null;
 
-  // Already actioned rows show a badge (rejected rows stay actionable)
-  if (signal && signal !== "rejected") {
+  // Already actioned rows show a badge
+  if (signal) {
     return <>{drawer}<SignalBadge signal={signal} /></>;
   }
 
