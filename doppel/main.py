@@ -340,7 +340,20 @@ async def _refresh_plan_credits(user_id: str, session: AsyncSession) -> int:
         )
         return weekly
     else:
-        return int(rec["credits"])
+        current = int(rec["credits"])
+        # Same week — if tier upgraded mid-week, top up to the new allowance immediately.
+        # (Never take credits away for downgrades — let them exhaust what they have.)
+        if weekly > current:
+            await session.execute(
+                sql_text("""
+                    UPDATE plan_credits
+                    SET credits = :credits, updated_at = NOW()
+                    WHERE user_id = :uid
+                """),
+                {"uid": user_id, "credits": weekly},
+            )
+            return weekly
+        return current
 
 
 async def _deduct_personal_credits(user_id: str, cost: int, session: AsyncSession) -> None:
@@ -4266,9 +4279,10 @@ async def create_checkout_session(
             metadata={"user_id": body.user_id, "clone_id": str(record["clone_id"])},
         )
         customer_id = customer.id
+        # Propagate to ALL clones for this user so webhooks match every clone
         await session.execute(
-            sql_text("UPDATE clone_identity SET stripe_customer_id = :cid WHERE clone_id = :id"),
-            {"cid": customer_id, "id": str(record["clone_id"])},
+            sql_text("UPDATE clone_identity SET stripe_customer_id = :cid WHERE user_id = :uid"),
+            {"cid": customer_id, "uid": body.user_id},
         )
         await session.commit()
 
@@ -4344,12 +4358,15 @@ async def stripe_webhook(request: Request) -> dict:
             meta = obj.get("metadata", {})
             user_id = meta.get("user_id")
             subscription_id = obj.get("subscription")
+            customer_id = obj.get("customer")
             tier = meta.get("tier")  # set at checkout creation time
             if user_id and subscription_id:
+                # Propagate stripe_customer_id + tier to ALL clones for this user
                 await session.execute(
                     sql_text("""
                         UPDATE clone_identity
-                        SET stripe_subscription_id = :sid
+                        SET stripe_subscription_id = :sid,
+                            stripe_customer_id     = COALESCE(:cid, stripe_customer_id)
                             {tier_clause}
                         WHERE user_id = :uid
                           AND (admin_tier_override IS NULL OR admin_tier_override = FALSE)
@@ -4359,6 +4376,7 @@ async def stripe_webhook(request: Request) -> dict:
                     )),
                     {
                         "sid": subscription_id,
+                        "cid": customer_id,
                         "uid": user_id,
                         **({"tier": tier} if tier else {}),
                     },
@@ -4373,12 +4391,17 @@ async def stripe_webhook(request: Request) -> dict:
             price_id = items[0]["price"]["id"] if items else None
             tier = _price_to_tier().get(price_id, "free") if price_id else "free"
             if customer_id:
+                # Update ALL clones belonging to this customer's user account
                 await session.execute(
                     sql_text("""
                         UPDATE clone_identity
-                        SET subscription_tier = :tier,
-                            stripe_subscription_id = :sid
-                        WHERE stripe_customer_id = :cid
+                        SET subscription_tier      = :tier,
+                            stripe_subscription_id = :sid,
+                            stripe_customer_id     = :cid
+                        WHERE user_id IN (
+                            SELECT DISTINCT user_id FROM clone_identity
+                            WHERE stripe_customer_id = :cid
+                        )
                           AND (admin_tier_override IS NULL OR admin_tier_override = FALSE)
                     """),
                     {"tier": tier, "sid": sub["id"], "cid": customer_id},
@@ -4389,12 +4412,16 @@ async def stripe_webhook(request: Request) -> dict:
             sub = event["data"]["object"]
             customer_id = sub.get("customer")
             if customer_id:
+                # Downgrade ALL clones for this user
                 await session.execute(
                     sql_text("""
                         UPDATE clone_identity
-                        SET subscription_tier = 'free',
+                        SET subscription_tier      = 'free',
                             stripe_subscription_id = NULL
-                        WHERE stripe_customer_id = :cid
+                        WHERE user_id IN (
+                            SELECT DISTINCT user_id FROM clone_identity
+                            WHERE stripe_customer_id = :cid
+                        )
                           AND (admin_tier_override IS NULL OR admin_tier_override = FALSE)
                     """),
                     {"cid": customer_id},
@@ -4524,21 +4551,22 @@ async def sync_billing_from_stripe(
     changed = (resolved_tier != db_tier) or (customer_id != record["stripe_customer_id"])
 
     if changed:
+        # Update ALL clones for this user — tier and customer ID are user-level, not clone-level
         await session.execute(
             sql_text("""
                 UPDATE clone_identity
-                SET subscription_tier    = :tier,
-                    stripe_customer_id   = :cid,
+                SET subscription_tier      = :tier,
+                    stripe_customer_id     = :cid,
                     stripe_subscription_id = :sid,
-                    updated_at           = now()
-                WHERE clone_id = :id
+                    updated_at             = now()
+                WHERE user_id = :uid
                   AND (admin_tier_override IS NULL OR admin_tier_override = FALSE)
             """),
             {
                 "tier": resolved_tier,
                 "cid": customer_id,
                 "sid": resolved_sub_id,
-                "id": clone_id,
+                "uid": user_id,
             },
         )
         await session.commit()
