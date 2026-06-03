@@ -4352,6 +4352,7 @@ async def stripe_webhook(request: Request) -> dict:
                         SET stripe_subscription_id = :sid
                             {tier_clause}
                         WHERE user_id = :uid
+                          AND (admin_tier_override IS NULL OR admin_tier_override = FALSE)
                     """.replace(
                         "{tier_clause}",
                         ", subscription_tier = :tier" if tier else ""
@@ -4425,6 +4426,129 @@ async def billing_status(
         "tier": record["subscription_tier"] or "free",
         "stripe_customer_id": record["stripe_customer_id"],
         "stripe_subscription_id": record["stripe_subscription_id"],
+    }
+
+
+@app.post("/billing/sync")
+async def sync_billing_from_stripe(
+    user_id: str = Query(...),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """
+    Reconcile subscription state by querying Stripe directly.
+
+    Use cases:
+    - Webhook was missed / not delivered during dev/early prod
+    - User paid but their tier wasn't updated in the DB
+    - stripe_customer_id not yet linked to a clone_identity row
+
+    Safe to call on every billing page load — no-ops if already in sync.
+    Respects admin_tier_override — never overwrites a manually set tier.
+    """
+    import stripe as stripe_lib
+
+    if not settings.stripe_secret_key:
+        # Stripe not configured — silently skip rather than 503
+        return {"synced": False, "reason": "Stripe not configured", "tier": "free"}
+
+    stripe_lib.api_key = settings.stripe_secret_key
+
+    # Load current DB state
+    row = await session.execute(
+        sql_text("""
+            SELECT clone_id, stripe_customer_id, subscription_tier, admin_tier_override,
+                   stripe_subscription_id
+            FROM clone_identity WHERE user_id = :uid LIMIT 1
+        """),
+        {"uid": user_id},
+    )
+    record = row.mappings().first()
+    if not record:
+        raise HTTPException(status_code=404, detail="No clone found for this user")
+
+    # Never overwrite admin-managed tiers
+    if bool(record.get("admin_tier_override")):
+        return {
+            "synced": False,
+            "reason": "admin_tier_override active",
+            "tier": record["subscription_tier"] or "free",
+        }
+
+    customer_id: str | None = record["stripe_customer_id"]
+    clone_id = str(record["clone_id"])
+    db_tier = record["subscription_tier"] or "free"
+
+    # ── Step 1: Find Stripe customer if not linked ───────────────────────────
+    if not customer_id:
+        try:
+            results = stripe_lib.Customer.search(
+                query=f'metadata["user_id"]:"{user_id}"',
+                limit=1,
+            )
+            if results.data:
+                customer_id = results.data[0].id
+        except Exception:
+            pass  # search API may not be enabled on older Stripe accounts
+
+    if not customer_id:
+        return {"synced": False, "reason": "No Stripe customer found", "tier": db_tier}
+
+    # ── Step 2: Find the highest active/trialing subscription ────────────────
+    price_map = _price_to_tier()
+    resolved_tier = "free"
+    resolved_sub_id: str | None = None
+
+    try:
+        for status in ("active", "trialing", "past_due"):
+            subs = stripe_lib.Subscription.list(
+                customer=customer_id,
+                status=status,
+                limit=10,
+                expand=["data.items.data.price"],
+            )
+            for sub in subs.data:
+                for item in sub["items"]["data"]:
+                    mapped = price_map.get(item["price"]["id"])
+                    if mapped and mapped != "free":
+                        resolved_tier = mapped
+                        resolved_sub_id = sub["id"]
+                        break
+                if resolved_tier != "free":
+                    break
+            if resolved_tier != "free":
+                break
+    except stripe_lib.StripeError as e:
+        raise HTTPException(status_code=502, detail=f"Stripe error: {e.user_message}")
+
+    # ── Step 3: Write back to DB only if something changed ───────────────────
+    changed = (resolved_tier != db_tier) or (customer_id != record["stripe_customer_id"])
+
+    if changed:
+        await session.execute(
+            sql_text("""
+                UPDATE clone_identity
+                SET subscription_tier    = :tier,
+                    stripe_customer_id   = :cid,
+                    stripe_subscription_id = :sid,
+                    updated_at           = now()
+                WHERE clone_id = :id
+                  AND (admin_tier_override IS NULL OR admin_tier_override = FALSE)
+            """),
+            {
+                "tier": resolved_tier,
+                "cid": customer_id,
+                "sid": resolved_sub_id,
+                "id": clone_id,
+            },
+        )
+        await session.commit()
+
+    return {
+        "synced": True,
+        "changed": changed,
+        "tier": resolved_tier,
+        "stripe_customer_id": customer_id,
+        "stripe_subscription_id": resolved_sub_id,
     }
 
 

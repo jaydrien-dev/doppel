@@ -3,7 +3,8 @@
 import Link from "next/link";
 import useSWR from "swr";
 import { useClone } from "@/lib/hooks/useClone";
-import type { BrainStats, ActivityTrace } from "@/lib/types";
+import { useClones } from "@/lib/hooks/useClones";
+import type { BrainStats, ActivityTrace, CloneOwnerInfo } from "@/lib/types";
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
@@ -16,41 +17,8 @@ function rel(iso: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Stats bar
+// Stats bar (4 tiles only — memory bars handled by AllClonesMemoryBars below)
 // ---------------------------------------------------------------------------
-function MemoryBar({ used, limit }: { used: number; limit: number }) {
-  const pct = limit > 0 ? Math.min((used / limit) * 100, 100) : 0;
-  const nearLimit = pct >= 80;
-  const atLimit = pct >= 100;
-  const barColor = atLimit
-    ? "rgba(248,113,113,0.70)"
-    : nearLimit
-    ? "rgba(251,191,36,0.70)"
-    : "rgba(255,255,255,0.35)";
-
-  function fmt(n: number) {
-    return n >= 1000 ? `${(n / 1000).toLocaleString(undefined, { maximumFractionDigits: 1 })}k` : n.toLocaleString();
-  }
-
-  return (
-    <div style={{ padding: "14px 18px", borderRadius: 14, background: "rgba(255,255,255,0.02)", border: `1px solid ${atLimit ? "rgba(248,113,113,0.18)" : nearLimit ? "rgba(251,191,36,0.14)" : "rgba(255,255,255,0.07)"}`, marginBottom: 28 }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-        <p style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.10em", color: "rgba(255,255,255,0.25)", margin: 0 }}>
-          Memory chunks
-        </p>
-        <p style={{ fontSize: 12, color: atLimit ? "rgba(248,113,113,0.80)" : nearLimit ? "rgba(251,191,36,0.80)" : "rgba(255,255,255,0.45)", margin: 0, fontVariantNumeric: "tabular-nums" }}>
-          {fmt(used)} / {fmt(limit)}
-          {atLimit && <span style={{ marginLeft: 8, fontSize: 11 }}>Limit reached — upgrade to store more</span>}
-          {!atLimit && nearLimit && <span style={{ marginLeft: 8, fontSize: 11 }}>Approaching limit</span>}
-        </p>
-      </div>
-      <div style={{ height: 4, borderRadius: 999, background: "rgba(255,255,255,0.06)", overflow: "hidden" }}>
-        <div style={{ height: "100%", width: `${pct}%`, borderRadius: 999, background: barColor, transition: "width 600ms ease" }} />
-      </div>
-    </div>
-  );
-}
-
 function StatsBar({ cloneId }: { cloneId: string }) {
   const { data: stats } = useSWR<BrainStats>(
     `/api/brain/stats?clone_id=${cloneId}`,
@@ -114,22 +82,71 @@ function StatsBar({ cloneId }: { cloneId: string }) {
     },
   ];
 
-  const memUsed = stats?.memory_used ?? stats?.episodic ?? 0;
-  const memLimit = stats?.memory_limit ?? 0;
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, marginBottom: 14 }}>
+      {items.map(({ label, value, sub, modifier }) => (
+        <div key={label} className={["stat-tile", modifier].filter(Boolean).join(" ")}>
+          <p className="stat-tile__value">{value}</p>
+          <p className="stat-tile__label">{label}</p>
+          {sub && <p className="stat-tile__sub">{sub}</p>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Per-clone memory bar — fetches its own stats
+function CloneMemoryBar({ clone }: { clone: CloneOwnerInfo }) {
+  const { data: stats } = useSWR<BrainStats>(
+    `/api/brain/stats?clone_id=${clone.clone_id}`,
+    fetcher,
+    { refreshInterval: 60_000 }
+  );
+  const used = stats?.memory_used ?? stats?.episodic ?? 0;
+  const limit = stats?.memory_limit ?? 0;
+  if (!limit) return null;
+
+  const pct = Math.min((used / limit) * 100, 100);
+  const nearLimit = pct >= 80;
+  const atLimit = pct >= 100;
+  const barColor = atLimit ? "rgba(248,113,113,0.70)" : nearLimit ? "rgba(251,191,36,0.70)" : "rgba(255,255,255,0.35)";
+
+  function fmt(n: number) {
+    return n >= 1000 ? `${(n / 1000).toLocaleString(undefined, { maximumFractionDigits: 1 })}k` : n.toLocaleString();
+  }
 
   return (
-    <>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, marginBottom: 14 }}>
-        {items.map(({ label, value, sub, modifier }) => (
-          <div key={label} className={["stat-tile", modifier].filter(Boolean).join(" ")}>
-            <p className="stat-tile__value">{value}</p>
-            <p className="stat-tile__label">{label}</p>
-            {sub && <p className="stat-tile__sub">{sub}</p>}
-          </div>
-        ))}
+    <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+      <span style={{ fontSize: 12, color: "rgba(255,255,255,0.50)", whiteSpace: "nowrap", minWidth: 120, overflow: "hidden", textOverflow: "ellipsis" }}>
+        {clone.listing_title || clone.display_name}
+      </span>
+      <div style={{ flex: 1, height: 4, borderRadius: 999, background: "rgba(255,255,255,0.06)", overflow: "hidden" }}>
+        <div style={{ height: "100%", width: `${pct}%`, borderRadius: 999, background: barColor, transition: "width 600ms ease" }} />
       </div>
-      {memLimit > 0 && <MemoryBar used={memUsed} limit={memLimit} />}
-    </>
+      <span style={{
+        fontSize: 11, color: atLimit ? "rgba(248,113,113,0.80)" : nearLimit ? "rgba(251,191,36,0.80)" : "rgba(255,255,255,0.35)",
+        whiteSpace: "nowrap", minWidth: 80, textAlign: "right", fontVariantNumeric: "tabular-nums",
+      }}>
+        {fmt(used)} / {fmt(limit)}
+      </span>
+    </div>
+  );
+}
+
+function AllClonesMemoryBars() {
+  const { clones } = useClones();
+  if (clones.length === 0) return null;
+  return (
+    <div style={{
+      padding: "14px 18px", borderRadius: 14,
+      background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.07)",
+      marginBottom: 28, display: "flex", flexDirection: "column", gap: 12,
+    }}>
+      <p style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.10em", color: "rgba(255,255,255,0.25)", margin: "0 0 4px" }}>
+        Memory usage
+      </p>
+      {clones.map((c) => <CloneMemoryBar key={c.clone_id} clone={c} />)}
+    </div>
   );
 }
 
@@ -308,6 +325,7 @@ export default function DashboardPage() {
       </div>
 
       <StatsBar cloneId={clone.clone_id} />
+      <AllClonesMemoryBars />
 
       {/* Two-col layout: activity list + sidebar */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 280px", gap: 20, alignItems: "start" }}>

@@ -171,17 +171,39 @@ class DoppelBrain:
           data: {"event": "thinking"}                        ← slow path only
           data: {"event": "token", "text": "..."}            ← one per chunk
           data: {"event": "done", "trace_id": "...", ...}
+
+        The LLM generation runs in an independent asyncio Task so the response is
+        fully generated and persisted to the DB even when the HTTP client disconnects
+        mid-stream (e.g. user navigates away before the reply finishes).
         """
-        t_start = time.monotonic()
-        try:
-            async for chunk in self._process_stream_inner(brain_input, t_start):
-                yield chunk
-        except Exception as exc:
-            import logging
-            logging.getLogger(__name__).error("Stream error: %s", exc, exc_info=True)
-            import json as _json
-            yield f"data: {_json.dumps({'event': 'error', 'message': str(exc)})}\n\n"
-            return
+        from doppel.brain.db.connection import AsyncSessionLocal
+        clone_id = self._clone_id
+        queue: asyncio.Queue[str | None] = asyncio.Queue()
+
+        async def _brain_task() -> None:
+            """Independent task — survives client disconnect."""
+            async with AsyncSessionLocal() as bg_session:
+                bg_brain = DoppelBrain(session=bg_session, clone_id=clone_id)
+                t_start = time.monotonic()
+                try:
+                    async for chunk in bg_brain._process_stream_inner(brain_input, t_start):
+                        await queue.put(chunk)
+                except Exception as exc:
+                    import logging as _logging
+                    _logging.getLogger(__name__).error("Stream task error: %s", exc, exc_info=True)
+                    await queue.put(
+                        f"data: {json.dumps({'event': 'error', 'message': str(exc)})}\n\n"
+                    )
+                finally:
+                    await queue.put(None)  # always signal completion
+
+        asyncio.create_task(_brain_task())
+
+        while True:
+            chunk = await queue.get()
+            if chunk is None:
+                break
+            yield chunk
 
     async def _process_stream_inner(
         self, brain_input: BrainInput, t_start: float

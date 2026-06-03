@@ -11,37 +11,75 @@ interface UseChatOptions {
   ownerMode?: boolean; // true = skip credits for owner (training); false = charge owner too (consumer test)
 }
 
+// localStorage key for persisted messages per clone+session
+function msgsKey(cloneId: string, sessionId: string) {
+  return `doppel_msgs:${cloneId}:${sessionId}`;
+}
+
 export function useChat({ cloneId, contextType = "chat", sessionId: initialSessionId, ownerMode = true }: UseChatOptions) {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const resolvedSessionId = useRef(initialSessionId ?? uuidv4());
+
+  // Init messages from localStorage on first render (instant, no flicker)
+  const [messages, setMessages] = useState<ChatMessage[]>(() => {
+    if (typeof window === "undefined") return [];
+    const sid = initialSessionId ?? resolvedSessionId.current;
+    try {
+      const stored = localStorage.getItem(msgsKey(cloneId, sid));
+      if (!stored) return [];
+      const parsed = JSON.parse(stored) as ChatMessage[];
+      return parsed
+        .filter((m) => !m.isStreaming)
+        .map((m) => ({ ...m, timestamp: new Date(m.timestamp as unknown as string), isHistory: true }));
+    } catch {
+      return [];
+    }
+  });
+
   const [isLoading, setIsLoading] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
+  // historyLoading = true when we need to do a DB fetch (on mount with a session)
   const [historyLoading, setHistoryLoading] = useState(!!initialSessionId);
   const [error, setError] = useState<string | null>(null);
-  const sessionId = useRef(initialSessionId ?? uuidv4());
 
-  // Load previous messages when a session ID is provided
+  // Persist messages to localStorage whenever they change (excluding streaming placeholder)
   useEffect(() => {
-    if (!initialSessionId) return;
+    if (typeof window === "undefined") return;
+    const sid = resolvedSessionId.current;
+    const toStore = messages.filter((m) => !m.isStreaming);
+    if (toStore.length === 0) return;
+    try {
+      localStorage.setItem(msgsKey(cloneId, sid), JSON.stringify(toStore));
+    } catch { /* storage full — non-fatal */ }
+  }, [messages, cloneId]);
+
+  // Load DB history on mount — DB is authoritative; merges with live (non-history) messages
+  useEffect(() => {
+    if (!initialSessionId) {
+      setHistoryLoading(false);
+      return;
+    }
     setHistoryLoading(true);
     fetch(`/api/brain/sessions/${initialSessionId}/messages`)
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (data?.messages?.length) {
-          setMessages(
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            data.messages.map((m: any) => ({
-              id: uuidv4(),
-              role: m.role as "user" | "clone",
-              content: m.content ?? "",
-              timestamp: m.timestamp ? new Date(m.timestamp) : new Date(),
-              path_taken: m.path_taken,
-              confidence: m.confidence ?? undefined,
-              isHistory: true,
-            }))
-          );
+          const dbMessages: ChatMessage[] = data.messages.map((m: any) => ({ // eslint-disable-line @typescript-eslint/no-explicit-any
+            id: uuidv4(),
+            role: m.role as "user" | "clone",
+            content: m.content ?? "",
+            timestamp: m.timestamp ? new Date(m.timestamp) : new Date(),
+            path_taken: m.path_taken,
+            confidence: m.confidence ?? undefined,
+            isHistory: true,
+          }));
+          // DB wins — replace history messages, keep any live (non-history) messages appended after
+          setMessages((prev) => {
+            const live = prev.filter((m) => !m.isHistory);
+            return [...dbMessages, ...live];
+          });
         }
       })
-      .catch(() => {/* non-fatal */})
+      .catch(() => {/* non-fatal — localStorage still covers it */})
       .finally(() => setHistoryLoading(false));
   }, [initialSessionId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -79,7 +117,7 @@ export function useChat({ cloneId, contextType = "chat", sessionId: initialSessi
           body: JSON.stringify({
             stream: true,
             clone_id: cloneId,
-            session_id: sessionId.current,
+            session_id: resolvedSessionId.current,
             message: content.trim(),
             context_type: contextType,
             response_mode: responseMode,
@@ -173,9 +211,13 @@ export function useChat({ cloneId, contextType = "chat", sessionId: initialSessi
   );
 
   const clearMessages = useCallback(() => {
+    // Clear localStorage for current session before generating new session ID
+    try {
+      localStorage.removeItem(msgsKey(cloneId, resolvedSessionId.current));
+    } catch { /* non-fatal */ }
     setMessages([]);
-    sessionId.current = uuidv4();
-  }, []);
+    resolvedSessionId.current = uuidv4();
+  }, [cloneId]);
 
-  return { messages, isLoading, isThinking, historyLoading, error, sendMessage, clearMessages, sessionId: sessionId.current };
+  return { messages, isLoading, isThinking, historyLoading, error, sendMessage, clearMessages, sessionId: resolvedSessionId.current };
 }

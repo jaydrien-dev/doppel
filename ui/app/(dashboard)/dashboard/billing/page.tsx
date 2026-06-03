@@ -147,11 +147,24 @@ function BillingContent() {
   const canceled = params.get("canceled") === "1";
 
   useEffect(() => {
-    fetch("/api/billing/status")
+    // Sync first (reconciles any missed Stripe webhooks), then read fresh status
+    fetch("/api/billing/sync", { method: "POST" })
+      .then((r) => r.json())
+      .then((sync) => {
+        // sync returns the resolved tier directly — use it, then also fetch status for IDs
+        setStatus((prev) => prev ? { ...prev, tier: sync.tier ?? prev.tier } : { tier: sync.tier ?? "free" });
+        return fetch("/api/billing/status");
+      })
       .then((r) => r.json())
       .then((d) => setStatus(d))
-      .catch(() => setStatus({ tier: "free" }));
-  }, []);
+      .catch(() => {
+        // Fallback: just read status from DB
+        fetch("/api/billing/status")
+          .then((r) => r.json())
+          .then((d) => setStatus(d))
+          .catch(() => setStatus({ tier: "free" }));
+      });
+  }, [success]); // re-run after successful checkout return
 
   async function handleUpgrade(planId: Tier) {
     setLoadingPlan(planId);

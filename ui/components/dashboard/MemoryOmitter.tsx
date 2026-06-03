@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import useSWR from "swr";
-import { useClone } from "@/lib/hooks/useClone";
 
 interface OmissionRule {
   pattern: string;
@@ -12,9 +11,7 @@ interface OmissionRule {
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
-export function MemoryOmitter() {
-  const { clone } = useClone();
-  const handle = clone?.handle;
+export function MemoryOmitter({ handle }: { handle: string }) {
 
   const { data, isLoading, mutate } = useSWR<{ rules: OmissionRule[] }>(
     handle ? `/api/clones/${handle}/omissions` : null,

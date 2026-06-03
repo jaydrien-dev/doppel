@@ -121,16 +121,6 @@ const MARKETPLACE: NavItem[] = [
     ),
   },
   {
-    href: "/dashboard/credits",
-    label: "Credits",
-    icon: (
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-        <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.4" opacity="0.6"/>
-        <path d="M8 5v6M5.5 7h4a1 1 0 010 2H6" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" opacity="0.8"/>
-      </svg>
-    ),
-  },
-  {
     href: "/dashboard/bundles",
     label: "Bundles",
     icon: (
@@ -360,8 +350,6 @@ function UserFooter() {
       .catch(() => {});
   }, []);
 
-  const totalCredits = credits ? credits.plan + credits.bought : null;
-
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "4px 4px 0" }}>
       <div className="sb__user">
@@ -381,17 +369,29 @@ function UserFooter() {
             >
               {TIER_LABEL[tier] ?? tier}
             </span>
-            {totalCredits !== null && (
+          </div>
+          {/* Credits breakdown — plan · bought */}
+          {credits !== null && (
+            <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 4, flexWrap: "wrap" }}>
               <span style={{
                 fontSize: 10, padding: "2px 6px", borderRadius: 999,
-                background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)",
-                color: totalCredits > 0 ? "rgba(255,255,255,0.45)" : "rgba(248,113,113,0.55)",
+                background: "rgba(96,165,250,0.08)", border: "1px solid rgba(96,165,250,0.15)",
+                color: credits.plan > 0 ? "rgba(96,165,250,0.70)" : "rgba(255,255,255,0.25)",
                 fontVariantNumeric: "tabular-nums",
-              }}>
-                {totalCredits.toLocaleString()} cr
+              }} title="Plan credits (weekly)">
+                {credits.plan.toLocaleString()} plan
               </span>
-            )}
-          </div>
+              <span style={{ fontSize: 9, color: "rgba(255,255,255,0.18)" }}>·</span>
+              <span style={{
+                fontSize: 10, padding: "2px 6px", borderRadius: 999,
+                background: "rgba(196,181,253,0.07)", border: "1px solid rgba(196,181,253,0.12)",
+                color: credits.bought > 0 ? "rgba(196,181,253,0.65)" : "rgba(255,255,255,0.25)",
+                fontVariantNumeric: "tabular-nums",
+              }} title="Bought credits (never expire)">
+                {credits.bought.toLocaleString()} bought
+              </span>
+            </div>
+          )}
         </div>
       </div>
       <button onClick={() => signOut({ redirectUrl: "/" })} className="sb__util">

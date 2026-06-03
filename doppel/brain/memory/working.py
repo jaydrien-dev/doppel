@@ -60,7 +60,11 @@ async def get_turns(
     session_id: UUID,
     max_turns: int | None = None,
 ) -> list[WorkingMemoryTurn]:
-    """Return conversation turns for the session, oldest first."""
+    """Return conversation turns for the session, oldest first.
+
+    Falls back to reasoning_traces when the cache is cold (Redis TTL expired
+    or server restarted) so conversation context is never lost across restarts.
+    """
     if max_turns is None:
         max_turns = settings.working_memory_max_turns
 
@@ -70,12 +74,52 @@ async def get_turns(
             async with aioredis.from_url(settings.redis_url, decode_responses=True) as redis:
                 key = _session_key(clone_id, session_id)
                 raw_turns = await redis.lrange(key, -max_turns, -1)
-                return [WorkingMemoryTurn.model_validate_json(t) for t in raw_turns]
+                if raw_turns:
+                    return [WorkingMemoryTurn.model_validate_json(t) for t in raw_turns]
         except Exception:
             pass  # fall through to local store
 
     raw = _local_store.get(_session_key(clone_id, session_id), [])
-    return [WorkingMemoryTurn.model_validate_json(t) for t in raw[-max_turns:]]
+    if raw:
+        return [WorkingMemoryTurn.model_validate_json(t) for t in raw[-max_turns:]]
+
+    # Cache is cold — rebuild from DB (handles Redis TTL expiry and server restarts)
+    try:
+        from sqlalchemy import text as _sql_text
+        from doppel.brain.db.connection import AsyncSessionLocal
+        async with AsyncSessionLocal() as db:
+            rows = await db.execute(
+                _sql_text("""
+                    SELECT brain_input->>'message' AS user_msg,
+                           response                AS clone_msg,
+                           confidence,
+                           created_at
+                    FROM reasoning_traces
+                    WHERE clone_id = :cid AND session_id = :sid
+                    ORDER BY created_at ASC
+                    LIMIT :n
+                """),
+                {"cid": str(clone_id), "sid": str(session_id), "n": max_turns},
+            )
+            db_turns: list[WorkingMemoryTurn] = []
+            for r in rows.mappings():
+                ts = r["created_at"] or datetime.utcnow()
+                if r["user_msg"]:
+                    db_turns.append(WorkingMemoryTurn(role="user", content=r["user_msg"], timestamp=ts))
+                if r["clone_msg"]:
+                    db_turns.append(WorkingMemoryTurn(
+                        role="clone",
+                        content=r["clone_msg"],
+                        confidence=float(r["confidence"]) if r["confidence"] is not None else None,
+                        timestamp=ts,
+                    ))
+        if db_turns:
+            # Repopulate cache so subsequent requests are fast
+            for turn in db_turns:
+                await append_turn(clone_id, session_id, turn.role, turn.content, turn.confidence)
+        return db_turns[-max_turns:]
+    except Exception:
+        return []
 
 
 async def clear_session(clone_id: UUID, session_id: UUID) -> None:

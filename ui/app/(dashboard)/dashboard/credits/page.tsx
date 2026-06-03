@@ -148,7 +148,7 @@ function CreditsContent() {
     <div className="db-page" style={{ display: "flex", flexDirection: "column", gap: 24 }}>
       <div className="db-page-head">
         <div>
-          <p className="db-eyebrow">Marketplace</p>
+          <p className="db-eyebrow">Account</p>
           <h1 className="db-h1">Credits</h1>
         </div>
       </div>

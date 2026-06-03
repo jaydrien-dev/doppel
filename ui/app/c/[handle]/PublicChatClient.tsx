@@ -45,6 +45,11 @@ const IMore = () => (
     <circle cx="3.5" cy="8" r="1.2"/><circle cx="8" cy="8" r="1.2"/><circle cx="12.5" cy="8" r="1.2"/>
   </svg>
 );
+const INewChat = () => (
+  <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+    <path d="M8 3v10M3 8h10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
+  </svg>
+);
 const ISparkle = () => (
   <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor">
     <path d="M8 2l1.2 3.6L13 7l-3.8 1.4L8 12l-1.2-3.6L3 7l3.8-1.4z" opacity="0.85"/>
@@ -72,7 +77,7 @@ export function PublicChatClient({
   const suggested = isOnboardingResource ? SUGGESTED_ONBOARDING : SUGGESTED_DEFAULT;
 
   // Persist session ID per clone so history survives page refreshes
-  const [sessionId] = useState<string>(() => {
+  const [sessionId, setSessionId] = useState<string>(() => {
     if (typeof window === "undefined") return crypto.randomUUID();
     const key = `doppel_session:${clone.handle}`;
     const existing = localStorage.getItem(key);
@@ -81,6 +86,14 @@ export function PublicChatClient({
     localStorage.setItem(key, fresh);
     return fresh;
   });
+
+  function startNewConversation() {
+    const fresh = crypto.randomUUID();
+    localStorage.setItem(`doppel_session:${clone.handle}`, fresh);
+    // Clear stored messages for old session
+    try { localStorage.removeItem(`doppel_msgs:${clone.clone_id}:${sessionId}`); } catch { /* non-fatal */ }
+    setSessionId(fresh);
+  }
 
   const cloneColor = deriveColor(clone.display_name);
   const cloneInitial = clone.display_name[0]?.toUpperCase() ?? "A";
@@ -127,6 +140,9 @@ export function PublicChatClient({
             </div>
           </div>
           <div className="chat-hdr__actions">
+            <button className="chat-hdr__act" onClick={startNewConversation} aria-label="New conversation" title="New conversation">
+              <INewChat />
+            </button>
             <button className="chat-hdr__act" onClick={handleShare} aria-label="Share">
               <IShare />
             </button>
@@ -150,6 +166,7 @@ export function PublicChatClient({
       {/* Chat interface */}
       <div style={{ flex: 1, minHeight: 0 }}>
         <ChatInterface
+          key={sessionId}
           cloneId={clone.clone_id}
           cloneName={clone.display_name}
           cloneColor={cloneColor}
