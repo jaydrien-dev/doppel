@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import useSWR from "swr";
-import { useClone } from "@/lib/hooks/useClone";
+import { useClones } from "@/lib/hooks/useClones";
+import { ClonePicker } from "@/components/dashboard/ClonePicker";
 import { submitFeedback } from "@/lib/api";
 import type { ActivityTrace, FeedbackSignalType } from "@/lib/types";
 
@@ -514,10 +515,16 @@ function TraceRow({ trace, idx, total, onFeedback }: {
 }
 
 export default function ActivityPage() {
-  const { clone, isLoading: cloneLoading } = useClone();
+  const { clones, isLoading: cloneLoading } = useClones();
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const clone = clones.find(c => c.clone_id === selectedId) ?? clones[0] ?? null;
+
   const [tab, setTab] = useState<"review" | "reports">("review");
   const [filter, setFilter] = useState<Filter>("all");
   const [localFeedback, setLocalFeedback] = useState<Record<string, FeedbackSignalType>>({});
+
+  // Reset feedback when switching clones
+  useEffect(() => { setLocalFeedback({}); }, [clone?.clone_id]);
 
   const { data, isLoading, mutate } = useSWR<{ traces: ActivityTrace[] }>(
     clone?.clone_id ? `/api/activity?clone_id=${clone.clone_id}&limit=100` : null,
@@ -555,6 +562,7 @@ export default function ActivityPage() {
           <h1 className="db-h1">Activity{tab === "review" && pendingCount > 0 && <em> · {pendingCount} to review</em>}</h1>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <ClonePicker clones={clones} selected={clone ?? clones[0]} onSelect={c => setSelectedId(c.clone_id)} />
           {/* Tab switcher */}
           <div style={{ display: "flex", gap: 4, padding: 4, borderRadius: 10, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }}>
             {(["review", "reports"] as const).map((t) => (

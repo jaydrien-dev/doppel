@@ -1,7 +1,14 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useClone } from "@/lib/hooks/useClone";
+import { useClones } from "@/lib/hooks/useClones";
+import { ClonePicker } from "@/components/dashboard/ClonePicker";
+import type { CloneOwnerInfo } from "@/lib/types";
+import { extractStyle, getGithubAuthUrl, getGmailAuthUrl, getNotionAuthUrl, getSlackInstallUrl, getSlackStatus, ingestText, triggerGithubSync, triggerGmailSync, triggerNotionSync } from "@/lib/api";
+import { IngestionJobBanner } from "@/components/dashboard/IngestionJobBanner";
+import { SeedQAPanel } from "@/components/dashboard/SeedQAPanel";
+import { TopicCoverageCard } from "@/components/dashboard/TopicCoverageCard";
+import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 
 type FileUploadItem = {
   id: string;
@@ -9,15 +16,43 @@ type FileUploadItem = {
   status: "pending" | "uploading" | "done" | "error";
   result?: string;
 };
-import { extractStyle, getGithubAuthUrl, getGmailAuthUrl, getNotionAuthUrl, getSlackInstallUrl, getSlackStatus, ingestText, triggerGithubSync, triggerGmailSync, triggerNotionSync } from "@/lib/api";
-import { IngestionJobBanner } from "@/components/dashboard/IngestionJobBanner";
-import { SeedQAPanel } from "@/components/dashboard/SeedQAPanel";
-import { TopicCoverageCard } from "@/components/dashboard/TopicCoverageCard";
-import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 
 export default function TrainPage() {
-  const { clone, isLoading } = useClone();
+  const { clones, isLoading } = useClones();
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
+  if (isLoading) return <LoadingSpinner />;
+
+  if (clones.length === 0) {
+    return (
+      <div style={{ padding: 32 }}>
+        <p style={{ fontSize: 13, color: "rgba(255,255,255,0.40)" }}>
+          Create your clone first.{" "}
+          <a href="/onboarding" style={{ color: "rgba(255,255,255,0.60)", textDecoration: "underline", textUnderlineOffset: 2 }}>
+            Get started →
+          </a>
+        </p>
+      </div>
+    );
+  }
+
+  const clone = clones.find(c => c.clone_id === selectedId) ?? clones[0];
+
+  return (
+    <div className="db-page" style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+      <div className="db-page-head">
+        <div>
+          <p className="db-eyebrow">Clone</p>
+          <h1 className="db-h1">Feed Data</h1>
+        </div>
+        <ClonePicker clones={clones} selected={clone} onSelect={c => setSelectedId(c.clone_id)} />
+      </div>
+      <TrainCloneContent key={clone.clone_id} clone={clone} />
+    </div>
+  );
+}
+
+function TrainCloneContent({ clone }: { clone: CloneOwnerInfo }) {
   // Memory usage
   const [memoryStats, setMemoryStats] = useState<{ memory_used: number; memory_limit: number } | null>(null);
 
@@ -85,20 +120,6 @@ export default function TrainPage() {
   const [extractResult, setExtractResult] = useState<string | null>(null);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-
-  if (isLoading) return <LoadingSpinner />;
-  if (!clone) {
-    return (
-      <div style={{ padding: 32 }}>
-        <p style={{ fontSize: 13, color: "rgba(255,255,255,0.40)" }}>
-          Create your clone first.{" "}
-          <a href="/onboarding" style={{ color: "rgba(255,255,255,0.60)", textDecoration: "underline", textUnderlineOffset: 2 }}>
-            Get started →
-          </a>
-        </p>
-      </div>
-    );
-  }
 
   function setErr(key: string, msg: string | null) {
     setConnectorError((prev) => ({ ...prev, [key]: msg }));
@@ -252,14 +273,7 @@ export default function TrainPage() {
   }
 
   return (
-    <div className="db-page" style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-      <div className="db-page-head">
-        <div>
-          <p className="db-eyebrow">Clone</p>
-          <h1 className="db-h1">Feed Data</h1>
-        </div>
-      </div>
-
+    <>
       {/* Memory usage bar */}
       {memoryStats && (
         <MemoryUsageBar used={memoryStats.memory_used} limit={memoryStats.memory_limit} />
@@ -500,7 +514,7 @@ export default function TrainPage() {
       {/* Full-width: Topic coverage */}
       <TopicCoverageCard cloneId={clone.clone_id} />
 
-    </div>
+    </>
   );
 }
 

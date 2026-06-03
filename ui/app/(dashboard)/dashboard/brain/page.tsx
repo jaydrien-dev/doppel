@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
-import { useClone } from "@/lib/hooks/useClone";
+import { useClones } from "@/lib/hooks/useClones";
+import { ClonePicker } from "@/components/dashboard/ClonePicker";
 import type { MemoryChunk, MemorySource } from "@/lib/types";
 
 const ForceGraph2D = dynamic(() => import("react-force-graph-2d"), {
@@ -352,7 +353,10 @@ function TestBeliefPanel({ cloneId }: { cloneId: string }) {
 type BrainView = "graph" | "timeline" | "test";
 
 export default function BrainPage() {
-  const { clone, isLoading: cloneLoading } = useClone();
+  const { clones, isLoading: cloneLoading } = useClones();
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const clone = clones.find(c => c.clone_id === selectedId) ?? clones[0] ?? null;
+
   const [view, setView] = useState<BrainView>("graph");
   const [graphData, setGraphData] = useState<GraphData | null>(null);
   const [loading, setLoading] = useState(false);
@@ -372,6 +376,12 @@ export default function BrainPage() {
     setDimensions({ width: el.offsetWidth, height: el.offsetHeight });
     return () => obs.disconnect();
   }, []);
+
+  useEffect(() => {
+    setGraphData(null);
+    setSelectedNode(null);
+    setHoveredNode(null);
+  }, [clone?.clone_id]);
 
   useEffect(() => {
     if (!clone) return;
@@ -465,24 +475,27 @@ export default function BrainPage() {
             ))}
           </div>
 
-          {/* Graph legend */}
-          {view === "graph" && graphData && totalNodes > 0 && (
-            <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-                {(["episodic", "semantic", "procedural", "relational"] as const).map((type) =>
-                  graphData.stats[type] > 0 ? (
-                    <div key={type} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <div style={{ width: 6, height: 6, borderRadius: "50%", background: TYPE_DOT_COLOR[type] }} />
-                      <span style={{ fontSize: 11, color: "rgba(255,255,255,0.4)" }}>
-                        {graphData.stats[type]} {graphData.stats[type] === 1 ? TYPE_LABEL[type] : TYPE_LABEL_PLURAL[type]}
-                      </span>
-                    </div>
-                  ) : null
-                )}
+          {/* Clone picker + graph legend */}
+          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+            <ClonePicker clones={clones} selected={clone ?? clones[0]} onSelect={c => setSelectedId(c.clone_id)} />
+            {view === "graph" && graphData && totalNodes > 0 && (
+              <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+                  {(["episodic", "semantic", "procedural", "relational"] as const).map((type) =>
+                    graphData.stats[type] > 0 ? (
+                      <div key={type} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <div style={{ width: 6, height: 6, borderRadius: "50%", background: TYPE_DOT_COLOR[type] }} />
+                        <span style={{ fontSize: 11, color: "rgba(255,255,255,0.4)" }}>
+                          {graphData.stats[type]} {graphData.stats[type] === 1 ? TYPE_LABEL[type] : TYPE_LABEL_PLURAL[type]}
+                        </span>
+                      </div>
+                    ) : null
+                  )}
+                </div>
+                <button onClick={handleZoomFit} className="btn btn--sm btn--ghost">Fit view</button>
               </div>
-              <button onClick={handleZoomFit} className="btn btn--sm btn--ghost">Fit view</button>
-            </div>
-          )}
+            )}
+          </div>
         </div>
 
         {/* Panel */}

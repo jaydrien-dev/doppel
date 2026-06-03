@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import useSWR from "swr";
-import { useClone } from "@/lib/hooks/useClone";
+import { useClones } from "@/lib/hooks/useClones";
+import { ClonePicker } from "@/components/dashboard/ClonePicker";
 import type { EmailDraft } from "@/lib/types";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 
@@ -324,7 +325,10 @@ function GmailWatchToggle({ cloneId }: { cloneId: string }) {
 }
 
 export default function EmailPage() {
-  const { clone, isLoading } = useClone();
+  const { clones, isLoading } = useClones();
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const clone = clones.find(c => c.clone_id === selectedId) ?? clones[0] ?? null;
+
   const [filter, setFilter] = useState<Filter>("pending");
 
   const urlParams = new URLSearchParams({ clone_id: clone?.clone_id ?? "" });
@@ -358,7 +362,10 @@ export default function EmailPage() {
           <p className="db-eyebrow">Automation</p>
           <h1 className="db-h1">Email drafts</h1>
         </div>
-        <GmailWatchToggle cloneId={clone.clone_id} />
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <ClonePicker clones={clones} selected={clone} onSelect={c => setSelectedId(c.clone_id)} />
+          <GmailWatchToggle cloneId={clone.clone_id} />
+        </div>
       </div>
 
       {/* Filter tabs */}
