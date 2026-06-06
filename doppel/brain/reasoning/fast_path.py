@@ -91,7 +91,7 @@ async def run_stream(
         _user_msg_content = user_content
 
     async with get_anthropic_client().messages.stream(
-        model=settings.reasoning_model,
+        model=settings.fast_reasoning_model,
         max_tokens=1024,
         system=system_prompt,
         messages=[{"role": "user", "content": _user_msg_content}],
@@ -153,7 +153,7 @@ async def run(
         _user_msg_content = user_content
 
     response = await get_anthropic_client().messages.create(
-        model=settings.reasoning_model,
+        model=settings.fast_reasoning_model,
         max_tokens=1024,
         system=system_prompt,
         messages=[{"role": "user", "content": _user_msg_content}],

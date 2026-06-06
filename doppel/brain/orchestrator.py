@@ -30,7 +30,8 @@ from doppel.brain.memory.system import MemorySystem
 from doppel.brain.memory.working import append_turn
 from doppel.brain.metacognition.layer import MetacognitionLayer
 from doppel.brain.models.types import BrainInput, BrainOutput
-from doppel.brain.perception.classifier import classify
+from doppel.brain.perception.classifier import classify, _quick_classify
+from doppel.brain.models.types import MemoryContext
 from doppel.brain.reasoning import fast_path, slow_path
 from doppel.brain.reasoning.engine import ReasoningEngine
 from doppel.brain.reasoning.router import route
@@ -76,28 +77,37 @@ class DoppelBrain:
                 latency_ms=int((time.monotonic() - t_start) * 1000),
             )
 
-        # ── 1–4. Perceive + load identity + retrieve memory — all in parallel ──
-        # Classification (Haiku LLM call) and memory retrieval (embed + pgvector)
-        # are fully independent; running them together saves ~200ms on fast path.
-        # IdentityLayer.load gets its own fresh session — SQLAlchemy AsyncSession
-        # does not support concurrent operations on the same instance.
+        # ── 1–4. Perceive + load identity + retrieve memory ──────────────────
+        # If the heuristic pre-classifier fires (social greeting etc.) skip the
+        # embed + 4 pgvector queries entirely — saves ~300ms on those messages.
+        # Otherwise run classify + retrieve concurrently.
         from doppel.brain.db.connection import AsyncSessionLocal
 
         async def _load_identity():
             async with AsyncSessionLocal() as s:
                 return await IdentityLayer.load(s, self._clone_id)
 
-        perceived, identity, memory, working = await asyncio.gather(
-            classify(brain_input.message),
-            _load_identity(),
-            self._mem_system.retrieve(
-                query=brain_input.message,
-                session_id=brain_input.session_id,
-                sender_id=brain_input.sender_id,
-                topics=None,
-            ),
-            self._mem_system.get_working_memory(brain_input.session_id),
-        )
+        quick = _quick_classify(brain_input.message)
+        if quick is not None:
+            # Heuristic fired — skip embed + vector search entirely
+            (identity, working) = await asyncio.gather(
+                _load_identity(),
+                self._mem_system.get_working_memory(brain_input.session_id),
+            )
+            perceived = quick
+            memory = MemoryContext(episodic=[], semantic=[], procedural=[], relational=None)
+        else:
+            perceived, identity, memory, working = await asyncio.gather(
+                classify(brain_input.message),
+                _load_identity(),
+                self._mem_system.retrieve(
+                    query=brain_input.message,
+                    session_id=brain_input.session_id,
+                    sender_id=brain_input.sender_id,
+                    topics=None,
+                ),
+                self._mem_system.get_working_memory(brain_input.session_id),
+            )
 
         # ── 5. Reasoning (fast or slow path) ─────────────────────────────
         response_text, trace = await self._reasoning.think(
@@ -208,8 +218,7 @@ class DoppelBrain:
         await load_clone_keys(self._session, self._clone_id)
 
         # Fire classification and all memory/identity fetches simultaneously.
-        # topics from classification are accepted by retrieve() but not actually used
-        # by any layer's vector search, so starting memory retrieval without them is safe.
+        # If the heuristic pre-classifier fires, skip embed + vector search.
         # IdentityLayer.load gets its own fresh session — SQLAlchemy AsyncSession
         # does not support concurrent operations on the same instance.
         from doppel.brain.db.connection import AsyncSessionLocal
@@ -218,17 +227,26 @@ class DoppelBrain:
             async with AsyncSessionLocal() as s:
                 return await IdentityLayer.load(s, self._clone_id)
 
-        perceived, identity, memory, working = await asyncio.gather(
-            classify(brain_input.message),
-            _load_identity(),
-            self._mem_system.retrieve(
-                query=brain_input.message,
-                session_id=brain_input.session_id,
-                sender_id=brain_input.sender_id,
-                topics=None,  # populated after gather; layers don't use it for filtering
-            ),
-            self._mem_system.get_working_memory(brain_input.session_id),
-        )
+        quick = _quick_classify(brain_input.message)
+        if quick is not None:
+            (identity, working) = await asyncio.gather(
+                _load_identity(),
+                self._mem_system.get_working_memory(brain_input.session_id),
+            )
+            perceived = quick
+            memory = MemoryContext(episodic=[], semantic=[], procedural=[], relational=None)
+        else:
+            perceived, identity, memory, working = await asyncio.gather(
+                classify(brain_input.message),
+                _load_identity(),
+                self._mem_system.retrieve(
+                    query=brain_input.message,
+                    session_id=brain_input.session_id,
+                    sender_id=brain_input.sender_id,
+                    topics=None,
+                ),
+                self._mem_system.get_working_memory(brain_input.session_id),
+            )
 
         path = route(perceived)
         # Override with user-specified mode

@@ -15,6 +15,8 @@ class Settings(BaseSettings):
 
     # Reasoning model — used for slow path + response generation
     reasoning_model: str = "claude-sonnet-4-6"
+    # Fast reasoning model — used for fast path conversational replies
+    fast_reasoning_model: str = "claude-haiku-4-5-20251001"
     # Classification model — used for fast, cheap perception calls
     classification_model: str = "claude-haiku-4-5-20251001"
     # Computer use agent model — must support computer-use-2025-01-24 beta
@@ -35,7 +37,7 @@ class Settings(BaseSettings):
 
     # --- Brain thresholds ---
     escalation_threshold: float = 0.45
-    slow_path_stakes_threshold: str = "medium"
+    slow_path_stakes_threshold: str = "high"
     max_episodic_tokens: int = 6000
     working_memory_max_turns: int = 20
 
