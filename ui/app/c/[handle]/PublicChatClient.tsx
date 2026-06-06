@@ -96,10 +96,7 @@ export function PublicChatClient({
   function startNewConversation() {
     const fresh = crypto.randomUUID();
     localStorage.setItem(`doppel_session:${clone.handle}`, fresh);
-    // Clear stored messages for old session
-    if (sessionId) {
-      try { localStorage.removeItem(`doppel_msgs:${clone.clone_id}:${sessionId}`); } catch { /* non-fatal */ }
-    }
+    try { localStorage.removeItem(`doppel_chat:${clone.clone_id}`); } catch { /* non-fatal */ }
     setSessionId(fresh);
   }
 

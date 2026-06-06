@@ -11,31 +11,28 @@ interface UseChatOptions {
   ownerMode?: boolean; // true = skip credits for owner (training); false = charge owner too (consumer test)
 }
 
-// localStorage key for persisted messages per clone+session
-function msgsKey(cloneId: string, sessionId: string) {
-  return `doppel_msgs:${cloneId}:${sessionId}`;
+// One storage slot per clone — no session ID in key, eliminates all session-mismatch bugs.
+// Session IDs are still used for the API (conversation continuity) but not for storage.
+function storageKey(cloneId: string) {
+  return `doppel_chat:${cloneId}`;
 }
 
 export function useChat({ cloneId, contextType = "chat", sessionId: initialSessionId, ownerMode = true }: UseChatOptions) {
   const resolvedSessionId = useRef(initialSessionId ?? uuidv4());
-  // Track whether we've attempted the localStorage read (prevents save effect from clobbering storage before init)
-  const storageReadDone = useRef(false);
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-
   const [isLoading, setIsLoading] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
   // historyLoading = true when we need to do a DB fetch (on mount with a session)
   const [historyLoading, setHistoryLoading] = useState(!!initialSessionId);
   const [error, setError] = useState<string | null>(null);
 
-  // Load from localStorage on mount — useEffect runs only on the client, avoiding SSR/hydration issues
+  // Load from localStorage on mount — runs only on client (useEffect never runs on server)
   useEffect(() => {
-    const sid = resolvedSessionId.current;
-    if (!cloneId || !sid) { storageReadDone.current = true; return; }
+    if (!cloneId) return;
     try {
-      const stored = localStorage.getItem(msgsKey(cloneId, sid));
-      console.log("[useChat] init cloneId=%s sid=%s stored=%s", cloneId, sid, stored ? `${JSON.parse(stored).length} msgs` : "null");
+      const stored = localStorage.getItem(storageKey(cloneId));
+      console.log("[useChat] init cloneId=%s stored=%s", cloneId, stored ? `${JSON.parse(stored).length} msgs` : "null");
       if (stored) {
         const parsed = JSON.parse(stored) as ChatMessage[];
         const valid = parsed
@@ -44,19 +41,16 @@ export function useChat({ cloneId, contextType = "chat", sessionId: initialSessi
         if (valid.length > 0) setMessages(valid);
       }
     } catch { /* ignore */ }
-    storageReadDone.current = true;
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [cloneId]); // re-runs if cloneId changes (e.g. switching clones on home page)
 
   // Persist messages to localStorage whenever they change (excluding streaming placeholder)
   useEffect(() => {
-    if (!storageReadDone.current) return; // don't clobber storage before we've loaded it
-    const sid = resolvedSessionId.current;
+    if (!cloneId) return;
     const toStore = messages.filter((m) => !m.isStreaming);
     if (toStore.length === 0) return;
     try {
-      const key = msgsKey(cloneId, sid);
-      localStorage.setItem(key, JSON.stringify(toStore));
-      console.log("[useChat] saved %d msgs key=%s", toStore.length, key);
+      localStorage.setItem(storageKey(cloneId), JSON.stringify(toStore));
+      console.log("[useChat] saved %d msgs key=%s", toStore.length, storageKey(cloneId));
     } catch { /* storage full — non-fatal */ }
   }, [messages, cloneId]);
 
@@ -219,10 +213,7 @@ export function useChat({ cloneId, contextType = "chat", sessionId: initialSessi
   );
 
   const clearMessages = useCallback(() => {
-    // Clear localStorage for current session before generating new session ID
-    try {
-      localStorage.removeItem(msgsKey(cloneId, resolvedSessionId.current));
-    } catch { /* non-fatal */ }
+    try { localStorage.removeItem(storageKey(cloneId)); } catch { /* non-fatal */ }
     setMessages([]);
     resolvedSessionId.current = uuidv4();
   }, [cloneId]);
