@@ -25,6 +25,7 @@ export function useChat({ cloneId, contextType = "chat", sessionId: initialSessi
     const sid = initialSessionId ?? resolvedSessionId.current;
     try {
       const stored = localStorage.getItem(msgsKey(cloneId, sid));
+      console.log("[useChat] init sid=%s stored=%s", sid, stored ? `${JSON.parse(stored).length} msgs` : "null");
       if (!stored) return [];
       const parsed = JSON.parse(stored) as ChatMessage[];
       return parsed
@@ -49,6 +50,7 @@ export function useChat({ cloneId, contextType = "chat", sessionId: initialSessi
     if (toStore.length === 0) return;
     try {
       localStorage.setItem(msgsKey(cloneId, sid), JSON.stringify(toStore));
+      console.log("[useChat] saved %d msgs to %s", toStore.length, msgsKey(cloneId, sid));
     } catch { /* storage full — non-fatal */ }
   }, [messages, cloneId]);
 
