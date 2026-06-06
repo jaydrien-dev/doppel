@@ -18,23 +18,10 @@ function msgsKey(cloneId: string, sessionId: string) {
 
 export function useChat({ cloneId, contextType = "chat", sessionId: initialSessionId, ownerMode = true }: UseChatOptions) {
   const resolvedSessionId = useRef(initialSessionId ?? uuidv4());
+  // Track whether we've attempted the localStorage read (prevents save effect from clobbering storage before init)
+  const storageReadDone = useRef(false);
 
-  // Init messages from localStorage on first render (instant, no flicker)
-  const [messages, setMessages] = useState<ChatMessage[]>(() => {
-    if (typeof window === "undefined") return [];
-    const sid = initialSessionId ?? resolvedSessionId.current;
-    try {
-      const stored = localStorage.getItem(msgsKey(cloneId, sid));
-      console.log("[useChat] init sid=%s stored=%s", sid, stored ? `${JSON.parse(stored).length} msgs` : "null");
-      if (!stored) return [];
-      const parsed = JSON.parse(stored) as ChatMessage[];
-      return parsed
-        .filter((m) => !m.isStreaming)
-        .map((m) => ({ ...m, timestamp: new Date(m.timestamp as unknown as string), isHistory: true }));
-    } catch {
-      return [];
-    }
-  });
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
 
   const [isLoading, setIsLoading] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
@@ -42,15 +29,34 @@ export function useChat({ cloneId, contextType = "chat", sessionId: initialSessi
   const [historyLoading, setHistoryLoading] = useState(!!initialSessionId);
   const [error, setError] = useState<string | null>(null);
 
+  // Load from localStorage on mount — useEffect runs only on the client, avoiding SSR/hydration issues
+  useEffect(() => {
+    const sid = resolvedSessionId.current;
+    if (!cloneId || !sid) { storageReadDone.current = true; return; }
+    try {
+      const stored = localStorage.getItem(msgsKey(cloneId, sid));
+      console.log("[useChat] init cloneId=%s sid=%s stored=%s", cloneId, sid, stored ? `${JSON.parse(stored).length} msgs` : "null");
+      if (stored) {
+        const parsed = JSON.parse(stored) as ChatMessage[];
+        const valid = parsed
+          .filter((m) => !m.isStreaming)
+          .map((m) => ({ ...m, timestamp: new Date(m.timestamp as unknown as string), isHistory: true }));
+        if (valid.length > 0) setMessages(valid);
+      }
+    } catch { /* ignore */ }
+    storageReadDone.current = true;
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Persist messages to localStorage whenever they change (excluding streaming placeholder)
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    if (!storageReadDone.current) return; // don't clobber storage before we've loaded it
     const sid = resolvedSessionId.current;
     const toStore = messages.filter((m) => !m.isStreaming);
     if (toStore.length === 0) return;
     try {
-      localStorage.setItem(msgsKey(cloneId, sid), JSON.stringify(toStore));
-      console.log("[useChat] saved %d msgs to %s", toStore.length, msgsKey(cloneId, sid));
+      const key = msgsKey(cloneId, sid);
+      localStorage.setItem(key, JSON.stringify(toStore));
+      console.log("[useChat] saved %d msgs key=%s", toStore.length, key);
     } catch { /* storage full — non-fatal */ }
   }, [messages, cloneId]);
 
