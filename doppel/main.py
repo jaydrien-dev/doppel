@@ -2473,6 +2473,9 @@ async def health():
     return {"status": "ok", "env": settings.app_env, "version": "0.2.0"}
 
 
+
+
+
 # ---------------------------------------------------------------------------
 # Brain — chat
 # ---------------------------------------------------------------------------
@@ -2596,6 +2599,15 @@ async def _retrieve_consumer_brain(
 ) -> str | None:
     """Retrieve the most relevant consumer memories for a given message."""
     try:
+        # Check existence before paying for the embed call
+        async with AsyncSessionLocal() as cb_session:
+            exists_row = await cb_session.execute(
+                sql_text("SELECT 1 FROM consumer_memory WHERE consumer_user_id = :uid AND embedding IS NOT NULL LIMIT 1"),
+                {"uid": consumer_user_id},
+            )
+            if not exists_row.first():
+                return None
+
         from doppel.brain.db.vector import embed_batch
         embeddings = await embed_batch([message])
         vec_literal = "[" + ",".join(str(v) for v in embeddings[0]) + "]"
