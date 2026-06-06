@@ -141,6 +141,27 @@ app.add_middleware(
 
 
 # ---------------------------------------------------------------------------
+# In-process access check cache — avoids re-querying clone_identity on every request.
+# Access mode doesn't change per-second; 60s TTL is safe.
+# ---------------------------------------------------------------------------
+import time as _time_module
+
+_ACCESS_CACHE: dict[str, tuple[float, str, str | None]] = {}  # key → (ts, access_mode, owner_id)
+_ACCESS_TTL = 60.0
+
+
+def _access_cache_key(clone_id: UUID, caller_user_id: str | None) -> str:
+    return f"{clone_id}:{caller_user_id or ''}"
+
+
+def invalidate_access_cache(clone_id: UUID) -> None:
+    prefix = str(clone_id) + ":"
+    for k in list(_ACCESS_CACHE.keys()):
+        if k.startswith(prefix):
+            del _ACCESS_CACHE[k]
+
+
+# ---------------------------------------------------------------------------
 # Security helpers — rate limiting, access control, audit logging
 # ---------------------------------------------------------------------------
 
@@ -401,39 +422,48 @@ async def _check_clone_access(
 ) -> None:
     """
     Enforce access_mode on every chat request.
+    Results are cached for 60s — access mode doesn't change per-second.
     Raises HTTP 403 if access is denied.
     """
+    cache_key = _access_cache_key(clone_id, caller_user_id)
+    cached = _ACCESS_CACHE.get(cache_key)
+    if cached and (_time_module.monotonic() - cached[0]) < _ACCESS_TTL:
+        mode, owner_id = cached[1], cached[2]
+        # Fast path: public or owner — no further checks needed
+        if mode == "public":
+            return
+        if caller_user_id and caller_user_id == owner_id:
+            return
+        # Non-trivial modes need full re-check (allowlist email/org could change)
+        # Fall through to DB below
+
+    # Only include org JOINs for org_scoped clones (avoids expensive JOIN on public clones)
     row = await session.execute(
         sql_text("""
-            SELECT c.access_mode, c.user_id AS owner_user_id, c.allowed_emails,
-                   c.clone_id,
-                   om.org_id AS caller_org_id,
-                   om2.org_id AS owner_org_id
-            FROM clone_identity c
-            LEFT JOIN org_memberships om ON om.user_id = :caller AND om.org_id = (
-                SELECT org_id FROM org_memberships WHERE user_id = c.user_id LIMIT 1
-            )
-            LEFT JOIN org_memberships om2 ON om2.user_id = c.user_id
-            WHERE c.clone_id = :clone_id
+            SELECT access_mode, user_id AS owner_user_id, allowed_emails
+            FROM clone_identity
+            WHERE clone_id = :clone_id
             LIMIT 1
         """),
-        {"clone_id": str(clone_id), "caller": caller_user_id or ""},
+        {"clone_id": str(clone_id)},
     )
     rec = row.mappings().first()
     if not rec:
         raise HTTPException(status_code=404, detail="Clone not found")
 
     mode = rec["access_mode"]
+    owner_id = rec["owner_user_id"]
+
+    # Cache for fast subsequent requests
+    _ACCESS_CACHE[cache_key] = (_time_module.monotonic(), mode, owner_id)
 
     if mode == "public":
         return  # anyone
 
-    owner_id = rec["owner_user_id"]
     if caller_user_id and caller_user_id == owner_id:
         return  # always allow owner
 
     if mode == "private":
-        # Check for explicit permission grant via clone_permissions
         if caller_user_id:
             perm_row = await session.execute(
                 sql_text("SELECT user_id FROM clone_permissions WHERE clone_id = :cid AND user_id = :uid LIMIT 1"),
@@ -450,8 +480,17 @@ async def _check_clone_access(
         return
 
     if mode == "org_scoped":
-        # Both caller and owner must be in the same org
-        if not rec["caller_org_id"] or rec["caller_org_id"] != rec["owner_org_id"]:
+        org_row = await session.execute(
+            sql_text("""
+                SELECT om.org_id FROM org_memberships om
+                WHERE om.user_id = :caller AND om.org_id IN (
+                    SELECT org_id FROM org_memberships WHERE user_id = :owner LIMIT 1
+                )
+                LIMIT 1
+            """),
+            {"caller": caller_user_id or "", "owner": owner_id or ""},
+        )
+        if not org_row.mappings().first():
             raise HTTPException(status_code=403, detail="This clone is restricted to org members.")
         return
 
@@ -2451,12 +2490,22 @@ async def chat_stream(
       data: {"event": "done", "trace_id": "...", "confidence": ..., "sources": [...], ...}
     """
     caller_user_id = request.headers.get("X-User-Id")
-    await _check_clone_access(body.clone_id, caller_user_id, None, session)
-    await _check_rate_limit(body.clone_id, session)
 
-    # Run credit deduction and consumer brain retrieval in parallel.
-    # Consumer brain does its own embed + vector search (~150-250ms) — no reason
-    # to let it block while credit queries are running.
+    # Run access check + rate limit in parallel using separate sessions.
+    # Both read from clone_identity; no reason to serialize them.
+    from doppel.brain.db.connection import AsyncSessionLocal
+
+    async def _access():
+        async with AsyncSessionLocal() as s:
+            await _check_clone_access(body.clone_id, caller_user_id, None, s)
+
+    async def _rate():
+        async with AsyncSessionLocal() as s:
+            await _check_rate_limit(body.clone_id, s)
+
+    await asyncio.gather(_access(), _rate())
+
+    # Credit deduction + consumer brain retrieval in parallel.
     if caller_user_id:
         body, consumer_brain_ctx = await asyncio.gather(
             _handle_chat_credits_and_context(body, caller_user_id, session),
@@ -2497,8 +2546,18 @@ async def chat(
     Routes to fast (System 1) or slow (System 2) path automatically.
     """
     caller_user_id = request.headers.get("X-User-Id")
-    await _check_clone_access(body.clone_id, caller_user_id, None, session)
-    await _check_rate_limit(body.clone_id, session)
+
+    from doppel.brain.db.connection import AsyncSessionLocal
+
+    async def _access():
+        async with AsyncSessionLocal() as s:
+            await _check_clone_access(body.clone_id, caller_user_id, None, s)
+
+    async def _rate():
+        async with AsyncSessionLocal() as s:
+            await _check_rate_limit(body.clone_id, s)
+
+    await asyncio.gather(_access(), _rate())
 
     if caller_user_id:
         body, consumer_brain_ctx = await asyncio.gather(

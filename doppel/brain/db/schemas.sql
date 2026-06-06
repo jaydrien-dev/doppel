@@ -134,6 +134,8 @@ CREATE INDEX IF NOT EXISTS traces_clone_idx ON reasoning_traces (clone_id);
 CREATE INDEX IF NOT EXISTS traces_session_idx ON reasoning_traces (clone_id, session_id);
 CREATE INDEX IF NOT EXISTS traces_feedback_idx ON reasoning_traces (clone_id, feedback_signal)
     WHERE feedback_signal IS NOT NULL;
+-- Composite index for rate-limit COUNT queries (clone_id + created_at)
+CREATE INDEX IF NOT EXISTS traces_clone_created_idx ON reasoning_traces (clone_id, created_at);
 
 
 -- ---------------------------------------------------------------------------
