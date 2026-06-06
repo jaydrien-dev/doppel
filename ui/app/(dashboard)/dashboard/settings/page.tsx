@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { useClone } from "@/lib/hooks/useClone";
+import { useClones } from "@/lib/hooks/useClones";
+import { ClonePicker } from "@/components/dashboard/ClonePicker";
 import { useOrg } from "@/lib/hooks/useOrg";
 
 // ---------------------------------------------------------------------------
@@ -278,7 +279,7 @@ function AdminPoliciesPanel({ cloneHandle }: { cloneHandle: string | null }) {
 // Data Retention panel
 // ---------------------------------------------------------------------------
 
-function DataRetentionPanel({ cloneHandle }: { cloneHandle: string | null }) {
+function DataRetentionPanel({ cloneHandle, cloneId }: { cloneHandle: string | null; cloneId: string | null }) {
   const [episodic, setEpisodic] = useState(730);
   const [traces, setTraces] = useState(365);
   const [saving, setSaving] = useState(false);
@@ -286,14 +287,15 @@ function DataRetentionPanel({ cloneHandle }: { cloneHandle: string | null }) {
   const [result, setResult] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch("/api/identity")
+    const qs = cloneId ? `?clone_id=${cloneId}` : "";
+    fetch(`/api/identity${qs}`)
       .then((r) => r.json())
       .then((d) => {
         if (d.retention_days_episodic) setEpisodic(d.retention_days_episodic);
         if (d.retention_days_traces) setTraces(d.retention_days_traces);
       })
       .catch(() => {});
-  }, []);
+  }, [cloneId]);
 
   async function save() {
     if (!cloneHandle) return;
@@ -575,7 +577,9 @@ function GdprPanel({ cloneHandle }: { cloneHandle: string | null }) {
 // Main settings page
 // ---------------------------------------------------------------------------
 export default function SettingsPage() {
-  const { clone } = useClone();
+  const { clones } = useClones();
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const clone = clones.find(c => c.clone_id === selectedId) ?? clones[0] ?? null;
   const { org } = useOrg();
 
   const [keys, setKeys] = useState<Record<Provider, KeyState>>(
@@ -776,11 +780,17 @@ export default function SettingsPage() {
             );
           })}
 
-          <p className="db-eyebrow" style={{ padding: "24px 4px 8px", marginBottom: 0 }}>Admin policies</p>
+          {/* Clone selector for per-clone settings */}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "20px 0 4px" }}>
+            <p className="db-eyebrow" style={{ margin: 0 }}>Clone settings</p>
+            <ClonePicker clones={clones} selected={clone ?? clones[0]} onSelect={c => setSelectedId(c.clone_id)} />
+          </div>
+
+          <p className="db-eyebrow" style={{ padding: "16px 4px 8px", marginBottom: 0 }}>Admin policies</p>
           <AdminPoliciesPanel cloneHandle={clone?.handle ?? null} />
 
           <p className="db-eyebrow" style={{ padding: "24px 4px 8px", marginBottom: 0 }}>Data retention</p>
-          <DataRetentionPanel cloneHandle={clone?.handle ?? null} />
+          <DataRetentionPanel cloneHandle={clone?.handle ?? null} cloneId={clone?.clone_id ?? null} />
 
           <p className="db-eyebrow" style={{ padding: "24px 4px 8px", marginBottom: 0 }}>Preservation</p>
           <PreservationPanel cloneHandle={clone?.handle ?? null} />

@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useClones } from "@/lib/hooks/useClones";
+import { ClonePicker } from "@/components/dashboard/ClonePicker";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -853,23 +855,30 @@ const TABS: { id: IdentityTab; label: string; desc: string; icon: React.ReactNod
 ];
 
 export default function IdentityPage() {
+  const { clones } = useClones();
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const selectedClone = clones.find(c => c.clone_id === selectedId) ?? clones[0] ?? null;
+
   const [tab, setTab] = useState<IdentityTab>("voice");
   const [data, setData] = useState<IdentityData | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("/api/identity")
+    if (!selectedClone) return;
+    setLoading(true);
+    setData(null);
+    fetch(`/api/identity?clone_id=${selectedClone.clone_id}`)
       .then((r) => r.json())
       .then((d) => { if (d.clone_id) setData(d); })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, []);
+  }, [selectedClone?.clone_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function saveLayer(layer: "style_fingerprint" | "value_system" | "epistemic_profile", patch: object) {
     await fetch("/api/identity", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ layer, data: patch }),
+      body: JSON.stringify({ layer, data: patch, clone_id: selectedClone?.clone_id }),
     });
     setData((prev) => prev ? { ...prev, [layer]: { ...(prev[layer] as object), ...patch } } : prev);
   }
@@ -883,6 +892,7 @@ export default function IdentityPage() {
           <p className="db-eyebrow">Clone settings</p>
           <h1 className="db-h1">Identity</h1>
         </div>
+        <ClonePicker clones={clones} selected={selectedClone ?? clones[0]} onSelect={c => setSelectedId(c.clone_id)} />
       </div>
 
       {/* Tab bar */}

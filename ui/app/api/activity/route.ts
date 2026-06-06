@@ -18,3 +18,20 @@ export async function GET(req: NextRequest) {
   const data = await res.json();
   return Response.json(data, { status: res.status });
 }
+
+export async function DELETE(req: NextRequest) {
+  const { searchParams } = new URL(req.url);
+  const cloneId = searchParams.get("clone_id");
+  const mode = searchParams.get("mode") ?? "all";
+
+  if (!cloneId) {
+    return Response.json({ error: "clone_id required" }, { status: 400 });
+  }
+
+  const res = await backendFetch(
+    `/brain/traces?clone_id=${cloneId}&mode=${mode}`,
+    { method: "DELETE" }
+  );
+  const data = await res.json();
+  return Response.json(data, { status: res.status });
+}

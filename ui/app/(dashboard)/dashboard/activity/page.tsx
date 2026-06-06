@@ -296,6 +296,96 @@ function QualityHeader({ cloneId }: { cloneId: string }) {
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
+// ---------------------------------------------------------------------------
+// Clear queries confirmation popover
+// ---------------------------------------------------------------------------
+
+function ClearQueriesButton({ cloneId, mode, onCleared }: {
+  cloneId: string;
+  mode: "owner" | "consumer";
+  onCleared: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  async function confirm() {
+    setDeleting(true);
+    try {
+      await fetch(`/api/activity?clone_id=${cloneId}&mode=${mode}`, { method: "DELETE" });
+      setOpen(false);
+      onCleared();
+    } catch { /* non-fatal */ }
+    finally { setDeleting(false); }
+  }
+
+  const label = mode === "consumer" ? "consumer" : "owner";
+
+  return (
+    <>
+      <button
+        onClick={() => setOpen(true)}
+        title={`Clear ${label} queries`}
+        className="btn btn--ghost btn--sm"
+        style={{ color: "rgba(248,113,113,0.60)", borderColor: "rgba(248,113,113,0.15)" }}
+      >
+        <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
+          <path d="M2 3h8M5 3V2h2v1M4.5 5v4M7.5 5v4M3 3l.5 7h5l.5-7" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+        Clear
+      </button>
+
+      {open && (
+        <div
+          style={{
+            position: "fixed", inset: 0, zIndex: 60,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            background: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)",
+          }}
+          onClick={() => setOpen(false)}
+        >
+          <div
+            style={{
+              width: 360, background: "rgba(14,14,16,0.98)",
+              border: "1px solid rgba(255,255,255,0.10)",
+              borderRadius: 18, padding: "24px 24px 20px",
+              boxShadow: "0 20px 60px rgba(0,0,0,0.70)",
+            }}
+            onClick={e => e.stopPropagation()}
+          >
+            <p style={{ fontSize: 14, fontWeight: 500, color: "rgba(255,255,255,0.85)", margin: "0 0 8px" }}>
+              Clear {label} queries?
+            </p>
+            <p style={{ fontSize: 13, color: "rgba(255,255,255,0.40)", margin: "0 0 20px", lineHeight: 1.6 }}>
+              This permanently deletes all {label} queries and responses for this clone.
+              This cannot be undone.
+            </p>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                onClick={confirm}
+                disabled={deleting}
+                style={{
+                  flex: 1, padding: "9px 0", borderRadius: 10, border: "1px solid rgba(248,113,113,0.30)",
+                  background: "rgba(248,113,113,0.12)", color: "rgba(248,113,113,0.85)",
+                  fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "inherit",
+                }}
+              >
+                {deleting ? "Deleting…" : "Delete all"}
+              </button>
+              <button
+                onClick={() => setOpen(false)}
+                className="btn btn--ghost"
+                style={{ flex: 1 }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 type Filter = "all" | "pending" | "approved" | "edited" | "rejected";
 const FILTERS: { value: Filter; label: string }[] = [
   { value: "all", label: "All" },
@@ -601,12 +691,19 @@ export default function ActivityPage() {
             ))}
           </div>
           {tab === "review" && clone && allTraces.length > 0 && (
-            <a href={`/api/activity/export?clone_id=${clone.clone_id}`} download className="btn btn--ghost btn--sm">
-              <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
-                <path d="M5.5 1v6M3 5l2.5 2.5L8 5M1 9h9" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-              Export CSV
-            </a>
+            <>
+              <a href={`/api/activity/export?clone_id=${clone.clone_id}`} download className="btn btn--ghost btn--sm">
+                <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
+                  <path d="M5.5 1v6M3 5l2.5 2.5L8 5M1 9h9" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                Export CSV
+              </a>
+              <ClearQueriesButton
+                cloneId={clone.clone_id}
+                mode={queryMode}
+                onCleared={() => mutate()}
+              />
+            </>
           )}
           {tab === "review" && <button onClick={() => mutate()} className="btn btn--ghost btn--sm">Refresh</button>}
         </div>

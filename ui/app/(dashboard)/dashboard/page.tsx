@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 import useSWR from "swr";
-import { useClone } from "@/lib/hooks/useClone";
 import { useClones } from "@/lib/hooks/useClones";
+import { ClonePicker } from "@/components/dashboard/ClonePicker";
 import type { BrainStats, ActivityTrace, CloneOwnerInfo } from "@/lib/types";
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
@@ -296,7 +297,9 @@ function NoCloneState() {
 // Page
 // ---------------------------------------------------------------------------
 export default function DashboardPage() {
-  const { clone, isLoading } = useClone();
+  const { clones, isLoading } = useClones();
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const clone = clones.find(c => c.clone_id === selectedId) ?? clones[0] ?? null;
 
   if (isLoading) {
     return (
@@ -317,7 +320,8 @@ export default function DashboardPage() {
             Your clone is responding. <em>Stay in the loop.</em>
           </h1>
         </div>
-        <div style={{ display: "flex", gap: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <ClonePicker clones={clones} selected={clone} onSelect={c => setSelectedId(c.clone_id)} />
           <Link href="/dashboard/test" className="btn btn--primary">
             Test clone →
           </Link>

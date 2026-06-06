@@ -2734,6 +2734,50 @@ async def get_traces(
     return {"traces": traces, "offset": offset, "limit": limit, "mode": mode}
 
 
+@app.delete("/brain/traces", status_code=200)
+async def delete_traces(
+    clone_id: UUID = Query(...),
+    mode: str = Query(default="all", regex="^(owner|consumer|all)$"),
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Delete reasoning traces for a clone. Caller must be the clone owner.
+
+    mode=owner    — delete only owner-mode traces
+    mode=consumer — delete only consumer-mode traces
+    mode=all      — delete all traces for this clone
+    """
+    caller_user_id = request.headers.get("X-User-Id")
+    if not caller_user_id:
+        raise HTTPException(status_code=401, detail="Login required")
+
+    owner_row = await session.execute(
+        sql_text("SELECT user_id FROM clone_identity WHERE clone_id = :cid"),
+        {"cid": str(clone_id)},
+    )
+    owner_rec = owner_row.mappings().first()
+    if not owner_rec or owner_rec["user_id"] != caller_user_id:
+        raise HTTPException(status_code=403, detail="You do not own this clone")
+
+    if mode == "owner":
+        mode_filter = "AND (brain_input->>'owner_mode')::boolean = TRUE"
+    elif mode == "consumer":
+        mode_filter = "AND (brain_input->>'owner_mode')::boolean = FALSE"
+    else:
+        mode_filter = ""
+
+    result = await session.execute(
+        sql_text(f"""
+            DELETE FROM reasoning_traces
+            WHERE clone_id = :cid
+              {mode_filter}
+        """),
+        {"cid": str(clone_id)},
+    )
+    await session.commit()
+    return {"deleted": result.rowcount, "mode": mode}
+
+
 # ---------------------------------------------------------------------------
 # Brain — quality / improvement metrics
 # ---------------------------------------------------------------------------
@@ -8289,20 +8333,34 @@ async def v1_clone_eval(
 @app.get("/identity")
 async def get_identity(
     user_id: str = Query(...),
+    clone_id: str | None = Query(default=None),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
-    """Return all identity layers for the owner's clone."""
-
-    row = await session.execute(
-        sql_text("""
-            SELECT clone_id, style_fingerprint, value_system,
-                   epistemic_profile, admin_policies,
-                   is_preserved, legal_hold_until,
-                   retention_days_episodic, retention_days_traces
-            FROM clone_identity WHERE user_id = :uid LIMIT 1
-        """),
-        {"uid": user_id},
-    )
+    """Return all identity layers for the owner's clone.
+    If clone_id is provided, returns that specific clone (must be owned by user_id).
+    """
+    if clone_id:
+        row = await session.execute(
+            sql_text("""
+                SELECT clone_id, style_fingerprint, value_system,
+                       epistemic_profile, admin_policies,
+                       is_preserved, legal_hold_until,
+                       retention_days_episodic, retention_days_traces
+                FROM clone_identity WHERE user_id = :uid AND clone_id = :cid
+            """),
+            {"uid": user_id, "cid": clone_id},
+        )
+    else:
+        row = await session.execute(
+            sql_text("""
+                SELECT clone_id, style_fingerprint, value_system,
+                       epistemic_profile, admin_policies,
+                       is_preserved, legal_hold_until,
+                       retention_days_episodic, retention_days_traces
+                FROM clone_identity WHERE user_id = :uid LIMIT 1
+            """),
+            {"uid": user_id},
+        )
     rec = row.mappings().first()
     if not rec:
         raise HTTPException(status_code=404, detail="No clone found")
@@ -8324,6 +8382,7 @@ class PatchIdentityRequest(BaseModel):
     user_id: str
     layer: str  # style_fingerprint | value_system | epistemic_profile
     data: dict
+    clone_id: str | None = None  # optional; if omitted, targets the first clone for user_id
 
 
 @app.patch("/identity")
@@ -8337,10 +8396,16 @@ async def patch_identity(
     if body.layer not in allowed:
         raise HTTPException(status_code=422, detail=f"layer must be one of: {allowed}")
 
-    row = await session.execute(
-        sql_text("SELECT clone_id FROM clone_identity WHERE user_id = :uid LIMIT 1"),
-        {"uid": body.user_id},
-    )
+    if body.clone_id:
+        row = await session.execute(
+            sql_text("SELECT clone_id FROM clone_identity WHERE user_id = :uid AND clone_id = :cid"),
+            {"uid": body.user_id, "cid": body.clone_id},
+        )
+    else:
+        row = await session.execute(
+            sql_text("SELECT clone_id FROM clone_identity WHERE user_id = :uid LIMIT 1"),
+            {"uid": body.user_id},
+        )
     rec = row.mappings().first()
     if not rec:
         raise HTTPException(status_code=404, detail="No clone found")
