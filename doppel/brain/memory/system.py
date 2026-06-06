@@ -30,51 +30,45 @@ class MemorySystem:
     ) -> MemoryContext:
         """
         Parallel retrieval from all long-term memory stores.
-        Embeds the query once and shares the vector across all layers to avoid
-        redundant API calls.
-        Returns a unified MemoryContext ready for the reasoning engine.
+        Embeds the query once and shares the vector across all layers.
+        Each layer gets its own AsyncSession — SQLAlchemy AsyncSession does not
+        support concurrent operations on the same session instance.
         """
-        # Single embedding call shared by all three layers (saves 2x round-trips)
+        from doppel.brain.db.connection import AsyncSessionLocal
+
+        # Single embedding call (saves 2x round-trips) — no session needed
         query_embedding = await embed(query)
 
-        tasks = [
-            episodic.retrieve(
-                self._session,
-                self._clone_id,
-                query,
-                limit=20,
-                authored_by_user_only=False,
-                query_embedding=query_embedding,
-            ),
-            semantic.retrieve(
-                self._session,
-                self._clone_id,
-                query,
-                limit=8,
-                query_embedding=query_embedding,
-            ),
-            procedural.retrieve(
-                self._session,
-                self._clone_id,
-                query,
-                limit=5,
-                query_embedding=query_embedding,
-            ),
-        ]
+        async def _episodic() -> list:
+            async with AsyncSessionLocal() as s:
+                return await episodic.retrieve(
+                    s, self._clone_id, query, limit=20,
+                    authored_by_user_only=False, query_embedding=query_embedding,
+                )
+
+        async def _semantic() -> list:
+            async with AsyncSessionLocal() as s:
+                return await semantic.retrieve(
+                    s, self._clone_id, query, limit=8,
+                    query_embedding=query_embedding,
+                )
+
+        async def _procedural() -> list:
+            async with AsyncSessionLocal() as s:
+                return await procedural.retrieve(
+                    s, self._clone_id, query, limit=5,
+                    query_embedding=query_embedding,
+                )
 
         # Relational memory only if we know who's asking
-        relational_task = None
-        if sender_id:
-            relational_task = relational.get_contact(
-                self._session,
-                self._clone_id,
-                sender_id,
-            )
+        async def _relational():
+            if not sender_id:
+                return None
+            async with AsyncSessionLocal() as s:
+                return await relational.get_contact(s, self._clone_id, sender_id)
 
-        results = await asyncio.gather(*tasks)
-        episodic_chunks, semantic_facts, procedural_patterns = results
-
-        contact_memory = await relational_task if relational_task else None
+        results = await asyncio.gather(_episodic(), _semantic(), _procedural(), _relational())
+        episodic_chunks, semantic_facts, procedural_patterns, contact_memory = results
 
         return MemoryContext(
             episodic=episodic_chunks,

@@ -79,9 +79,17 @@ class DoppelBrain:
         # ── 1–4. Perceive + load identity + retrieve memory — all in parallel ──
         # Classification (Haiku LLM call) and memory retrieval (embed + pgvector)
         # are fully independent; running them together saves ~200ms on fast path.
+        # IdentityLayer.load gets its own fresh session — SQLAlchemy AsyncSession
+        # does not support concurrent operations on the same instance.
+        from doppel.brain.db.connection import AsyncSessionLocal
+
+        async def _load_identity():
+            async with AsyncSessionLocal() as s:
+                return await IdentityLayer.load(s, self._clone_id)
+
         perceived, identity, memory, working = await asyncio.gather(
             classify(brain_input.message),
-            IdentityLayer.load(self._session, self._clone_id),
+            _load_identity(),
             self._mem_system.retrieve(
                 query=brain_input.message,
                 session_id=brain_input.session_id,
@@ -202,9 +210,17 @@ class DoppelBrain:
         # Fire classification and all memory/identity fetches simultaneously.
         # topics from classification are accepted by retrieve() but not actually used
         # by any layer's vector search, so starting memory retrieval without them is safe.
+        # IdentityLayer.load gets its own fresh session — SQLAlchemy AsyncSession
+        # does not support concurrent operations on the same instance.
+        from doppel.brain.db.connection import AsyncSessionLocal
+
+        async def _load_identity():
+            async with AsyncSessionLocal() as s:
+                return await IdentityLayer.load(s, self._clone_id)
+
         perceived, identity, memory, working = await asyncio.gather(
             classify(brain_input.message),
-            IdentityLayer.load(self._session, self._clone_id),
+            _load_identity(),
             self._mem_system.retrieve(
                 query=brain_input.message,
                 session_id=brain_input.session_id,

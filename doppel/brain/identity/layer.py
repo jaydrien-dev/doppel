@@ -98,9 +98,7 @@ class IdentityLayer:
 async def _load_both(
     session: AsyncSession, clone_id: UUID
 ) -> tuple[StyleFingerprint, ValueSystem]:
-    import asyncio
-    style_task = asyncio.create_task(load_style(session, clone_id))
-    values_task = asyncio.create_task(load_values(session, clone_id))
-    style = await style_task
-    values = await values_task
+    # Run sequentially — SQLAlchemy AsyncSession does not support concurrent ops.
+    style = await load_style(session, clone_id)
+    values = await load_values(session, clone_id)
     return style, values
