@@ -35,6 +35,15 @@ interface MarketplaceClone {
   listing_description: string | null;
 }
 
+interface OrgClone {
+  clone_id: string;
+  display_name: string;
+  handle: string;
+  avatar_url: string | null;
+  category: string | null;
+  price_per_query: number;
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -439,6 +448,9 @@ function ConvSidebar({
   onSelect,
   planCredits,
   boughtCredits,
+  orgCreditBalance,
+  orgClones,
+  onSelectOrgClone,
   searchQuery,
   onSearchChange,
 }: {
@@ -447,6 +459,9 @@ function ConvSidebar({
   onSelect: (c: Conversation) => void;
   planCredits: number | null;
   boughtCredits: number | null;
+  orgCreditBalance: number | null;
+  orgClones: OrgClone[];
+  onSelectOrgClone: (c: OrgClone) => void;
   searchQuery: string;
   onSearchChange: (v: string) => void;
 }) {
@@ -539,6 +554,39 @@ function ConvSidebar({
           </svg>
           My Brain
         </Link>
+        <Link href="/org" style={{
+          display: "flex", alignItems: "center", gap: 8,
+          padding: "8px 14px", borderRadius: 10,
+          background: "rgba(26,115,232,0.06)", border: "1px solid rgba(26,115,232,0.14)",
+          color: "rgba(107,174,255,0.65)", fontSize: 12, fontWeight: 500,
+          textDecoration: "none", transition: "all 150ms",
+        }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(26,115,232,0.12)"; e.currentTarget.style.color = "rgba(107,174,255,0.95)"; e.currentTarget.style.borderColor = "rgba(26,115,232,0.30)"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(26,115,232,0.06)"; e.currentTarget.style.color = "rgba(107,174,255,0.65)"; e.currentTarget.style.borderColor = "rgba(26,115,232,0.14)"; }}
+        >
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+            <circle cx="6" cy="5.5" r="2" stroke="currentColor" strokeWidth="1.3"/>
+            <circle cx="11.5" cy="5" r="1.6" stroke="currentColor" strokeWidth="1.2" opacity="0.6"/>
+            <path d="M1.5 13.5c0-2.5 2-4.5 4.5-4.5s4.5 2 4.5 4.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+            <path d="M11.5 8.5c1.9.3 3 1.7 3 3.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" opacity="0.6"/>
+          </svg>
+          My Organisation
+        </Link>
+        <Link href="/synthesis" style={{
+          display: "flex", alignItems: "center", gap: 8,
+          padding: "8px 14px", borderRadius: 10,
+          background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)",
+          color: "rgba(255,255,255,0.45)", fontSize: 12, fontWeight: 500,
+          textDecoration: "none", transition: "all 150ms",
+        }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.07)"; e.currentTarget.style.color = "rgba(255,255,255,0.75)"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.03)"; e.currentTarget.style.color = "rgba(255,255,255,0.45)"; }}
+        >
+          <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
+            <path d="M7 1L2 4l5 3 5-3-5-3zM2 7l5 3 5-3M2 10l5 3 5-3" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"/>
+          </svg>
+          Synthesis
+        </Link>
       </div>
 
       {/* Conversation list */}
@@ -575,6 +623,57 @@ function ConvSidebar({
           />
         ))}
 
+        {/* Org clones section */}
+        {orgClones.length > 0 && (
+          <div style={{ marginTop: "auto", paddingTop: 12, borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+            <p style={{
+              fontSize: 10, textTransform: "uppercase", letterSpacing: "0.12em",
+              color: "rgba(107,174,255,0.40)", padding: "8px 14px 4px", margin: 0,
+            }}>
+              Org Clones
+            </p>
+            {orgClones.map((c) => {
+              const active = c.clone_id === selectedId;
+              const color = catColor(c.category);
+              const initial = c.display_name[0]?.toUpperCase() ?? "?";
+              return (
+                <button
+                  key={c.clone_id}
+                  onClick={() => onSelectOrgClone(c)}
+                  style={{
+                    width: "100%", display: "flex", alignItems: "center", gap: 10,
+                    padding: "8px 14px", borderRadius: 12, border: "none",
+                    background: active ? hexToRgba("#6BAEFF", 0.12) : "transparent",
+                    cursor: "pointer", textAlign: "left", fontFamily: "inherit",
+                    transition: "background 150ms",
+                  }}
+                  onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = "rgba(107,174,255,0.06)"; }}
+                  onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = "transparent"; }}
+                >
+                  <div style={{
+                    width: 32, height: 32, borderRadius: 10, flexShrink: 0,
+                    background: c.avatar_url ? "transparent" : hexToRgba(color, 0.20),
+                    border: `1px solid ${hexToRgba(color, 0.30)}`,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    fontSize: 12, fontWeight: 500, color, overflow: "hidden",
+                  }}>
+                    {c.avatar_url
+                      ? <img src={c.avatar_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                      : initial}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{ fontSize: 12, fontWeight: 500, color: "rgba(255,255,255,0.75)", margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {c.display_name}
+                    </p>
+                    <p style={{ fontSize: 10, color: "rgba(255,255,255,0.30)", margin: "1px 0 0" }}>
+                      {c.price_per_query > 0 ? `${c.price_per_query} cr` : "Free"} · org
+                    </p>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* User footer */}
@@ -589,7 +688,7 @@ function ConvSidebar({
             <p style={{ fontSize: 12, fontWeight: 500, color: "rgba(255,255,255,0.65)", margin: 0 }}>
               {user?.firstName ?? "You"}
             </p>
-            {(planCredits !== null || boughtCredits !== null) && (
+            {(planCredits !== null || boughtCredits !== null || orgCreditBalance !== null) && (
               <p style={{ fontSize: 10, color: "rgba(255,255,255,0.28)", margin: "1px 0 0", display: "flex", alignItems: "center", flexWrap: "wrap", gap: "0 4px" }}>
                 {planCredits !== null && planCredits > 0 && (
                   <span style={{ color: "rgba(96,165,250,0.65)" }}>{planCredits} plan</span>
@@ -600,7 +699,10 @@ function ConvSidebar({
                 {boughtCredits !== null && boughtCredits > 0 && (
                   <span>{boughtCredits} cr</span>
                 )}
-                {(planCredits === 0 || planCredits === null) && (boughtCredits === 0 || boughtCredits === null) && (
+                {orgCreditBalance !== null && orgCreditBalance > 0 && (
+                  <span style={{ color: "rgba(107,174,255,0.55)" }}>· {orgCreditBalance} org</span>
+                )}
+                {(planCredits === 0 || planCredits === null) && (boughtCredits === 0 || boughtCredits === null) && (orgCreditBalance === null || orgCreditBalance === 0) && (
                   <Link href="/dashboard/credits" style={{ color: "rgba(255,255,255,0.22)", textDecoration: "none" }}>
                     get credits
                   </Link>
@@ -759,6 +861,8 @@ function HomeContent() {
   const [selected, setSelected] = useState<Conversation | null>(null);
   const [planCredits, setPlanCredits] = useState<number | null>(null);
   const [boughtCredits, setBoughtCredits] = useState<number | null>(null);
+  const [orgCreditBalance, setOrgCreditBalance] = useState<number | null>(null);
+  const [orgClones, setOrgClones] = useState<OrgClone[]>([]);
   const [search, setSearch] = useState("");
 
   useEffect(() => {
@@ -778,6 +882,14 @@ function HomeContent() {
     fetch("/api/credits/balance")
       .then((r) => r.json())
       .then((d) => { setPlanCredits(d.plan_credits ?? 0); setBoughtCredits(d.bought_credits ?? 0); })
+      .catch(() => {});
+    fetch("/api/org/credits")
+      .then((r) => r.json())
+      .then((d) => { if (d.org_id) setOrgCreditBalance(d.credits ?? 0); })
+      .catch(() => {});
+    fetch("/api/org/clones")
+      .then((r) => r.json())
+      .then((d) => setOrgClones(d.clones ?? []))
       .catch(() => {});
   }, [isSignedIn]);
 
@@ -842,6 +954,10 @@ function HomeContent() {
     addAndSelect(c);
   }
 
+  function handleSelectOrgClone(c: OrgClone) {
+    addAndSelect(c);
+  }
+
   if (!isLoaded || !isSignedIn) return null;
 
   return (
@@ -856,6 +972,9 @@ function HomeContent() {
         onSelect={setSelected}
         planCredits={planCredits}
         boughtCredits={boughtCredits}
+        orgCreditBalance={orgCreditBalance}
+        orgClones={orgClones}
+        onSelectOrgClone={handleSelectOrgClone}
         searchQuery={search}
         onSearchChange={setSearch}
       />
