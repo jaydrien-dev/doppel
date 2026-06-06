@@ -215,6 +215,7 @@ export interface ActivityTrace {
   confidence: number | null;
   feedback_signal: "approved" | "edited" | "rejected" | null;
   input_message: string;
+  sender_id: string | null;
   response: string;
   latency_ms: number | null;
   needs_escalation: boolean;

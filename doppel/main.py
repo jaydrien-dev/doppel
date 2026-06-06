@@ -2695,18 +2695,31 @@ async def get_traces(
     clone_id: UUID = Query(...),
     limit: int = Query(default=50, le=200),
     offset: int = Query(default=0, ge=0),
+    mode: str = Query(default="owner", regex="^(owner|consumer|all)$"),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
-    """Return recent reasoning traces for the activity log."""
+    """Return recent reasoning traces for the activity log.
+
+    mode=owner    — only traces where the clone owner was chatting (training/testing)
+    mode=consumer — only traces from marketplace users chatting with the clone
+    mode=all      — every trace regardless of caller type
+    """
+    if mode == "owner":
+        mode_filter = "AND (brain_input->>'owner_mode')::boolean = TRUE"
+    elif mode == "consumer":
+        mode_filter = "AND (brain_input->>'owner_mode')::boolean = FALSE"
+    else:
+        mode_filter = ""
 
     rows = await session.execute(
-        sql_text("""
+        sql_text(f"""
             SELECT id, session_id, path, confidence, feedback_signal,
-                   brain_input->>'message' AS input_message,
+                   brain_input->>'message'   AS input_message,
+                   brain_input->>'sender_id' AS sender_id,
                    response, latency_ms, needs_escalation, created_at
             FROM reasoning_traces
             WHERE clone_id = :clone_id
-              AND (brain_input->>'owner_mode')::boolean = TRUE
+              {mode_filter}
             ORDER BY created_at DESC
             LIMIT :limit OFFSET :offset
         """),
@@ -2718,7 +2731,7 @@ async def get_traces(
         if r.get("created_at"):
             r["created_at"] = r["created_at"].isoformat()
         traces.append(r)
-    return {"traces": traces, "offset": offset, "limit": limit}
+    return {"traces": traces, "offset": offset, "limit": limit, "mode": mode}
 
 
 # ---------------------------------------------------------------------------
@@ -6269,19 +6282,32 @@ async def delete_semantic(
 async def get_activity_report(
     clone_id: UUID = Query(...),
     days: int = Query(default=30, ge=1, le=365),
+    mode: str = Query(default="owner", regex="^(owner|consumer|all)$"),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
-    """Return query analytics for a clone owner: volume over time, top questioners, top questions, themes."""
+    """Return query analytics for a clone owner: volume over time, top questioners, top questions, themes.
+
+    mode=owner    — only owner training/testing queries
+    mode=consumer — only marketplace consumer queries
+    mode=all      — all queries
+    """
     cid = str(clone_id)
+
+    if mode == "owner":
+        mode_filter = "AND (brain_input->>'owner_mode')::boolean = TRUE"
+    elif mode == "consumer":
+        mode_filter = "AND (brain_input->>'owner_mode')::boolean = FALSE"
+    else:
+        mode_filter = ""
 
     # Daily query volume
     volume_rows = await session.execute(
-        sql_text("""
+        sql_text(f"""
             SELECT DATE(created_at) AS day, COUNT(*) AS count
             FROM reasoning_traces
             WHERE clone_id = :cid
               AND created_at >= NOW() - MAKE_INTERVAL(days => :days)
-              AND (brain_input->>'owner_mode')::boolean = TRUE
+              {mode_filter}
             GROUP BY DATE(created_at)
             ORDER BY day ASC
         """),
@@ -6294,7 +6320,7 @@ async def get_activity_report(
 
     # Summary totals
     totals_row = await session.execute(
-        sql_text("""
+        sql_text(f"""
             SELECT COUNT(*)                                         AS total_queries,
                    COUNT(DISTINCT brain_input->>'sender_id')        AS unique_questioners,
                    COUNT(DISTINCT session_id)                       AS total_sessions,
@@ -6302,7 +6328,7 @@ async def get_activity_report(
             FROM reasoning_traces
             WHERE clone_id = :cid
               AND created_at >= NOW() - MAKE_INTERVAL(days => :days)
-              AND (brain_input->>'owner_mode')::boolean = TRUE
+              {mode_filter}
         """),
         {"cid": cid, "days": days},
     )
@@ -6310,7 +6336,7 @@ async def get_activity_report(
 
     # Top questioners (by message count)
     questioner_rows = await session.execute(
-        sql_text("""
+        sql_text(f"""
             SELECT brain_input->>'sender_id'    AS sender_id,
                    COUNT(*)                     AS query_count,
                    MAX(created_at)              AS last_active
@@ -6319,7 +6345,7 @@ async def get_activity_report(
               AND created_at >= NOW() - MAKE_INTERVAL(days => :days)
               AND brain_input->>'sender_id' IS NOT NULL
               AND brain_input->>'sender_id' != ''
-              AND (brain_input->>'owner_mode')::boolean = TRUE
+              {mode_filter}
             GROUP BY brain_input->>'sender_id'
             ORDER BY query_count DESC
             LIMIT 15
@@ -6337,13 +6363,13 @@ async def get_activity_report(
 
     # Top questions (most-repeated exact messages)
     question_rows = await session.execute(
-        sql_text("""
+        sql_text(f"""
             SELECT brain_input->>'message' AS message, COUNT(*) AS count
             FROM reasoning_traces
             WHERE clone_id = :cid
               AND created_at >= NOW() - MAKE_INTERVAL(days => :days)
               AND brain_input->>'message' IS NOT NULL
-              AND (brain_input->>'owner_mode')::boolean = TRUE
+              {mode_filter}
             GROUP BY brain_input->>'message'
             ORDER BY count DESC, MAX(created_at) DESC
             LIMIT 25
@@ -6355,7 +6381,7 @@ async def get_activity_report(
         for r in question_rows.mappings()
     ]
 
-    # Recurring themes — from episodic memory chunks sourced from chat
+    # Recurring themes — from episodic memory chunks sourced from chat (always owner-scoped)
     theme_rows = await session.execute(
         sql_text("""
             SELECT t AS theme, COUNT(*) AS count
@@ -6374,6 +6400,7 @@ async def get_activity_report(
 
     return {
         "period_days": days,
+        "mode": mode,
         "total_queries": int(totals.get("total_queries") or 0),
         "unique_questioners": int(totals.get("unique_questioners") or 0),
         "total_sessions": int(totals.get("total_sessions") or 0),
@@ -6389,17 +6416,26 @@ async def get_activity_report(
 async def export_activity_report(
     clone_id: UUID = Query(...),
     days: int = Query(default=30, ge=1, le=365),
+    mode: str = Query(default="owner", regex="^(owner|consumer|all)$"),
     session: AsyncSession = Depends(get_session),
 ):
     """Export raw query log as CSV."""
     import csv, io
     from fastapi.responses import StreamingResponse
 
+    if mode == "owner":
+        mode_filter = "AND (brain_input->>'owner_mode')::boolean = TRUE"
+    elif mode == "consumer":
+        mode_filter = "AND (brain_input->>'owner_mode')::boolean = FALSE"
+    else:
+        mode_filter = ""
+
     rows = await session.execute(
-        sql_text("""
+        sql_text(f"""
             SELECT created_at,
                    session_id,
                    brain_input->>'sender_id'    AS sender_id,
+                   brain_input->>'owner_mode'   AS owner_mode,
                    brain_input->>'message'      AS message,
                    LEFT(response, 200)          AS response_preview,
                    confidence,
@@ -6409,7 +6445,7 @@ async def export_activity_report(
             FROM reasoning_traces
             WHERE clone_id = :cid
               AND created_at >= NOW() - MAKE_INTERVAL(days => :days)
-              AND (brain_input->>'owner_mode')::boolean = TRUE
+              {mode_filter}
             ORDER BY created_at DESC
             LIMIT 10000
         """),
@@ -6419,12 +6455,14 @@ async def export_activity_report(
 
     buf = io.StringIO()
     writer = csv.writer(buf)
-    writer.writerow(["timestamp", "session_id", "sender_id", "message", "response_preview", "confidence", "latency_ms", "path", "needs_escalation"])
+    writer.writerow(["timestamp", "session_id", "sender_id", "query_type", "message", "response_preview", "confidence", "latency_ms", "path", "needs_escalation"])
     for r in records:
+        query_type = "owner" if str(r.get("owner_mode", "")).lower() == "true" else "consumer"
         writer.writerow([
             r["created_at"].isoformat() if r["created_at"] else "",
             str(r["session_id"]) if r["session_id"] else "",
             r["sender_id"] or "",
+            query_type,
             r["message"] or "",
             (r["response_preview"] or "").replace("\n", " "),
             round(float(r["confidence"] or 0), 3),

@@ -6,13 +6,14 @@ export async function GET(req: NextRequest) {
   const cloneId = searchParams.get("clone_id");
   const limit = searchParams.get("limit") ?? "50";
   const offset = searchParams.get("offset") ?? "0";
+  const mode = searchParams.get("mode") ?? "owner";
 
   if (!cloneId) {
     return Response.json({ error: "clone_id required" }, { status: 400 });
   }
 
   const res = await backendFetch(
-    `/brain/traces?clone_id=${cloneId}&limit=${limit}&offset=${offset}`
+    `/brain/traces?clone_id=${cloneId}&limit=${limit}&offset=${offset}&mode=${mode}`
   );
   const data = await res.json();
   return Response.json(data, { status: res.status });

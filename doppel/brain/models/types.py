@@ -104,7 +104,7 @@ class MemoryContext(BaseModel):
 
 class WorkingMemoryTurn(BaseModel):
     """A single turn in the session working memory."""
-    role: Literal["user", "clone"]
+    role: Literal["user", "clone", "summary"]
     content: str
     timestamp: datetime = Field(default_factory=datetime.utcnow)
     confidence: Optional[float] = None

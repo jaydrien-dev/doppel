@@ -68,18 +68,18 @@ function maskId(id: string): string {
   return id.slice(0, 4) + "…" + id.slice(-4);
 }
 
-function ActivityReportTab({ cloneId }: { cloneId: string }) {
+function ActivityReportTab({ cloneId, queryMode }: { cloneId: string; queryMode: "owner" | "consumer" }) {
   const [days, setDays] = useState(30);
 
   const { data, isLoading } = useSWR<ActivityReport>(
-    `/api/brain/activity-report?clone_id=${cloneId}&days=${days}`,
+    `/api/brain/activity-report?clone_id=${cloneId}&days=${days}&mode=${queryMode}`,
     fetcher,
     { revalidateOnFocus: false }
   );
 
   function handleExport() {
     const a = document.createElement("a");
-    a.href = `/api/brain/activity-report/export?clone_id=${cloneId}&days=${days}`;
+    a.href = `/api/brain/activity-report/export?clone_id=${cloneId}&days=${days}&mode=${queryMode}`;
     a.download = `activity-report-${days}d.csv`;
     a.click();
   }
@@ -445,8 +445,8 @@ function ActionButtons({ trace, onFeedback }: {
   );
 }
 
-function TraceRow({ trace, idx, total, onFeedback }: {
-  trace: ActivityTrace; idx: number; total: number;
+function TraceRow({ trace, idx, total, onFeedback, consumerMode }: {
+  trace: ActivityTrace; idx: number; total: number; consumerMode?: boolean;
   onFeedback: (id: string, signal: FeedbackSignalType, correction?: string) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -486,9 +486,19 @@ function TraceRow({ trace, idx, total, onFeedback }: {
             : <span style={{ color: "rgba(255,255,255,0.20)", fontSize: 12 }}>—</span>}
         </div>
 
-        {/* Always-fixed action column */}
+        {/* Actions column — feedback buttons for owner; sender badge for consumer */}
         <div style={{ display: "flex", justifyContent: "flex-end" }}>
-          <ActionButtons trace={trace} onFeedback={onFeedback} />
+          {consumerMode ? (
+            <span style={{
+              fontSize: 11, fontFamily: "ui-monospace,Menlo,monospace",
+              color: "rgba(255,255,255,0.35)", overflow: "hidden",
+              textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 96,
+            }}>
+              {trace.sender_id ? maskId(trace.sender_id) : "anonymous"}
+            </span>
+          ) : (
+            <ActionButtons trace={trace} onFeedback={onFeedback} />
+          )}
         </div>
       </div>
 
@@ -521,13 +531,14 @@ export default function ActivityPage() {
 
   const [tab, setTab] = useState<"review" | "reports">("review");
   const [filter, setFilter] = useState<Filter>("all");
+  const [queryMode, setQueryMode] = useState<"owner" | "consumer">("owner");
   const [localFeedback, setLocalFeedback] = useState<Record<string, FeedbackSignalType>>({});
 
-  // Reset feedback when switching clones
-  useEffect(() => { setLocalFeedback({}); }, [clone?.clone_id]);
+  // Reset feedback when switching clones or mode
+  useEffect(() => { setLocalFeedback({}); }, [clone?.clone_id, queryMode]);
 
   const { data, isLoading, mutate } = useSWR<{ traces: ActivityTrace[] }>(
-    clone?.clone_id ? `/api/activity?clone_id=${clone.clone_id}&limit=100` : null,
+    clone?.clone_id ? `/api/activity?clone_id=${clone.clone_id}&limit=100&mode=${queryMode}` : null,
     fetcher, { refreshInterval: 30_000 }
   );
 
@@ -559,11 +570,25 @@ export default function ActivityPage() {
       <div className="db-page-head">
         <div>
           <p className="db-eyebrow">Monitoring</p>
-          <h1 className="db-h1">Activity{tab === "review" && pendingCount > 0 && <em> · {pendingCount} to review</em>}</h1>
+          <h1 className="db-h1">Activity{tab === "review" && pendingCount > 0 && queryMode === "owner" && <em> · {pendingCount} to review</em>}</h1>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <ClonePicker clones={clones} selected={clone ?? clones[0]} onSelect={c => setSelectedId(c.clone_id)} />
-          {/* Tab switcher */}
+
+          {/* Owner / Consumer mode toggle */}
+          <div style={{ display: "flex", gap: 4, padding: 4, borderRadius: 10, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }}>
+            {(["owner", "consumer"] as const).map((m) => (
+              <button key={m} onClick={() => setQueryMode(m)} style={{
+                padding: "5px 14px", borderRadius: 7, fontSize: 12, fontWeight: 500,
+                cursor: "pointer", border: "none", fontFamily: "inherit",
+                background: queryMode === m ? "rgba(255,255,255,0.09)" : "transparent",
+                color: queryMode === m ? "rgba(255,255,255,0.80)" : "rgba(255,255,255,0.38)",
+                transition: "all 150ms", textTransform: "capitalize",
+              }}>{m}</button>
+            ))}
+          </div>
+
+          {/* Review / Reports tab switcher */}
           <div style={{ display: "flex", gap: 4, padding: 4, borderRadius: 10, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }}>
             {(["review", "reports"] as const).map((t) => (
               <button key={t} onClick={() => setTab(t)} style={{
@@ -588,14 +613,15 @@ export default function ActivityPage() {
       </div>
 
       {/* Reports tab */}
-      {tab === "reports" && clone && <ActivityReportTab cloneId={clone.clone_id} />}
+      {tab === "reports" && clone && <ActivityReportTab cloneId={clone.clone_id} queryMode={queryMode} />}
       {tab === "reports" && !clone && !cloneLoading && (
         <div className="card"><p style={{ fontSize: 13, color: "rgba(255,255,255,0.35)", margin: 0 }}>Create your clone first.</p></div>
       )}
 
-      {tab === "review" && clone && <QualityHeader cloneId={clone.clone_id} />}
+      {/* Quality header only relevant for owner interactions (where feedback is collected) */}
+      {tab === "review" && clone && queryMode === "owner" && <QualityHeader cloneId={clone.clone_id} />}
 
-      {tab === "review" && allTraces.length > 0 && (
+      {tab === "review" && allTraces.length > 0 && queryMode === "owner" && (
         <div style={{
           display: "inline-flex", gap: 4, marginBottom: 18, padding: 4, borderRadius: 12,
           background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)",
@@ -628,13 +654,21 @@ export default function ActivityPage() {
 
       {tab === "review" && (cloneLoading || isLoading) && <div className="card"><p style={{ fontSize: 13, color: "rgba(255,255,255,0.35)", margin: 0 }}>Loading…</p></div>}
       {tab === "review" && !cloneLoading && !clone && <div className="card"><p style={{ fontSize: 13, color: "rgba(255,255,255,0.35)", margin: 0 }}>Create your clone first to see activity.</p></div>}
-      {tab === "review" && !isLoading && clone && allTraces.length === 0 && <div className="card"><p style={{ fontSize: 13, color: "rgba(255,255,255,0.35)", margin: 0 }}>No queries yet. Chat with your clone to see activity here.</p></div>}
+      {tab === "review" && !isLoading && clone && allTraces.length === 0 && (
+        <div className="card">
+          <p style={{ fontSize: 13, color: "rgba(255,255,255,0.35)", margin: 0 }}>
+            {queryMode === "consumer"
+              ? "No consumer queries yet. Share your clone's public page to start getting questions."
+              : "No queries yet. Chat with your clone to see activity here."}
+          </p>
+        </div>
+      )}
       {tab === "review" && !isLoading && clone && allTraces.length > 0 && traces.length === 0 && <div className="card"><p style={{ fontSize: 13, color: "rgba(255,255,255,0.35)", margin: 0 }}>No responses match this filter.</p></div>}
 
       {tab === "review" && traces.length > 0 && (
         <div className="card" style={{ padding: 0, overflow: "hidden" }}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 60px 100px", gap: 16, padding: "10px 20px", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
-            {["Question", "Response", "Conf.", "Actions"].map((h) => (
+            {["Question", "Response", "Conf.", queryMode === "consumer" ? "Sender" : "Actions"].map((h) => (
               <span key={h} style={{ fontSize: 10, letterSpacing: "0.14em", textTransform: "uppercase", color: "rgba(255,255,255,0.25)", fontWeight: 500 }}>{h}</span>
             ))}
           </div>
@@ -643,6 +677,7 @@ export default function ActivityPage() {
               key={trace.id}
               trace={{ ...trace, feedback_signal: localFeedback[trace.id] ?? trace.feedback_signal }}
               idx={idx} total={traces.length} onFeedback={handleFeedback}
+              consumerMode={queryMode === "consumer"}
             />
           ))}
         </div>
