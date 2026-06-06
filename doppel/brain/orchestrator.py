@@ -214,13 +214,13 @@ class DoppelBrain:
     async def _process_stream_inner(
         self, brain_input: BrainInput, t_start: float
     ) -> AsyncGenerator[str, None]:
+        import logging as _logging
+        _log = _logging.getLogger(__name__)
+
         # Load clone's API key overrides before any LLM/embed calls (cached after first hit)
         await load_clone_keys(self._session, self._clone_id)
+        _log.info("[TIMING] brain: keys=%.0fms", (time.monotonic() - t_start) * 1000)
 
-        # Fire classification and all memory/identity fetches simultaneously.
-        # If the heuristic pre-classifier fires, skip embed + vector search.
-        # IdentityLayer.load gets its own fresh session — SQLAlchemy AsyncSession
-        # does not support concurrent operations on the same instance.
         from doppel.brain.db.connection import AsyncSessionLocal
 
         async def _load_identity():
@@ -249,13 +249,13 @@ class DoppelBrain:
             )
 
         path = route(perceived)
-        # Override with user-specified mode
         mode = brain_input.response_mode
         if mode == "fast":
             path = "fast"
         elif mode in ("pro", "extended"):
             path = "slow"
 
+        _log.info("[TIMING] brain: gather=%.0fms path=%s heuristic=%s", (time.monotonic() - t_start) * 1000, path, quick is not None)
         yield f"data: {json.dumps({'event': 'start', 'path': path})}\n\n"
 
         kwargs = dict(
@@ -273,10 +273,14 @@ class DoppelBrain:
 
         full_text = ""
         trace = None
+        first_token = True
         async for event_type, data in gen:
             if event_type == "thinking":
                 yield f"data: {json.dumps({'event': 'thinking'})}\n\n"
             elif event_type == "token":
+                if first_token:
+                    _log.info("[TIMING] brain: first_token=%.0fms", (time.monotonic() - t_start) * 1000)
+                    first_token = False
                 full_text += data
                 yield f"data: {json.dumps({'event': 'token', 'text': data})}\n\n"
             elif event_type == "done":

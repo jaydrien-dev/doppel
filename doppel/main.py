@@ -2490,9 +2490,8 @@ async def chat_stream(
       data: {"event": "done", "trace_id": "...", "confidence": ..., "sources": [...], ...}
     """
     caller_user_id = request.headers.get("X-User-Id")
+    _t0 = time.monotonic()
 
-    # Run access check + rate limit in parallel using separate sessions.
-    # Both read from clone_identity; no reason to serialize them.
     from doppel.brain.db.connection import AsyncSessionLocal
 
     async def _access():
@@ -2504,8 +2503,8 @@ async def chat_stream(
             await _check_rate_limit(body.clone_id, s)
 
     await asyncio.gather(_access(), _rate())
+    _log.info("[TIMING] preflight done in %.0fms", (time.monotonic() - _t0) * 1000)
 
-    # Credit deduction + consumer brain retrieval in parallel.
     if caller_user_id:
         body, consumer_brain_ctx = await asyncio.gather(
             _handle_chat_credits_and_context(body, caller_user_id, session),
@@ -2519,7 +2518,10 @@ async def chat_stream(
     else:
         body = await _handle_chat_credits_and_context(body, caller_user_id, session)
 
+    _log.info("[TIMING] credits+context done in %.0fms", (time.monotonic() - _t0) * 1000)
     await load_clone_keys(session, body.clone_id)
+    _log.info("[TIMING] keys loaded in %.0fms — starting brain (model=%s)", (time.monotonic() - _t0) * 1000, settings.fast_reasoning_model)
+
     brain = DoppelBrain(session=session, clone_id=body.clone_id)
     try:
         return StreamingResponse(

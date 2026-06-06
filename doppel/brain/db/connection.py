@@ -6,11 +6,13 @@ from doppel.config import settings
 
 engine = create_async_engine(
     settings.database_url,
-    echo=settings.app_env == "development",
-    pool_size=10,
-    max_overflow=20,
-    pool_pre_ping=True,
-    pool_recycle=300,
+    echo=False,  # never echo in prod — generates massive logs and adds latency
+    pool_size=20,        # enough for concurrent sessions per request
+    max_overflow=30,
+    pool_pre_ping=False, # pre_ping adds a round-trip per checkout; use pool_recycle instead
+    pool_recycle=600,    # recycle connections every 10 min to avoid stale connections
+    pool_timeout=10,     # fail fast if pool exhausted rather than hanging
+    connect_args={"command_timeout": 10},  # kill runaway queries after 10s
 )
 
 AsyncSessionLocal = async_sessionmaker(
