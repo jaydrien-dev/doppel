@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c ':*)",
+      "Bash(python3 -)",
+      "Bash(node -e ':*)",
+      "Bash(grep -v \"= \\\\`\")",
+      "Bash(find \"c:/Users/jaydr/OneDrive/Documents/DOPPEL/ui/app\" -name \"*.tsx\" -not -path \"*/node_modules/*\" -exec grep -l \"create.*org\\\\|POST.*org\" {} \\\\;)",
+      "Bash(ls -la c:/Users/jaydr/OneDrive/Documents/DOPPEL/ui/.env*)",
+      "Bash(find c:/Users/jaydr/OneDrive/Documents/DOPPEL/ui/components -name \"*.tsx\" -exec wc -l {} +)",
+      "Bash(find c:/Users/jaydr/OneDrive/Documents/DOPPEL/ui/app -name \"page.tsx\" -exec wc -l {} +)",
+      "Bash(find c:/Users/jaydr/OneDrive/Documents/DOPPEL/ui/app/api -name \"route.ts\" -exec grep -l \"fetch.*FASTAPI_URL\\\\|fetch.*localhost:8000\" {} \\\\;)",
+      "Bash(wc -l c:/Users/jaydr/OneDrive/Documents/DOPPEL/doppel/ingestion/*.py)",
+      "Bash(awk '$1 > 1000 {print $2\": \"$1 \" lines\"}')",
+      "Bash(python -c \"import ast, sys; ast.parse\\(open\\('doppel/main.py'\\).read\\(\\)\\); print\\('syntax ok'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('doppel/main.py'\\).read\\(\\)\\); print\\('ok'\\)\")",
+      "Read(//c/Users/jaydr/OneDrive/Documents/DOPPEL/ui/app/\\(dashboard\\)/**)",
+      "Bash(xargs ls:*)"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\jaydr\\OneDrive\\Documents\\DOPPEL\\ui\\app\\api\\org\\by-token",
+      "c:\\Users\\jaydr\\OneDrive\\Documents\\DOPPEL\\ui\\app\\join",
+      "c:\\Users\\jaydr\\OneDrive\\Documents\\DOPPEL\\ui\\app\\api\\brain\\semantic",
+      "c:\\Users\\jaydr\\OneDrive\\Documents\\DOPPEL\\ui\\app\\api\\clones\\[handle]"
+    ]
+  }
+}
