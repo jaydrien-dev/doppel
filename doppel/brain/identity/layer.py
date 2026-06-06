@@ -1,9 +1,13 @@
 """
 IdentityLayer: loads and exposes the full identity (style + values) for a clone.
 Acts as the authoritative source of "who this clone is" for all other layers.
+
+Identity is cached in-process with a 5-minute TTL — clone identity rarely changes
+mid-session and loading it on every request adds 3 unnecessary DB round-trips.
 """
 from __future__ import annotations
 
+import time
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,6 +15,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from doppel.brain.identity.style import load_style, render_style_prompt
 from doppel.brain.identity.values import load_values, render_values_prompt
 from doppel.brain.models.types import StyleFingerprint, ValueSystem
+
+# ── In-process identity cache ─────────────────────────────────────────────────
+# Keyed by str(clone_id). Value is (loaded_at_timestamp, IdentityLayer).
+# Single-threaded asyncio — no locking needed.
+_IDENTITY_CACHE: dict[str, tuple[float, "IdentityLayer"]] = {}
+_IDENTITY_TTL = 300.0  # seconds
+
+
+def invalidate_identity_cache(clone_id: UUID | str) -> None:
+    """Call after identity updates (style/values saved) to force a fresh load."""
+    _IDENTITY_CACHE.pop(str(clone_id), None)
 
 
 class IdentityLayer:
@@ -26,6 +41,11 @@ class IdentityLayer:
 
     @classmethod
     async def load(cls, session: AsyncSession, clone_id: UUID) -> "IdentityLayer":
+        key = str(clone_id)
+        cached = _IDENTITY_CACHE.get(key)
+        if cached and (time.monotonic() - cached[0]) < _IDENTITY_TTL:
+            return cached[1]
+
         style, values = await _load_both(session, clone_id)
         # Fetch the display name separately
         from sqlalchemy import text
@@ -35,7 +55,9 @@ class IdentityLayer:
         )
         row = result.mappings().first()
         name = row["display_name"] if row else "Unknown"
-        return cls(style=style, values=values, clone_name=name)
+        identity = cls(style=style, values=values, clone_name=name)
+        _IDENTITY_CACHE[key] = (time.monotonic(), identity)
+        return identity
 
     def render_persona_block(self) -> str:
         """

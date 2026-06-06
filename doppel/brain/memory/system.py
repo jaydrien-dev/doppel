@@ -9,6 +9,7 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from doppel.brain.db.vector import embed
 from doppel.brain.memory import episodic, procedural, relational, semantic
 from doppel.brain.memory.working import get_turns, format_for_prompt
 from doppel.brain.models.types import MemoryContext, WorkingMemoryTurn
@@ -29,8 +30,13 @@ class MemorySystem:
     ) -> MemoryContext:
         """
         Parallel retrieval from all long-term memory stores.
+        Embeds the query once and shares the vector across all layers to avoid
+        redundant API calls.
         Returns a unified MemoryContext ready for the reasoning engine.
         """
+        # Single embedding call shared by all three layers (saves 2x round-trips)
+        query_embedding = await embed(query)
+
         tasks = [
             episodic.retrieve(
                 self._session,
@@ -38,18 +44,21 @@ class MemorySystem:
                 query,
                 limit=20,
                 authored_by_user_only=False,
+                query_embedding=query_embedding,
             ),
             semantic.retrieve(
                 self._session,
                 self._clone_id,
                 query,
                 limit=8,
+                query_embedding=query_embedding,
             ),
             procedural.retrieve(
                 self._session,
                 self._clone_id,
                 query,
                 limit=5,
+                query_embedding=query_embedding,
             ),
         ]
 

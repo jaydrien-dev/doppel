@@ -163,22 +163,6 @@ export interface TranscriptEntry {
   ts: string;
 }
 
-export interface MeetingResponse {
-  question: string;
-  answer: string;
-  ts: string;
-}
-
-export interface MeetingSession {
-  bot_id: string;
-  meeting_url: string;
-  platform: "zoom" | "meet" | "teams";
-  status: "joining" | "in_call" | "ended" | "error";
-  transcript: TranscriptEntry[];
-  responses: MeetingResponse[];
-  started_at: string | null;
-  ended_at: string | null;
-}
 
 // ---------------------------------------------------------------------------
 // Ingestion
@@ -219,88 +203,6 @@ export interface ChatMessage {
   isHistory?: boolean;
 }
 
-// ---------------------------------------------------------------------------
-// Company Brain — Role Brains + Skills
-// ---------------------------------------------------------------------------
-
-export interface RoleBrain {
-  id: string;
-  org_id: string;
-  role_name: string;
-  description: string;
-  member_clone_ids: string[];
-  member_names: string[];
-  knowledge_summary: Record<string, unknown>;
-  freshness_score: number;
-  last_extracted_at: string | null;
-  skill_count: number;
-  has_knowledge: boolean;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface DecisionRule {
-  condition: string;
-  action: string;
-}
-
-export interface SkillProcedure {
-  steps: string[];
-  decision_rules: DecisionRule[];
-  exceptions: string[];
-  escalation: string;
-}
-
-export interface OrgSkill {
-  id: string;
-  org_id: string;
-  role_brain_id: string | null;
-  skill_name: string;
-  display_name?: string;
-  trigger_context: string[];
-  inputs_required: string[];
-  procedure: SkillProcedure;
-  confidence: number;
-  source_count: number;
-  last_verified_at: string | null;
-  created_at: string;
-  // Joined field
-  role_name?: string;
-}
-
-export interface AgentQueryResult {
-  skill_applied: string | null;
-  skill_id: string | null;
-  recommendation: string;
-  reasoning: string;
-  confidence: number;
-  escalate: boolean;
-  escalation_reason: string | null;
-  caveats: string[];
-  latency_ms: number;
-}
-
-export interface ValidateActionResult {
-  safe_to_proceed: boolean;
-  confidence: number;
-  notes: string[];
-  blocking_reason: string | null;
-  suggested_alternative: string | null;
-  latency_ms: number;
-}
-
-export interface AgentQuery {
-  id: string;
-  org_id: string;
-  skill_id: string | null;
-  situation: string;
-  context: Record<string, unknown>;
-  response: AgentQueryResult;
-  confidence: number | null;
-  escalated: boolean;
-  latency_ms: number | null;
-  created_at: string;
-}
 
 // ---------------------------------------------------------------------------
 // Activity log (reasoning traces)

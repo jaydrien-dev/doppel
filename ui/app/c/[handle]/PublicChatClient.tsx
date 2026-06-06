@@ -76,22 +76,30 @@ export function PublicChatClient({
   const [profile, setProfile] = useState<ConsumerProfile | null>(null);
   const suggested = isOnboardingResource ? SUGGESTED_ONBOARDING : SUGGESTED_DEFAULT;
 
-  // Persist session ID per clone so history survives page refreshes
-  const [sessionId, setSessionId] = useState<string>(() => {
-    if (typeof window === "undefined") return crypto.randomUUID();
+  // Persist session ID per clone so history survives page refreshes.
+  // Initialized as "" to avoid SSR hydration mismatch (useState initializers
+  // don't re-run on the client during Next.js SSR hydration — useEffect does).
+  const [sessionId, setSessionId] = useState<string>("");
+
+  useEffect(() => {
     const key = `doppel_session:${clone.handle}`;
     const existing = localStorage.getItem(key);
-    if (existing) return existing;
-    const fresh = crypto.randomUUID();
-    localStorage.setItem(key, fresh);
-    return fresh;
-  });
+    if (existing) {
+      setSessionId(existing);
+    } else {
+      const fresh = crypto.randomUUID();
+      localStorage.setItem(key, fresh);
+      setSessionId(fresh);
+    }
+  }, [clone.handle]);
 
   function startNewConversation() {
     const fresh = crypto.randomUUID();
     localStorage.setItem(`doppel_session:${clone.handle}`, fresh);
     // Clear stored messages for old session
-    try { localStorage.removeItem(`doppel_msgs:${clone.clone_id}:${sessionId}`); } catch { /* non-fatal */ }
+    if (sessionId) {
+      try { localStorage.removeItem(`doppel_msgs:${clone.clone_id}:${sessionId}`); } catch { /* non-fatal */ }
+    }
     setSessionId(fresh);
   }
 
@@ -163,21 +171,23 @@ export function PublicChatClient({
         </div>
       )}
 
-      {/* Chat interface */}
+      {/* Chat interface — only mount once sessionId is resolved from localStorage */}
       <div style={{ flex: 1, minHeight: 0 }}>
-        <ChatInterface
-          key={sessionId}
-          cloneId={clone.clone_id}
-          cloneName={clone.display_name}
-          cloneColor={cloneColor}
-          contextType="chat"
-          ownerMode={false}
-          suggestedQuestions={suggested}
-          placeholder={`Ask ${clone.display_name} anything…`}
-          initialInput={prefillQ}
-          pricePerQuery={clone.price_per_query ?? 0}
-          sessionId={sessionId}
-        />
+        {sessionId && (
+          <ChatInterface
+            key={sessionId}
+            cloneId={clone.clone_id}
+            cloneName={clone.display_name}
+            cloneColor={cloneColor}
+            contextType="chat"
+            ownerMode={false}
+            suggestedQuestions={suggested}
+            placeholder={`Ask ${clone.display_name} anything…`}
+            initialInput={prefillQ}
+            pricePerQuery={clone.price_per_query ?? 0}
+            sessionId={sessionId}
+          />
+        )}
       </div>
     </div>
   );

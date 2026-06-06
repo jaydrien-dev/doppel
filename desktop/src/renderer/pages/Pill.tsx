@@ -1,19 +1,28 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { getCached, setCached } from "../lib/cache";
 
 // Settings are loaded async on mount (from Electron userData/settings.json)
 // defaults used until settings arrive
 
 declare global {
   interface Window {
-    pillAPI?:              { resize: (h: number) => void; exit: () => void; openFull: () => void; getSettings: () => Promise<any>; };
-    pillResponseAPI?:      { show: (text: string) => void; hide: () => void; };
+    pillAPI?: {
+      resize:             (h: number) => void;
+      exit:               () => void;
+      openFull:           () => void;
+      getSettings:        () => Promise<any>;
+      getActiveApp:       () => Promise<{ appName: string; windowTitle: string } | null>;
+      onClipboardChange:  (cb: (text: string) => void) => void;
+      offClipboardChange: (cb: (text: string) => void) => void;
+    };
+    pillResponseAPI?:       { show: (text: string) => void; hide: () => void; };
     pillGetScreenSourceId?: () => Promise<string | null>;
   }
 }
 
 // ─── Heights ─────────────────────────────────────────────────────────────────
 
-const H = { idle: 68, recording: 68, thinking: 68, speaking: 68, expanded: 420 };
+const H = { idle: 68, recording: 68, thinking: 68, speaking: 68, expanded: 470 };
 
 // ─── Color ───────────────────────────────────────────────────────────────────
 
@@ -26,7 +35,7 @@ function color(name: string) {
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type State = "idle" | "recording" | "thinking" | "speaking";
-interface Msg { role: "user" | "clone"; text: string; }
+interface Msg { role: "user" | "clone"; text: string; fromCache?: boolean; }
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
@@ -39,11 +48,15 @@ export default function Pill() {
   const col         = color(cloneName);
   const initial     = cloneName[0]?.toUpperCase() ?? "?";
 
-  const [pillState,  setPillState]  = useState<State>("idle");
-  const [expanded,   setExpanded]   = useState(false);
-  const [messages,   setMessages]   = useState<Msg[]>([]);
-  const [liveText,   setLiveText]   = useState("");      // streaming response
-  const [statusText, setStatusText] = useState("watching"); // subtitle in pill
+  const [pillState,      setPillState]      = useState<State>("idle");
+  const [expanded,       setExpanded]       = useState(false);
+  const [messages,       setMessages]       = useState<Msg[]>([]);
+  const [liveText,       setLiveText]       = useState("");
+  const [statusText,     setStatusText]     = useState("watching");
+  const [inputText,      setInputText]      = useState("");
+  const [clipboardText,  setClipboardText]  = useState<string | null>(null);
+  const [clipboardDone,  setClipboardDone]  = useState(false);
+  const [activeAppLabel, setActiveAppLabel] = useState<string | null>(null);
 
   // Persist session ID per clone so working memory survives pill close/reopen (Redis TTL: 4h)
   const sessionId = useRef<string>((() => {
@@ -59,6 +72,7 @@ export default function Pill() {
   const audioRef      = useRef<HTMLAudioElement | null>(null);
   const readerRef     = useRef<ReadableStreamDefaultReader<Uint8Array> | null>(null);
   const messagesEnd   = useRef<HTMLDivElement>(null);
+  const inputRef      = useRef<HTMLInputElement>(null);
   const apiRef        = useRef("http://localhost:8000");
   const openaiKeyRef  = useRef("");
   const userIdRef     = useRef("");
@@ -85,6 +99,29 @@ export default function Pill() {
   useEffect(() => {
     messagesEnd.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, liveText]);
+
+  // ── Clipboard detection ───────────────────────────────────────────────────
+
+  useEffect(() => {
+    const handler = (text: string) => {
+      setClipboardText(text);
+      setClipboardDone(false);
+    };
+    window.pillAPI?.onClipboardChange?.(handler);
+    return () => window.pillAPI?.offClipboardChange?.(handler);
+  }, []);
+
+  // ── Active app polling ────────────────────────────────────────────────────
+
+  useEffect(() => {
+    const refresh = async () => {
+      const info = await window.pillAPI?.getActiveApp?.();
+      if (info?.appName) setActiveAppLabel(info.appName);
+    };
+    refresh();
+    const interval = setInterval(refresh, 5000);
+    return () => clearInterval(interval);
+  }, []);
 
   // ── Screen capture helper (called early, in parallel with Whisper) ───────
 
@@ -194,6 +231,15 @@ export default function Pill() {
     setPillState("thinking"); setStatusText("thinking…");
     setLiveText("");
 
+    // ── Cache check ─────────────────────────────────────────────────────────
+    const cached = await getCached(cloneHandle, text);
+    if (cached) {
+      setMessages(prev => [...prev, { role: "clone", text: cached, fromCache: true }]);
+      window.pillResponseAPI?.show(cached);
+      await speakText(cached);
+      return;
+    }
+
     const imageMeta: Record<string, string> = dataUrl
       ? { image_base64: dataUrl.split(",")[1], image_media_type: "image/jpeg" }
       : {};
@@ -203,9 +249,15 @@ export default function Pill() {
       // Fast path = 1 LLM call with vision, target <1.5s vs 6-12s on slow path.
       const responseMode = "fast";
 
-      const authHeaders: Record<string, string> = userIdRef.current
-        ? { "X-User-Id": userIdRef.current }
-        : {};
+      // Build auth headers — prefer Clerk JWT, fall back to userId header
+      const authHeaders: Record<string, string> = {};
+      try {
+        const token = await (window as any).Clerk?.session?.getToken?.();
+        if (token) authHeaders["Authorization"] = `Bearer ${token}`;
+        else if (userIdRef.current) authHeaders["X-User-Id"] = userIdRef.current;
+      } catch {
+        if (userIdRef.current) authHeaders["X-User-Id"] = userIdRef.current;
+      }
 
       console.log(`[pill] sending mode=${responseMode} screenshot=${!!dataUrl} user=${userIdRef.current || "anon"}`);
       const res = await fetch(`${apiRef.current}/brain/chat/stream`, {
@@ -256,6 +308,8 @@ export default function Pill() {
       readerRef.current = null;
       setMessages(prev => [...prev, { role: "clone", text: full }]);
       setLiveText("");
+      // Write to cache for next time (skip if vision was used — context changes)
+      if (!dataUrl) setCached(cloneHandle, text, full);
       await speakText(full);
     } catch (e) {
       console.error("[pill] sendMessage error:", e);
@@ -263,7 +317,7 @@ export default function Pill() {
       setTimeout(() => setStatusText("watching"), 3000);
       window.pillResponseAPI?.hide();
     }
-  }, [cloneId]);
+  }, [cloneId, cloneHandle]);
 
   // ── TTS ───────────────────────────────────────────────────────────────────
 
@@ -356,6 +410,11 @@ export default function Pill() {
               <span style={{ fontSize: 10, color: pillState === "recording" ? "rgba(248,113,113,0.70)" : pillState === "idle" ? "rgba(52,211,153,0.60)" : "rgba(255,255,255,0.30)" }}>
                 {statusText}
               </span>
+              {activeAppLabel && pillState === "idle" && (
+                <span style={{ fontSize: 9, color: "rgba(255,255,255,0.18)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 70 }}>
+                  · {activeAppLabel}
+                </span>
+              )}
             </div>
           </div>
 
@@ -398,13 +457,20 @@ export default function Pill() {
               )}
               {messages.map((m, i) => (
                 <div key={i} style={{ display: "flex", justifyContent: m.role === "user" ? "flex-end" : "flex-start" }}>
-                  <p style={{
-                    maxWidth: "85%", margin: 0, padding: "7px 10px",
-                    borderRadius: m.role === "user" ? "12px 12px 3px 12px" : "12px 12px 12px 3px",
-                    background: m.role === "user" ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.05)",
-                    border: "1px solid rgba(255,255,255,0.07)",
-                    fontSize: 12, lineHeight: 1.55, color: "rgba(255,255,255,0.78)", wordBreak: "break-word",
-                  }}>{m.text}</p>
+                  <div style={{ maxWidth: "85%" }}>
+                    <p style={{
+                      margin: 0, padding: "7px 10px",
+                      borderRadius: m.role === "user" ? "12px 12px 3px 12px" : "12px 12px 12px 3px",
+                      background: m.role === "user" ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.05)",
+                      border: "1px solid rgba(255,255,255,0.07)",
+                      fontSize: 12, lineHeight: 1.55, color: "rgba(255,255,255,0.78)", wordBreak: "break-word",
+                    }}>{m.text}</p>
+                    {m.fromCache && (
+                      <span style={{ fontSize: 9, color: "rgba(99,102,241,0.55)", marginTop: 2, display: "block" }}>
+                        cached
+                      </span>
+                    )}
+                  </div>
                 </div>
               ))}
               {liveText && (
@@ -415,6 +481,83 @@ export default function Pill() {
                 </div>
               )}
               <div ref={messagesEnd} />
+            </div>
+
+            {/* ── Clipboard chip ── */}
+            {clipboardText && !clipboardDone && (
+              <div style={{
+                margin: "0 12px 6px",
+                padding: "6px 10px",
+                borderRadius: 8,
+                background: "rgba(99,102,241,0.10)",
+                border: "1px solid rgba(99,102,241,0.20)",
+                display: "flex", alignItems: "center", gap: 8,
+                WebkitAppRegion: "no-drag",
+              } as React.CSSProperties}>
+                <svg width="11" height="11" viewBox="0 0 12 12" fill="none" style={{ flexShrink: 0, color: "rgba(165,180,252,0.70)" }}>
+                  <rect x="2" y="1" width="8" height="10" rx="1.5" stroke="currentColor" strokeWidth="1.2"/>
+                  <path d="M4 1.5A1 1 0 015 1h2a1 1 0 011 .5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+                  <path d="M4 5h4M4 7h2.5" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" opacity="0.6"/>
+                </svg>
+                <span style={{ flex: 1, fontSize: 10, color: "rgba(255,255,255,0.45)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {clipboardText.slice(0, 60)}{clipboardText.length > 60 ? "…" : ""}
+                </span>
+                <button
+                  onClick={() => { setInputText(prev => prev ? `${prev} ${clipboardText}` : clipboardText); setClipboardDone(true); inputRef.current?.focus(); }}
+                  style={{ fontSize: 10, color: "rgba(165,180,252,0.80)", background: "rgba(99,102,241,0.15)", border: "none", borderRadius: 5, padding: "2px 7px", cursor: "pointer" }}
+                >
+                  Use
+                </button>
+                <button
+                  onClick={() => setClipboardDone(true)}
+                  style={{ color: "rgba(255,255,255,0.20)", background: "none", border: "none", cursor: "pointer", padding: "0 2px", fontSize: 12, lineHeight: 1 }}
+                >
+                  ×
+                </button>
+              </div>
+            )}
+
+            {/* ── Text input ── */}
+            <div style={{ padding: "6px 12px 10px", borderTop: "1px solid rgba(255,255,255,0.06)", WebkitAppRegion: "no-drag" } as React.CSSProperties}>
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const t = inputText.trim();
+                  if (!t || pillState !== "idle") return;
+                  setInputText("");
+                  sendMessage(t);
+                }}
+                style={{ display: "flex", gap: 6, alignItems: "center" }}
+              >
+                <input
+                  ref={inputRef}
+                  value={inputText}
+                  onChange={e => setInputText(e.target.value)}
+                  placeholder="Type a message…"
+                  disabled={pillState !== "idle"}
+                  style={{
+                    flex: 1, background: "rgba(255,255,255,0.05)",
+                    border: "1px solid rgba(255,255,255,0.10)", borderRadius: 8,
+                    padding: "6px 10px", fontSize: 12, color: "rgba(255,255,255,0.75)",
+                    outline: "none", opacity: pillState !== "idle" ? 0.4 : 1,
+                  }}
+                />
+                <button
+                  type="submit"
+                  disabled={!inputText.trim() || pillState !== "idle"}
+                  style={{
+                    width: 30, height: 30, borderRadius: 8, border: "none", cursor: "pointer",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    background: inputText.trim() && pillState === "idle" ? "rgba(99,102,241,0.50)" : "rgba(255,255,255,0.05)",
+                    color: inputText.trim() && pillState === "idle" ? "rgba(255,255,255,0.90)" : "rgba(255,255,255,0.25)",
+                    transition: "all 150ms",
+                  }}
+                >
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                    <path d="M2 6h8M7 3l3 3-3 3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                </button>
+              </form>
             </div>
           </>
         )}

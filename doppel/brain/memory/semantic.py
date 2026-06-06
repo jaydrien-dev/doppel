@@ -52,9 +52,13 @@ async def retrieve(
     query: str,
     limit: int = 10,
     domain: str | None = None,
+    query_embedding: list[float] | None = None,
 ) -> list[KnowledgeFact]:
-    """Retrieve semantically relevant facts for a query."""
-    query_embedding = await embed(query)
+    """Retrieve semantically relevant facts for a query.
+    Pass query_embedding to reuse a pre-computed vector and skip the embed() call.
+    """
+    if query_embedding is None:
+        query_embedding = await embed(query)
     extra_where = f"AND domain = '{domain}'" if domain else ""
 
     rows = await similarity_search(

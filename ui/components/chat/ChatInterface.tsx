@@ -1378,7 +1378,7 @@ export function ChatInterface({
       <div style={{ display: convMode ? "none" : "contents" }}>
         {/* Messages scroll area */}
         <div className="chat-scroll" ref={scrollRef}>
-          {historyLoading ? (
+          {historyLoading && isEmpty ? (
             <div style={{ display: "flex", flexDirection: "column", gap: 12, padding: "24px 20px" }}>
               {[80, 55, 90, 65].map((w, i) => (
                 <div key={i} style={{ display: "flex", alignItems: "flex-end", gap: 8, flexDirection: i % 2 === 0 ? "row-reverse" : "row" }}>

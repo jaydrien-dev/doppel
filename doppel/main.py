@@ -2421,12 +2421,6 @@ async def _handle_chat_credits_and_context(
         except Exception as _cp_err:
             _log.warning("consumer_profiles update skipped: %s", _cp_err)
 
-    # Consumer brain: relevant memories about this caller
-    if caller_user_id:
-        consumer_brain_ctx = await _retrieve_consumer_brain(caller_user_id, body.message, session)
-        if consumer_brain_ctx:
-            body = body.model_copy(update={"metadata": {**body.metadata, "consumer_brain": consumer_brain_ctx}})
-
     return body
 
 
@@ -2459,11 +2453,23 @@ async def chat_stream(
     caller_user_id = request.headers.get("X-User-Id")
     await _check_clone_access(body.clone_id, caller_user_id, None, session)
     await _check_rate_limit(body.clone_id, session)
-    body = await _handle_chat_credits_and_context(body, caller_user_id, session)
+
+    # Run credit deduction and consumer brain retrieval in parallel.
+    # Consumer brain does its own embed + vector search (~150-250ms) — no reason
+    # to let it block while credit queries are running.
     if caller_user_id:
+        body, consumer_brain_ctx = await asyncio.gather(
+            _handle_chat_credits_and_context(body, caller_user_id, session),
+            _retrieve_consumer_brain(caller_user_id, body.message, session),
+        )
+        if consumer_brain_ctx:
+            body = body.model_copy(update={"metadata": {**body.metadata, "consumer_brain": consumer_brain_ctx}})
         asyncio.create_task(
             _maybe_update_consumer_profile(str(body.clone_id), caller_user_id, str(body.session_id))
         )
+    else:
+        body = await _handle_chat_credits_and_context(body, caller_user_id, session)
+
     await load_clone_keys(session, body.clone_id)
     brain = DoppelBrain(session=session, clone_id=body.clone_id)
     try:
@@ -2493,7 +2499,17 @@ async def chat(
     caller_user_id = request.headers.get("X-User-Id")
     await _check_clone_access(body.clone_id, caller_user_id, None, session)
     await _check_rate_limit(body.clone_id, session)
-    body = await _handle_chat_credits_and_context(body, caller_user_id, session)
+
+    if caller_user_id:
+        body, consumer_brain_ctx = await asyncio.gather(
+            _handle_chat_credits_and_context(body, caller_user_id, session),
+            _retrieve_consumer_brain(caller_user_id, body.message, session),
+        )
+        if consumer_brain_ctx:
+            body = body.model_copy(update={"metadata": {**body.metadata, "consumer_brain": consumer_brain_ctx}})
+    else:
+        body = await _handle_chat_credits_and_context(body, caller_user_id, session)
+
     await load_clone_keys(session, body.clone_id)
     brain = DoppelBrain(session=session, clone_id=body.clone_id)
     try:

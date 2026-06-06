@@ -138,13 +138,33 @@ def set_keys(
 
 # ---------------------------------------------------------------------------
 # DB loader — call once per request before any LLM/embed/oauth calls
+# In-process cache avoids hitting clone_identity on every single request.
 # ---------------------------------------------------------------------------
+
+import time as _time
+
+_KEYS_CACHE: dict[str, tuple[float, dict]] = {}  # clone_id → (ts, api_keys dict)
+_KEYS_TTL = 300.0  # seconds
+
+
+def invalidate_keys_cache(clone_id) -> None:
+    """Call after a clone's api_keys are updated."""
+    _KEYS_CACHE.pop(str(clone_id), None)
+
 
 async def load_clone_keys(session: AsyncSession, clone_id: UUID) -> None:
     """
     Fetch the clone's stored api_keys from clone_identity and inject into ContextVars.
     Any key not set in DB is left as None → downstream getters fall back to settings.
+    Results are cached for 5 minutes to avoid per-request DB queries.
     """
+    key = str(clone_id)
+    cached = _KEYS_CACHE.get(key)
+    if cached and (_time.monotonic() - cached[0]) < _KEYS_TTL:
+        if cached[1]:
+            set_keys(**cached[1])
+        return
+
     from sqlalchemy import text
 
     result = await session.execute(
@@ -152,5 +172,8 @@ async def load_clone_keys(session: AsyncSession, clone_id: UUID) -> None:
         {"id": str(clone_id)},
     )
     row = result.mappings().first()
+    api_keys: dict = {}
     if row and row["api_keys"]:
-        set_keys(**{k: v for k, v in row["api_keys"].items() if v})
+        api_keys = {k: v for k, v in row["api_keys"].items() if v}
+        set_keys(**api_keys)
+    _KEYS_CACHE[key] = (_time.monotonic(), api_keys)

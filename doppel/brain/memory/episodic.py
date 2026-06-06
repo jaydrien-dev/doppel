@@ -69,12 +69,15 @@ async def retrieve(
     query: str,
     limit: int = 20,
     authored_by_user_only: bool = False,
+    query_embedding: list[float] | None = None,
 ) -> list[MemoryChunk]:
     """
     Semantic similarity search over episodic memory.
     Pinned chunks are always included first (up to 5).
+    Pass query_embedding to reuse a pre-computed vector and skip the embed() call.
     """
-    query_embedding = await embed(query)
+    if query_embedding is None:
+        query_embedding = await embed(query)
 
     extra_where = "AND is_excluded = false AND source != 'chat'"
     if authored_by_user_only:

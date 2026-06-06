@@ -9,7 +9,6 @@ import type {
   BrainOutput,
   CloneOwnerInfo,
   FeedbackSignal,
-  MeetingSession,
   StyleFingerprint,
 } from "./types";
 
@@ -174,14 +173,6 @@ export async function joinMeeting(
 
 export async function leaveMeeting(botId: string): Promise<{ status: string }> {
   return apiFetch(`/api/meetings/${botId}/leave`, { method: "POST" });
-}
-
-export async function getMeetingSessions(cloneId: string): Promise<{ sessions: MeetingSession[] }> {
-  return apiFetch(`/api/meetings/sessions?clone_id=${cloneId}`);
-}
-
-export async function getMeetingSession(botId: string): Promise<MeetingSession> {
-  return apiFetch(`/api/meetings/${botId}`);
 }
 
 // ---------------------------------------------------------------------------

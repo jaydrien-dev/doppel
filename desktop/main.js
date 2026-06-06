@@ -8,10 +8,12 @@ const {
   screen,
   nativeImage,
   desktopCapturer,
+  clipboard,
   shell,
 } = require("electron");
 const path = require("path");
 const fs   = require("fs");
+const { exec } = require("child_process");
 
 // Allow getUserMedia without a browser-level permission dialog.
 app.commandLine.appendSwitch("use-fake-ui-for-media-stream");
@@ -141,6 +143,7 @@ function createPillWindow(cloneInfo = {}) {
   pillWin.loadURL(pillURL);
 
   // Forward renderer console to terminal
+  startClipboardPoll();
   pillWin.webContents.on("console-message", (_e, level, msg) => {
     const prefix = ["", "warn", "error", "debug"][level] || "";
     console.log(`[pill${prefix ? ":"+prefix : ""}] ${msg}`);
@@ -150,7 +153,7 @@ function createPillWindow(cloneInfo = {}) {
     pillWin.webContents.openDevTools({ mode: "detach" });
   }
 
-  pillWin.on("closed", () => { pillWin = null; });
+  pillWin.on("closed", () => { pillWin = null; stopClipboardPoll(); });
 }
 
 // ─── Response Overlay Window ─────────────────────────────────────────────────
@@ -210,6 +213,57 @@ function destroyResponseWindow() {
   }
 }
 
+// ─── Clipboard Polling ────────────────────────────────────────────────────────
+
+let _lastClipboard     = "";
+let _clipboardInterval = null;
+
+function startClipboardPoll() {
+  if (_clipboardInterval) return;
+  _clipboardInterval = setInterval(() => {
+    if (!pillWin || pillWin.isDestroyed()) return;
+    const text = clipboard.readText();
+    if (text && text !== _lastClipboard && text.length < 5000) {
+      _lastClipboard = text;
+      pillWin.webContents.send("clipboard-changed", text);
+    }
+  }, 500);
+}
+
+function stopClipboardPoll() {
+  if (_clipboardInterval) {
+    clearInterval(_clipboardInterval);
+    _clipboardInterval = null;
+  }
+}
+
+// ─── Active Window ────────────────────────────────────────────────────────────
+
+function getActiveApp(callback) {
+  if (process.platform === "win32") {
+    exec(
+      'powershell -NoProfile -Command "Get-Process | Where-Object {$_.MainWindowHandle -ne 0 -and $_.MainWindowTitle -ne \\"\\"} | Sort-Object CPU -Descending | Select-Object -First 1 | ForEach-Object {\\"$($_.ProcessName)|$($_.MainWindowTitle)\\"}"',
+      { timeout: 2000 },
+      (err, stdout) => {
+        if (err || !stdout.trim()) { callback(null); return; }
+        const [appName, ...rest] = stdout.trim().split("|");
+        callback({ appName: appName.trim(), windowTitle: rest.join("|").trim() });
+      }
+    );
+  } else if (process.platform === "darwin") {
+    exec(
+      "osascript -e 'tell application \"System Events\" to get name of first application process whose frontmost is true'",
+      { timeout: 2000 },
+      (err, stdout) => {
+        if (err) { callback(null); return; }
+        callback({ appName: stdout.trim(), windowTitle: "" });
+      }
+    );
+  } else {
+    callback(null);
+  }
+}
+
 // ─── IPC ─────────────────────────────────────────────────────────────────────
 
 ipcMain.on("win-minimize", () => win?.minimize());
@@ -221,6 +275,11 @@ ipcMain.on("save-settings", (_, data) => persistSettings(data));
 
 // Open external URL in default browser
 ipcMain.on("open-external", (_, url) => shell.openExternal(url));
+
+// Active window query
+ipcMain.handle("get-active-app", () =>
+  new Promise((resolve) => getActiveApp((info) => resolve(info)))
+);
 
 // Screen capture: return source ID so the renderer can use getUserMedia
 // (thumbnail approach gives black images on Windows with transparent windows)

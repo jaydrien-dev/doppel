@@ -66,9 +66,13 @@ async def retrieve(
     query: str,
     limit: int = 5,
     pattern_type: str | None = None,
+    query_embedding: list[float] | None = None,
 ) -> list[DecisionPattern]:
-    """Retrieve decision patterns relevant to a situation."""
-    query_embedding = await embed(query)
+    """Retrieve decision patterns relevant to a situation.
+    Pass query_embedding to reuse a pre-computed vector and skip the embed() call.
+    """
+    if query_embedding is None:
+        query_embedding = await embed(query)
     extra_where = f"AND pattern_type = '{pattern_type}'" if pattern_type else ""
 
     rows = await similarity_search(

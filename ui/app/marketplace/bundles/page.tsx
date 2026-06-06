@@ -19,17 +19,6 @@ interface CreatorBundle {
   created_at: string;
 }
 
-interface ConsumerBundle {
-  id: string;
-  user_id: string;
-  title: string;
-  description: string | null;
-  price_usd: number;
-  clone_count: number;
-  purchase_count: number;
-  created_at: string;
-}
-
 // ---------------------------------------------------------------------------
 // Icons
 // ---------------------------------------------------------------------------
@@ -37,9 +26,6 @@ const I = {
   chevR:  <svg width="6" height="11" viewBox="0 0 6 11" fill="none"><path d="M1 1l3.5 4.5L1 10" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/></svg>,
   arrowS: <svg width="11" height="11" viewBox="0 0 16 16" fill="none"><path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg>,
   layers: <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M8 2L2 5l6 3 6-3-6-3zM2 8l6 3 6-3M2 11l6 3 6-3" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"/></svg>,
-  user:   <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="6" r="2.5" fill="currentColor" opacity="0.7"/><path d="M3 13c0-2.76 2.24-5 5-5s5 2.24 5 5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" opacity="0.6"/></svg>,
-  bolt:   <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M9 2L4 9h3l-1 5 5-7H8l1-5z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" fill="currentColor" opacity="0.8"/></svg>,
-  check:  <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>,
 };
 
 // ---------------------------------------------------------------------------
@@ -118,76 +104,6 @@ function CreatorBundleCard({ bundle }: { bundle: CreatorBundle }) {
 }
 
 // ---------------------------------------------------------------------------
-// Consumer bundle card (light)
-// ---------------------------------------------------------------------------
-function ConsumerBundleCard({ bundle }: { bundle: ConsumerBundle }) {
-  return (
-    <Link
-      href={`/marketplace/bundles/consumer/${bundle.id}`}
-      style={{
-        display: "flex", flexDirection: "column",
-        background: "#fff", border: "1px solid rgba(0,0,0,0.08)",
-        borderRadius: 16, padding: "18px 20px 16px",
-        textDecoration: "none", cursor: "pointer",
-        boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
-        transition: "transform 200ms ease, box-shadow 200ms ease, border-color 200ms ease",
-      }}
-      onMouseEnter={(e) => {
-        const el = e.currentTarget as HTMLElement;
-        el.style.transform = "translateY(-2px)";
-        el.style.boxShadow = "0 6px 20px rgba(0,0,0,0.10)";
-        el.style.borderColor = "transparent";
-      }}
-      onMouseLeave={(e) => {
-        const el = e.currentTarget as HTMLElement;
-        el.style.transform = "";
-        el.style.boxShadow = "0 1px 3px rgba(0,0,0,0.05)";
-        el.style.borderColor = "rgba(0,0,0,0.08)";
-      }}
-    >
-      {/* Banner strip */}
-      <div style={{
-        height: 80, borderRadius: 10, marginBottom: 14,
-        background: "linear-gradient(135deg, #3B1D8A 0%, #6D28D9 100%)",
-        display: "flex", alignItems: "center", justifyContent: "center",
-        position: "relative", overflow: "hidden",
-      }}>
-        <div style={{
-          position: "absolute", inset: 0, opacity: 0.3,
-          backgroundImage: "radial-gradient(rgba(255,255,255,0.10) 1px, transparent 1px)",
-          backgroundSize: "16px 16px",
-        }} />
-        <span style={{ position: "relative", zIndex: 1, color: "rgba(255,255,255,0.35)" }}>{I.user}</span>
-      </div>
-
-      <p style={{ fontSize: 14, fontWeight: 500, color: "#1D1D1F", margin: "0 0 4px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-        {bundle.title}
-      </p>
-      <p style={{ fontSize: 12, color: "#5F6368", margin: "0 0 8px" }}>
-        Community curated · {bundle.clone_count} clone{bundle.clone_count !== 1 ? "s" : ""}
-      </p>
-      {bundle.description && (
-        <p style={{
-          fontSize: 12, color: "#6B7280", lineHeight: 1.5, margin: "0 0 12px",
-          overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" as React.CSSProperties["WebkitBoxOrient"],
-        }}>
-          {bundle.description}
-        </p>
-      )}
-
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: "auto" }}>
-        {bundle.purchase_count > 0 && (
-          <span style={{ fontSize: 11, color: "#9CA3AF" }}>{bundle.purchase_count} purchase{bundle.purchase_count !== 1 ? "s" : ""}</span>
-        )}
-        <span style={{ marginLeft: "auto", fontSize: 14, fontWeight: 600, color: bundle.price_usd > 0 ? "#1D1D1F" : "#059669" }}>
-          {bundle.price_usd > 0 ? `$${bundle.price_usd.toFixed(0)}` : "Free"}
-        </span>
-      </div>
-    </Link>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Skeleton (light)
 // ---------------------------------------------------------------------------
 function BundleSkeleton() {
@@ -205,17 +121,14 @@ function BundleSkeleton() {
 // ---------------------------------------------------------------------------
 export default function MarketplaceBundlesPage() {
   const [creatorBundles, setCreatorBundles] = useState<CreatorBundle[]>([]);
-  const [consumerBundles, setConsumerBundles] = useState<ConsumerBundle[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    Promise.all([
-      fetch("/api/marketplace/bundles?limit=48").then(r => r.json()),
-      fetch("/api/marketplace/consumer-bundles?limit=48").then(r => r.json()),
-    ]).then(([creator, consumer]) => {
-      setCreatorBundles(creator.bundles ?? []);
-      setConsumerBundles(consumer.bundles ?? []);
-    }).catch(() => {}).finally(() => setLoading(false));
+    fetch("/api/marketplace/bundles?limit=48")
+      .then(r => r.json())
+      .then((data) => setCreatorBundles(data.bundles ?? []))
+      .catch(() => {})
+      .finally(() => setLoading(false));
   }, []);
 
   return (
@@ -256,7 +169,7 @@ export default function MarketplaceBundlesPage() {
             Packaged knowledge,<br />ready to use.
           </h1>
           <p className="mk-hero__sub" style={{ margin: "0 auto", textAlign: "center" }}>
-            Creator bundles are expert briefings packaged by clone owners. Community bundles are curated research packs put together by the community.
+            Expert briefings and knowledge packs packaged by clone owners.
           </p>
         </div>
       </section>
@@ -291,44 +204,6 @@ export default function MarketplaceBundlesPage() {
           ) : (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 16 }}>
               {creatorBundles.map((b) => <CreatorBundleCard key={b.id} bundle={b} />)}
-            </div>
-          )}
-        </section>
-
-        {/* Divider */}
-        <div style={{ height: 1, background: "rgba(0,0,0,0.06)", marginBottom: 48 }} />
-
-        {/* Community bundles */}
-        <section style={{ marginBottom: 48 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <div style={{ width: 32, height: 32, borderRadius: 9, background: "rgba(109,40,217,0.08)", color: "#6D28D9",
-                display: "flex", alignItems: "center", justifyContent: "center" }}>{I.user}</div>
-              <div>
-                <h2 style={{ fontSize: 15, fontWeight: 500, color: "#1D1D1F", margin: 0 }}>Community bundles</h2>
-                <p style={{ fontSize: 12, color: "#9CA3AF", margin: 0 }}>Curated research packs from community members</p>
-              </div>
-            </div>
-            <Link href="/dashboard/bundles" className="mk-btn mk-btn--ghost mk-btn--sm">
-              Create yours {I.arrowS}
-            </Link>
-          </div>
-
-          {loading ? (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 16 }}>
-              {Array.from({ length: 4 }).map((_, i) => <BundleSkeleton key={i} />)}
-            </div>
-          ) : consumerBundles.length === 0 ? (
-            <div style={{ padding: "48px 0", textAlign: "center", background: "#fff", borderRadius: 16, border: "1px solid rgba(0,0,0,0.07)" }}>
-              <p style={{ fontSize: 14, color: "#5F6368", marginBottom: 6 }}>No community bundles published yet.</p>
-              <p style={{ fontSize: 12, color: "#9CA3AF", marginBottom: 16 }}>Be the first to curate and share a knowledge bundle.</p>
-              <Link href="/dashboard/bundles" className="mk-btn mk-btn--primary mk-btn--sm">
-                Create a bundle {I.arrowS}
-              </Link>
-            </div>
-          ) : (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 16 }}>
-              {consumerBundles.map((b) => <ConsumerBundleCard key={b.id} bundle={b} />)}
             </div>
           )}
         </section>

@@ -76,31 +76,19 @@ class DoppelBrain:
                 latency_ms=int((time.monotonic() - t_start) * 1000),
             )
 
-        # ── 1. Perceive ───────────────────────────────────────────────────
-        perceived = await classify(brain_input.message)
-
-        # ── 2. Load identity (parallel with memory retrieval) ─────────────
-        identity_task = asyncio.create_task(
-            IdentityLayer.load(self._session, self._clone_id)
-        )
-
-        # ── 3. Retrieve long-term memory ──────────────────────────────────
-        memory_task = asyncio.create_task(
+        # ── 1–4. Perceive + load identity + retrieve memory — all in parallel ──
+        # Classification (Haiku LLM call) and memory retrieval (embed + pgvector)
+        # are fully independent; running them together saves ~200ms on fast path.
+        perceived, identity, memory, working = await asyncio.gather(
+            classify(brain_input.message),
+            IdentityLayer.load(self._session, self._clone_id),
             self._mem_system.retrieve(
                 query=brain_input.message,
                 session_id=brain_input.session_id,
                 sender_id=brain_input.sender_id,
-                topics=perceived.topics,
-            )
-        )
-
-        # ── 4. Fetch working memory (session history) ─────────────────────
-        working_task = asyncio.create_task(
-            self._mem_system.get_working_memory(brain_input.session_id)
-        )
-
-        identity, memory, working = await asyncio.gather(
-            identity_task, memory_task, working_task
+                topics=None,
+            ),
+            self._mem_system.get_working_memory(brain_input.session_id),
         )
 
         # ── 5. Reasoning (fast or slow path) ─────────────────────────────
@@ -208,18 +196,20 @@ class DoppelBrain:
     async def _process_stream_inner(
         self, brain_input: BrainInput, t_start: float
     ) -> AsyncGenerator[str, None]:
-        # Load clone's API key overrides before any LLM/embed calls
+        # Load clone's API key overrides before any LLM/embed calls (cached after first hit)
         await load_clone_keys(self._session, self._clone_id)
 
-        perceived = await classify(brain_input.message)
-
-        identity, memory, working = await asyncio.gather(
+        # Fire classification and all memory/identity fetches simultaneously.
+        # topics from classification are accepted by retrieve() but not actually used
+        # by any layer's vector search, so starting memory retrieval without them is safe.
+        perceived, identity, memory, working = await asyncio.gather(
+            classify(brain_input.message),
             IdentityLayer.load(self._session, self._clone_id),
             self._mem_system.retrieve(
                 query=brain_input.message,
                 session_id=brain_input.session_id,
                 sender_id=brain_input.sender_id,
-                topics=perceived.topics,
+                topics=None,  # populated after gather; layers don't use it for filtering
             ),
             self._mem_system.get_working_memory(brain_input.session_id),
         )

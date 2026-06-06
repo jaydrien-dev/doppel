@@ -142,19 +142,6 @@ const MARKETPLACE: NavItem[] = [
   },
 ];
 
-const SURFACES: NavItem[] = [
-  {
-    href: "/dashboard/email",
-    label: "Email",
-    icon: (
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-        <rect x="1.5" y="3.5" width="13" height="9" rx="2" stroke="currentColor" strokeWidth="1.4" opacity="0.7"/>
-        <path d="M1.5 6l6.5 4.5L14.5 6" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" opacity="0.5"/>
-      </svg>
-    ),
-  },
-];
-
 const ACCOUNT: NavItem[] = [
   {
     href: "/dashboard/profile",
@@ -209,37 +196,10 @@ const ACCOUNT: NavItem[] = [
   },
 ];
 
-const ORG: NavItem[] = [
-  {
-    href: "/dashboard/org",
-    label: "Admin",
-    icon: (
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-        <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.3" opacity="0.6"/>
-        <path d="M8 5v3l2 1.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" opacity="0.85"/>
-      </svg>
-    ),
-  },
-  {
-    href: "/org",
-    label: "Team Clones",
-    icon: (
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-        <circle cx="6" cy="5.5" r="2" stroke="currentColor" strokeWidth="1.3" opacity="0.8"/>
-        <circle cx="11.5" cy="5" r="1.6" stroke="currentColor" strokeWidth="1.2" opacity="0.45"/>
-        <path d="M1.5 13.5c0-2.5 2-4.5 4.5-4.5s4.5 2 4.5 4.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" opacity="0.65"/>
-        <path d="M11.5 8.5c1.9.3 3 1.7 3 3.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" opacity="0.40"/>
-      </svg>
-    ),
-  },
-];
-
 const GROUPS: { label: string; items: NavItem[]; color: string; disabled?: boolean }[] = [
-  { label: "Clone",        items: CLONE,       color: "#1A73E8" },
-  { label: "Organisation", items: ORG,         color: "#6BAEFF" },
-  { label: "Marketplace",  items: MARKETPLACE, color: "#34A853", disabled: true },
-  { label: "Surfaces",     items: SURFACES,    color: "#EA4335" },
-  { label: "Account",      items: ACCOUNT,     color: "#F59E0B" },
+  { label: "Clone",       items: CLONE,       color: "#1A73E8" },
+  { label: "Marketplace", items: MARKETPLACE, color: "#34A853", disabled: true },
+  { label: "Account",     items: ACCOUNT,     color: "#F59E0B" },
 ];
 
 function NavGroup({ label, items, color, disabled }: { label: string; items: NavItem[]; color: string; disabled?: boolean }) {
