@@ -81,17 +81,40 @@ export function PublicChatClient({
   // don't re-run on the client during Next.js SSR hydration — useEffect does).
   const [sessionId, setSessionId] = useState<string>("");
 
+  // On first load (or when the user signs in): try to restore the server-side session
+  // so conversation history survives sign-out/sign-in. Falls back to localStorage, then fresh UUID.
   useEffect(() => {
     const key = `doppel_session:${clone.handle}`;
-    const existing = localStorage.getItem(key);
-    if (existing) {
-      setSessionId(existing);
-    } else {
-      const fresh = crypto.randomUUID();
-      localStorage.setItem(key, fresh);
-      setSessionId(fresh);
+
+    async function resolveSession() {
+      // If signed in, prefer the server-side session (most recent DB session for this user+clone)
+      if (isSignedIn) {
+        try {
+          const res = await fetch(`/api/consumer/session?clone_handle=${encodeURIComponent(clone.handle)}`);
+          if (res.ok) {
+            const data = await res.json();
+            if (data.session_id) {
+              localStorage.setItem(key, data.session_id);
+              setSessionId(data.session_id);
+              return;
+            }
+          }
+        } catch { /* non-fatal — fall through to localStorage */ }
+      }
+
+      // Fall back to localStorage (anonymous or server returned no session)
+      const existing = localStorage.getItem(key);
+      if (existing) {
+        setSessionId(existing);
+      } else {
+        const fresh = crypto.randomUUID();
+        localStorage.setItem(key, fresh);
+        setSessionId(fresh);
+      }
     }
-  }, [clone.handle]);
+
+    resolveSession();
+  }, [clone.handle, isSignedIn]);
 
   function startNewConversation() {
     const fresh = crypto.randomUUID();

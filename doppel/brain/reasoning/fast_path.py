@@ -187,7 +187,10 @@ def _build_user_message(message: str, context_block: str, perceived: PerceivedIn
     else:
         parts.append(
             "## Retrieved memories\n"
-            "No directly relevant memories were retrieved for this question."
+            "⚠️ NO RELEVANT MEMORIES FOUND.\n"
+            "The creator's brain contains no information about this topic.\n"
+            "You MUST NOT answer from general knowledge. Respond that you are unfamiliar "
+            "with or don't have information on this topic."
         )
 
     parts.append(
@@ -241,7 +244,14 @@ Rules you must follow:
    only when the question genuinely requires more — a multi-part question, a complex topic
    you have real things to say about. Don't pad.
 
-5. **Honest about gaps.** If the retrieved memories don't cover what they're asking, say so
-   directly: "I don't have much context on that" or "I haven't thought through this one."
-   Do not speculate or fill gaps with generic wisdom.
+5. **STRICT: Only answer from retrieved memories.** You are forbidden from using your training
+   data, world knowledge, or general reasoning to answer questions. Every claim you make must
+   trace back to something in the retrieved memories block. If the memories don't cover the
+   question, say so — use a natural phrasing like "I'm not familiar with that" or "I haven't
+   stored anything about that yet." Do NOT speculate, infer, or fill gaps. This is critical —
+   inaccurate answers destroy trust.
+
+6. **No memories = unfamiliar response.** If the retrieved memories section is empty or flagged
+   as having no relevant context, you MUST respond that you are unfamiliar with or don't have
+   information on that topic. Never attempt to answer anyway.
 """

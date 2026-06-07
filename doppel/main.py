@@ -1348,6 +1348,55 @@ async def get_consumer_conversations(
     return {"conversations": convs}
 
 
+@app.get("/consumer/session")
+async def get_consumer_session(
+    request: Request,
+    clone_id: str | None = Query(default=None),
+    clone_handle: str | None = Query(default=None),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Return the most recent session_id for a signed-in consumer's conversation with a clone.
+    Used to restore conversation continuity after sign-out/sign-in.
+    """
+    caller_user_id = request.headers.get("X-User-Id") if request else None
+    if not caller_user_id:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    if not clone_id and not clone_handle:
+        raise HTTPException(status_code=400, detail="clone_id or clone_handle required")
+
+    # Resolve clone_id from handle if needed
+    if not clone_id:
+        row = await session.execute(
+            sql_text("SELECT clone_id FROM clone_identity WHERE handle = :h"),
+            {"h": clone_handle},
+        )
+        r = row.mappings().first()
+        if not r:
+            raise HTTPException(status_code=404, detail="Clone not found")
+        clone_id = str(r["clone_id"])
+
+    row = await session.execute(
+        sql_text("""
+            SELECT session_id
+            FROM reasoning_traces
+            WHERE clone_id = :cid
+              AND brain_input->>'sender_id' = :uid
+              AND (
+                brain_input->'owner_mode' = 'false'
+                OR brain_input->>'owner_mode' IS NULL
+              )
+            ORDER BY created_at DESC
+            LIMIT 1
+        """),
+        {"cid": clone_id, "uid": caller_user_id},
+    )
+    r = row.mappings().first()
+    if not r:
+        return {"session_id": None}
+    return {"session_id": str(r["session_id"])}
+
+
 @app.post("/clones/{handle}/add", status_code=200)
 async def add_clone_to_messages(
     handle: str,
@@ -2736,9 +2785,9 @@ async def get_traces(
 
 @app.delete("/brain/traces", status_code=200)
 async def delete_traces(
+    request: Request,
     clone_id: UUID = Query(...),
     mode: str = Query(default="all", regex="^(owner|consumer|all)$"),
-    request: Request,
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     """Delete reasoning traces for a clone. Caller must be the clone owner.

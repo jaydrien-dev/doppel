@@ -95,7 +95,7 @@ async def retrieve(
     )
     pinned_rows = [dict(r) for r in pinned_result.mappings().all()]
 
-    # Similarity search for the rest
+    # Similarity search for the rest — 0.50 threshold filters unrelated results
     similar_rows = await similarity_search(
         session,
         table="episodic_memory",
@@ -103,6 +103,7 @@ async def retrieve(
         query_embedding=query_embedding,
         limit=limit,
         extra_where=extra_where + " AND is_pinned = false",
+        min_similarity=0.50,
     )
 
     # Merge: pinned first, then similar (dedup by id)

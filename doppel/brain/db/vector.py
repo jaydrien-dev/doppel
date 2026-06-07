@@ -45,6 +45,7 @@ async def similarity_search(
     query_embedding: list[float],
     limit: int = 20,
     extra_where: str = "",
+    min_similarity: float = 0.0,
 ) -> list[dict[str, Any]]:
     """
     Cosine similarity search against a table's `embedding` column.
@@ -52,9 +53,17 @@ async def similarity_search(
 
     `extra_where` is an optional raw SQL fragment added after the clone_id filter,
     e.g. "AND is_excluded = false".
+
+    `min_similarity` (0.0–1.0) filters out rows below the threshold.
+    Set to 0.50 for consumer queries to prevent returning unrelated memories.
     """
     vec_literal = "[" + ",".join(str(v) for v in query_embedding) + "]"
-    where_clause = f"clone_id = :clone_id AND embedding IS NOT NULL {extra_where}"
+    sim_filter = (
+        f"AND 1 - (embedding <=> '{vec_literal}'::vector) >= {min_similarity}"
+        if min_similarity > 0.0
+        else ""
+    )
+    where_clause = f"clone_id = :clone_id AND embedding IS NOT NULL {extra_where} {sim_filter}"
 
     sql = text(f"""
         SELECT *,
