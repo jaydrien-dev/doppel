@@ -31,6 +31,20 @@ _PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(
         r"\b(\+1[\s\-]?)?\(?\d{3}\)?[\s\-]\d{3}[\s\-]\d{4}\b"
     ), "[REDACTED:PHONE]"),
+    # Email addresses — redact address but keep domain for context (e.g. → [REDACTED:EMAIL]@gmail.com)
+    (re.compile(
+        r"\b[A-Za-z0-9._%+\-]+@([A-Za-z0-9\-]+\.[A-Za-z]{2,})\b"
+    ), r"[REDACTED:EMAIL]@\1"),
+    # URLs containing auth tokens / credentials in query string or path
+    (re.compile(
+        r"https?://[^\s]*(?:token|key|secret|auth|access_token|refresh_token|api_key)[^\s]*",
+        re.IGNORECASE,
+    ), "[REDACTED:AUTH_URL]"),
+    # Street addresses (US pattern: number + street name + St/Ave/Rd/etc.)
+    (re.compile(
+        r"\b\d{1,5}\s+[A-Z][a-zA-Z\s]{3,30}\s+(?:St|Ave|Rd|Blvd|Dr|Ln|Ct|Way|Pl|Terr?|Circle|Cir|Pkwy)\b\.?",
+        re.IGNORECASE,
+    ), "[REDACTED:ADDRESS]"),
 ]
 
 

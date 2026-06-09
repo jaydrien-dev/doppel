@@ -18,6 +18,7 @@ import { TypingIndicator } from "./TypingIndicator";
 
 interface ChatInterfaceProps {
   cloneId: string;
+  cloneHandle?: string;
   cloneName?: string;
   cloneColor?: string;
   cloneAvatarUrl?: string | null;
@@ -939,6 +940,7 @@ const MODES: { value: ResponseMode; label: string; hint: string; icon: React.Rea
 
 export function ChatInterface({
   cloneId,
+  cloneHandle,
   cloneName = "Clone",
   cloneColor,
   cloneAvatarUrl,
@@ -953,6 +955,18 @@ export function ChatInterface({
 }: ChatInterfaceProps) {
   const { messages, isLoading, isThinking, historyLoading, error, sendMessage, sessionId } = useChat({ cloneId, contextType, sessionId: sessionIdProp, ownerMode });
   const [input, setInput] = useState(initialInput ?? "");
+
+  // Consumer feedback callback — only active when cloneHandle is provided and not owner
+  function makeConsFeedback(traceId?: string) {
+    if (!cloneHandle || ownerMode) return undefined;
+    return (helpful: boolean) => {
+      fetch(`/api/clones/${cloneHandle}/feedback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ trace_id: traceId ?? null, session_id: sessionId ?? null, helpful }),
+      }).catch(() => {});
+    };
+  }
   const [responseMode, setResponseMode] = useState<ResponseMode>("fast");
   const [summaryState, setSummaryState] = useState<"idle" | "loading" | "done">("idle");
   const [summaryText, setSummaryText] = useState("");
@@ -1452,7 +1466,8 @@ export function ChatInterface({
             return (
               <MessageBubble key={msg.id} message={msg}
                 cloneId={ownerMode ? cloneId : undefined}
-                ownerMode={ownerMode} cloneInitial={cloneInitial} cloneColor={avatarColor} />
+                ownerMode={ownerMode} cloneInitial={cloneInitial} cloneColor={avatarColor}
+                onFeedback={makeConsFeedback(msg.trace_id)} />
             );
           })}
 

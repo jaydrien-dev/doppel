@@ -77,6 +77,21 @@ class DoppelBrain:
                 latency_ms=int((time.monotonic() - t_start) * 1000),
             )
 
+        # ── 0c. Blocked topic gate ────────────────────────────────────────
+        blocked_response = await _check_blocked_topics(
+            self._session, self._clone_id, brain_input.message
+        )
+        if blocked_response:
+            return BrainOutput(
+                response=blocked_response,
+                confidence=1.0,
+                needs_escalation=False,
+                sources=[],
+                reasoning_trace_id=str(__import__("uuid").uuid4()),
+                path_taken="fast",
+                latency_ms=int((time.monotonic() - t_start) * 1000),
+            )
+
         # ── 1–4. Perceive + load identity + retrieve memory ──────────────────
         # If the heuristic pre-classifier fires (social greeting etc.) skip the
         # embed + 4 pgvector queries entirely — saves ~300ms on those messages.
@@ -108,6 +123,18 @@ class DoppelBrain:
                 ),
                 self._mem_system.get_working_memory(brain_input.session_id),
             )
+
+        # ── 4b. Uncertainty check — flag if no relevant knowledge found ──────
+        knowledge_weak = _is_knowledge_weak(memory)
+        if knowledge_weak and not brain_input.owner_mode:
+            # Log gap so owner can see what people asked about
+            asyncio.create_task(
+                _log_knowledge_gap(self._clone_id, brain_input.message)
+            )
+            # Inject hint so the LLM knows to be honest about the gap
+            brain_input = brain_input.model_copy(update={
+                "metadata": {**brain_input.metadata, "_knowledge_gap": True}
+            })
 
         # ── 5. Reasoning (fast or slow path) ─────────────────────────────
         response_text, trace = await self._reasoning.think(
@@ -221,6 +248,23 @@ class DoppelBrain:
         await load_clone_keys(self._session, self._clone_id)
         _log.info("[TIMING] brain: keys=%.0fms", (time.monotonic() - t_start) * 1000)
 
+        # Security gate
+        safe, _ = is_safe_input(brain_input.message)
+        if not safe:
+            _safe_msg = "I'm not able to help with that kind of request."
+            yield f"data: {json.dumps({'event': 'token', 'text': _safe_msg})}\n\n"
+            yield f"data: {json.dumps({'event': 'done', 'corrected_response': None, 'confidence': 1.0, 'needs_escalation': False, 'sources': [], 'latency_ms': int((time.monotonic() - t_start) * 1000)})}\n\n"
+            return
+
+        # Blocked topic gate
+        blocked_response = await _check_blocked_topics(
+            self._session, self._clone_id, brain_input.message
+        )
+        if blocked_response:
+            yield f"data: {json.dumps({'event': 'token', 'text': blocked_response})}\n\n"
+            yield f"data: {json.dumps({'event': 'done', 'corrected_response': None, 'confidence': 1.0, 'needs_escalation': False, 'sources': [], 'latency_ms': int((time.monotonic() - t_start) * 1000)})}\n\n"
+            return
+
         from doppel.brain.db.connection import AsyncSessionLocal
 
         async def _load_identity():
@@ -247,6 +291,16 @@ class DoppelBrain:
                 ),
                 self._mem_system.get_working_memory(brain_input.session_id),
             )
+
+        # Uncertainty check
+        knowledge_weak = _is_knowledge_weak(memory)
+        if knowledge_weak and not brain_input.owner_mode:
+            asyncio.create_task(
+                _log_knowledge_gap(self._clone_id, brain_input.message)
+            )
+            brain_input = brain_input.model_copy(update={
+                "metadata": {**brain_input.metadata, "_knowledge_gap": True}
+            })
 
         path = route(perceived)
         mode = brain_input.response_mode
@@ -328,6 +382,75 @@ class DoppelBrain:
                 latency_ms=latency_ms,
             )
         )
+
+
+def _is_knowledge_weak(memory: MemoryContext) -> bool:
+    """
+    Returns True when retrieval found no meaningful knowledge for the query.
+    We consider knowledge 'weak' when:
+      - No episodic chunks at all, AND
+      - No semantic facts at all
+    (Procedural patterns are general habits and don't count as topic knowledge.)
+    Social/greeting messages never reach here (they get quick-classified).
+    """
+    return not memory.episodic and not memory.semantic
+
+
+async def _log_knowledge_gap(clone_id: UUID, query: str) -> None:
+    """Fire-and-forget: write one row to knowledge_gaps."""
+    try:
+        from doppel.brain.db.connection import AsyncSessionLocal
+        from sqlalchemy import text as _text
+        async with AsyncSessionLocal() as s:
+            await s.execute(
+                _text("INSERT INTO knowledge_gaps (clone_id, query) VALUES (:cid, :q)"),
+                {"cid": str(clone_id), "q": query[:1000]},
+            )
+            await s.commit()
+    except Exception:
+        pass  # non-fatal
+
+
+async def _check_blocked_topics(
+    session: AsyncSession,
+    clone_id: UUID,
+    message: str,
+) -> str | None:
+    """
+    Load the clone's admin_policies.blocked_topics and check if the message
+    touches any of them. Returns a polite refusal string if blocked, else None.
+
+    Topics are stored as plain strings (keywords or short phrases). Matching is
+    case-insensitive substring search against the lowercased message. The clone
+    declines without revealing the full list of restricted topics.
+    """
+    try:
+        from sqlalchemy import text as _text
+        row = await session.execute(
+            _text(
+                "SELECT admin_policies FROM clone_identity WHERE clone_id = :cid"
+            ),
+            {"cid": str(clone_id)},
+        )
+        result = row.fetchone()
+        if not result or not result[0]:
+            return None
+
+        policies = result[0]
+        blocked: list[str] = policies.get("blocked_topics", []) if isinstance(policies, dict) else []
+        if not blocked:
+            return None
+
+        lower_msg = message.lower()
+        for topic in blocked:
+            if topic.lower() in lower_msg:
+                return (
+                    f"That's a topic I haven't made available through this interface. "
+                    f"Feel free to ask me about something else."
+                )
+        return None
+    except Exception:
+        return None  # non-fatal — don't block the request on DB errors
 
 
 async def _persist_async(

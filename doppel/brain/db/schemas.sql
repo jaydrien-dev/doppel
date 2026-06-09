@@ -804,3 +804,37 @@ CREATE TABLE IF NOT EXISTS payout_requests (
     processed_at        TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS payout_requests_user_idx ON payout_requests (user_id, created_at DESC);
+
+-- ---------------------------------------------------------------------------
+-- KNOWLEDGE GAPS
+-- Queries where the clone had no relevant training data. Surfaces to owner
+-- so they can fill the gap with more training material.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS knowledge_gaps (
+    id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    clone_id    UUID NOT NULL REFERENCES clone_identity(clone_id) ON DELETE CASCADE,
+    query       TEXT NOT NULL,
+    asked_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS knowledge_gaps_clone_idx ON knowledge_gaps (clone_id, asked_at DESC);
+
+-- ---------------------------------------------------------------------------
+-- RESPONSE FEEDBACK
+-- Per-message thumbs up/down from consumers. Owner can review to find
+-- patterns where the clone gives unhelpful answers.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS response_feedback (
+    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    clone_id        UUID NOT NULL REFERENCES clone_identity(clone_id) ON DELETE CASCADE,
+    trace_id        UUID,
+    session_id      UUID,
+    rater_user_id   TEXT,
+    helpful         BOOLEAN NOT NULL,
+    note            TEXT,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS response_feedback_clone_idx ON response_feedback (clone_id, created_at DESC);
+
+-- Migration: add consent columns to consumer_profiles
+ALTER TABLE consumer_profiles ADD COLUMN IF NOT EXISTS consent_given BOOLEAN DEFAULT NULL;
+ALTER TABLE consumer_profiles ADD COLUMN IF NOT EXISTS consent_given_at TIMESTAMPTZ;

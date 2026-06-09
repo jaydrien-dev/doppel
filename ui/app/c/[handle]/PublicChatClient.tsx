@@ -62,6 +62,9 @@ interface ConsumerProfile {
   summary?: string;
 }
 
+// Consent values: null = not yet asked, true = accepted, false = declined (anonymous)
+type ConsentState = null | boolean;
+
 export function PublicChatClient({
   clone,
   isOnboardingResource,
@@ -76,18 +79,29 @@ export function PublicChatClient({
   const [profile, setProfile] = useState<ConsumerProfile | null>(null);
   const suggested = isOnboardingResource ? SUGGESTED_ONBOARDING : SUGGESTED_DEFAULT;
 
+  // Consent gate — null means we're still loading
+  const [consent, setConsent] = useState<ConsentState | "loading">("loading");
+
   // Persist session ID per clone so history survives page refreshes.
-  // Initialized as "" to avoid SSR hydration mismatch (useState initializers
-  // don't re-run on the client during Next.js SSR hydration — useEffect does).
   const [sessionId, setSessionId] = useState<string>("");
 
-  // On first load (or when the user signs in): try to restore the server-side session
-  // so conversation history survives sign-out/sign-in. Falls back to localStorage, then fresh UUID.
+  // Load consent status on mount
+  useEffect(() => {
+    if (!isSignedIn) {
+      setConsent(null); // not signed in — skip consent, no memory built
+      return;
+    }
+    fetch(`/api/clones/${clone.handle}/consent`)
+      .then((r) => r.json())
+      .then((d) => setConsent(d.consent ?? null))
+      .catch(() => setConsent(null));
+  }, [isSignedIn, clone.handle]);
+
+  // Resolve session ID
   useEffect(() => {
     const key = `doppel_session:${clone.handle}`;
 
     async function resolveSession() {
-      // If signed in, prefer the server-side session (most recent DB session for this user+clone)
       if (isSignedIn) {
         try {
           const res = await fetch(`/api/consumer/session?clone_handle=${encodeURIComponent(clone.handle)}`);
@@ -99,10 +113,9 @@ export function PublicChatClient({
               return;
             }
           }
-        } catch { /* non-fatal — fall through to localStorage */ }
+        } catch { /* non-fatal */ }
       }
 
-      // Fall back to localStorage (anonymous or server returned no session)
       const existing = localStorage.getItem(key);
       if (existing) {
         setSessionId(existing);
@@ -134,7 +147,39 @@ export function PublicChatClient({
       .catch(() => {});
   }, [isSignedIn, clone.handle]);
 
+  async function handleConsent(accepted: boolean) {
+    setConsent(accepted);
+    try {
+      await fetch(`/api/clones/${clone.handle}/consent`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ consent: accepted }),
+      });
+    } catch { /* non-fatal */ }
+  }
+
   const isReturning = profile?.exists && (profile.total_sessions ?? 0) > 1;
+  const [showPrivacy, setShowPrivacy] = useState(false);
+  const [deletingProfile, setDeletingProfile] = useState(false);
+  const [profileDeleted, setProfileDeleted] = useState(false);
+
+  async function handleDeleteProfile() {
+    if (deletingProfile) return;
+    setDeletingProfile(true);
+    try {
+      await fetch(`/api/clones/${clone.handle}/my-profile`, { method: "DELETE" });
+      // Also reset consent so the prompt shows again on next visit
+      await fetch(`/api/clones/${clone.handle}/consent`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ consent: false }),
+      });
+      setProfile(null);
+      setProfileDeleted(true);
+      setShowPrivacy(false);
+      setConsent(false);
+    } catch { /* non-fatal */ } finally { setDeletingProfile(false); }
+  }
 
   function handleShare() {
     if (navigator.share) {
@@ -143,6 +188,9 @@ export function PublicChatClient({
       navigator.clipboard.writeText(window.location.href);
     }
   }
+
+  // Show consent prompt for signed-in users who haven't answered yet
+  const showConsentPrompt = isSignedIn && consent === null;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
@@ -181,8 +229,50 @@ export function PublicChatClient({
         </div>
       </header>
 
+      {/* First-chat consent prompt */}
+      {showConsentPrompt && (
+        <div style={{
+          margin: "10px 14px 0",
+          background: "rgba(255,255,255,0.04)",
+          border: "1px solid rgba(255,255,255,0.08)",
+          borderRadius: 12,
+          padding: "12px 14px",
+          flexShrink: 0,
+        }}>
+          <p style={{ fontSize: 12, color: "rgba(255,255,255,0.55)", margin: "0 0 4px", fontWeight: 500 }}>
+            Can {clone.display_name} remember you?
+          </p>
+          <p style={{ fontSize: 11, color: "rgba(255,255,255,0.32)", lineHeight: 1.55, margin: "0 0 10px" }}>
+            After a few chats, the clone can remember who you are and give you more relevant answers.
+            Your conversations are never shared with other users.
+          </p>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button
+              onClick={() => handleConsent(true)}
+              style={{
+                fontSize: 11, fontWeight: 500, padding: "5px 14px",
+                background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.12)",
+                borderRadius: 8, color: "rgba(255,255,255,0.75)", cursor: "pointer", fontFamily: "inherit",
+              }}
+            >
+              Yes, remember me
+            </button>
+            <button
+              onClick={() => handleConsent(false)}
+              style={{
+                fontSize: 11, padding: "5px 14px",
+                background: "none", border: "1px solid rgba(255,255,255,0.07)",
+                borderRadius: 8, color: "rgba(255,255,255,0.30)", cursor: "pointer", fontFamily: "inherit",
+              }}
+            >
+              Stay anonymous
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Returning consumer banner */}
-      {isReturning && (
+      {isReturning && !showConsentPrompt && (
         <div className="chat-banner">
           <span className="chat-banner__pill">
             <ISparkle />
@@ -193,10 +283,11 @@ export function PublicChatClient({
 
       {/* Chat interface — only mount once sessionId is resolved from localStorage */}
       <div style={{ flex: 1, minHeight: 0 }}>
-        {sessionId && (
+        {sessionId && consent !== "loading" && (
           <ChatInterface
             key={sessionId}
             cloneId={clone.clone_id}
+            cloneHandle={clone.handle}
             cloneName={clone.display_name}
             cloneColor={cloneColor}
             contextType="chat"
@@ -209,6 +300,57 @@ export function PublicChatClient({
           />
         )}
       </div>
+
+      {/* Consumer data transparency footer */}
+      {isSignedIn && (
+        <div style={{ borderTop: "1px solid rgba(255,255,255,0.05)", padding: "8px 16px", flexShrink: 0 }}>
+          {!showPrivacy ? (
+            <button
+              onClick={() => setShowPrivacy(true)}
+              style={{ fontSize: 11, color: "rgba(255,255,255,0.22)", background: "none", border: "none", cursor: "pointer", padding: 0, display: "flex", alignItems: "center", gap: 5 }}
+              onMouseEnter={e => { e.currentTarget.style.color = "rgba(255,255,255,0.45)"; }}
+              onMouseLeave={e => { e.currentTarget.style.color = "rgba(255,255,255,0.22)"; }}
+            >
+              <svg width="10" height="10" viewBox="0 0 12 12" fill="none">
+                <path d="M6 1L2 3v3.5c0 2.3 1.7 4.4 4 5 2.3-.6 4-2.7 4-5V3L6 1z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
+              </svg>
+              What does {clone.display_name} know about me?
+            </button>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <p style={{ fontSize: 11, fontWeight: 500, color: "rgba(255,255,255,0.45)", margin: 0 }}>What this clone knows about you</p>
+                <button onClick={() => setShowPrivacy(false)} style={{ fontSize: 13, color: "rgba(255,255,255,0.22)", background: "none", border: "none", cursor: "pointer", padding: 0, lineHeight: 1 }}>×</button>
+              </div>
+              {profileDeleted ? (
+                <p style={{ fontSize: 11, color: "rgba(52,211,153,0.65)", margin: 0 }}>All memory deleted. The clone no longer recognises you.</p>
+              ) : profile?.exists ? (
+                <>
+                  <p style={{ fontSize: 11, color: "rgba(255,255,255,0.38)", lineHeight: 1.55, margin: 0 }}>
+                    {profile.summary
+                      ? profile.summary
+                      : `${clone.display_name} has spoken with you ${profile.total_sessions ?? 1} time${(profile.total_sessions ?? 1) !== 1 ? "s" : ""}. No detailed notes yet.`}
+                  </p>
+                  <button
+                    onClick={handleDeleteProfile}
+                    disabled={deletingProfile}
+                    style={{ alignSelf: "flex-start", fontSize: 10, color: "rgba(248,113,113,0.55)", background: "none", border: "1px solid rgba(248,113,113,0.18)", borderRadius: 6, padding: "3px 9px", cursor: "pointer", fontFamily: "inherit" }}
+                    onMouseEnter={e => { e.currentTarget.style.color = "rgba(248,113,113,0.80)"; e.currentTarget.style.borderColor = "rgba(248,113,113,0.35)"; }}
+                    onMouseLeave={e => { e.currentTarget.style.color = "rgba(248,113,113,0.55)"; e.currentTarget.style.borderColor = "rgba(248,113,113,0.18)"; }}
+                  >
+                    {deletingProfile ? "Deleting…" : "Delete all memory"}
+                  </button>
+                </>
+              ) : (
+                <p style={{ fontSize: 11, color: "rgba(255,255,255,0.30)", margin: 0, lineHeight: 1.55 }}>
+                  {clone.display_name} doesn&apos;t have notes about you yet. This builds up over a few conversations.
+                  Your chats are never shared with other users.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

@@ -10,6 +10,7 @@ interface MessageBubbleProps {
   ownerMode?: boolean;
   cloneInitial?: string;
   cloneColor?: string;
+  onFeedback?: (helpful: boolean) => void;
 }
 
 // Icon SVGs (14px viewBox, 1.4 stroke, currentColor)
@@ -82,9 +83,11 @@ export function MessageBubble({
   ownerMode,
   cloneInitial = "A",
   cloneColor = "#1A73E8",
+  onFeedback,
 }: MessageBubbleProps) {
   const isUser = message.role === "user";
   const [feedbackSent, setFeedbackSent] = useState<FeedbackSignalType | null>(null);
+  const [consFeedback, setConsFeedback] = useState<"up" | "down" | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(message.content);
   const [copied, setCopied] = useState(false);
@@ -223,16 +226,35 @@ export function MessageBubble({
                 </button>
               </>
             ) : (
-              !ownerMode && (
+              !ownerMode && !consFeedback && onFeedback && (
                 <>
-                  <button className="msg__act" aria-label="Helpful" title="Helpful"><IUp /></button>
-                  <button className="msg__act" aria-label="Not helpful" title="Not helpful"><IDown /></button>
+                  <button
+                    className="msg__act"
+                    aria-label="Helpful"
+                    title="Helpful"
+                    onClick={() => { setConsFeedback("up"); onFeedback(true); }}
+                  >
+                    <IUp />
+                  </button>
+                  <button
+                    className="msg__act"
+                    aria-label="Not helpful"
+                    title="Not helpful"
+                    onClick={() => { setConsFeedback("down"); onFeedback(false); }}
+                  >
+                    <IDown />
+                  </button>
                 </>
               )
             )}
           </div>
         )}
 
+        {consFeedback && !isUser && (
+          <span style={{ fontSize: 11, color: "var(--fg-dark-3)", paddingLeft: 4 }}>
+            {consFeedback === "up" ? "Thanks for the feedback." : "Got it — thanks."}
+          </span>
+        )}
         {feedbackSent && !isUser && (
           <span style={{ fontSize: 11, color: "var(--fg-dark-3)", paddingLeft: 4 }}>
             Feedback saved — {feedbackSent}

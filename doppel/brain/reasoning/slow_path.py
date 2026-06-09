@@ -113,6 +113,15 @@ async def run_stream(
                 "Every response ends with exactly one focused question."
             )
 
+    if brain_input.metadata.get("_knowledge_gap"):
+        _slow_system += (
+            "\n\n## Honest Knowledge Boundary\n"
+            "You don't have specific information about this topic in your memory. "
+            "Be upfront about that — say something like \"I haven't covered this specifically\" "
+            "or \"I don't have detail on that\". Don't make things up or guess. "
+            "You can still share your general perspective, but make clear it's not from direct experience or training."
+        )
+
     _slow_messages = [{
         "role": "user",
         "content": _build_response_prompt(brain_input.message, scratchpad, brain_input.context_type, depth=depth),

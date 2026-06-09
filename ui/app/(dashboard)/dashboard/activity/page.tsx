@@ -294,6 +294,114 @@ function QualityHeader({ cloneId }: { cloneId: string }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Knowledge gaps panel — shows what people asked that the clone couldn't answer
+// ---------------------------------------------------------------------------
+
+interface KnowledgeGap {
+  query: string;
+  asked_at: string;
+  freq: number;
+}
+
+function KnowledgeGapsPanel({ handle }: { handle: string }) {
+  const { data, isLoading } = useSWR<{ gaps: KnowledgeGap[] }>(
+    `/api/clones/${handle}/knowledge-gaps`,
+    fetcher,
+    { revalidateOnFocus: false }
+  );
+
+  if (isLoading) return (
+    <div className="card" style={{ marginBottom: 20 }}>
+      <p style={{ fontSize: 12, color: "rgba(255,255,255,0.25)", margin: 0 }}>Loading…</p>
+    </div>
+  );
+
+  const gaps = data?.gaps ?? [];
+  if (gaps.length === 0) return (
+    <div className="card" style={{ marginBottom: 20, padding: "16px 20px" }}>
+      <p style={{ fontSize: 12, fontWeight: 500, color: "rgba(255,255,255,0.50)", margin: "0 0 4px" }}>Topics you haven't covered yet</p>
+      <p style={{ fontSize: 12, color: "rgba(255,255,255,0.28)", margin: 0 }}>
+        When people ask your clone something it doesn't know, the questions will appear here so you can fill the gap.
+      </p>
+    </div>
+  );
+
+  // Deduplicate by query, sort by frequency then recency
+  const seen = new Set<string>();
+  const unique = gaps.filter(g => { if (seen.has(g.query)) return false; seen.add(g.query); return true; });
+
+  return (
+    <div className="card" style={{ marginBottom: 20, padding: "16px 20px" }}>
+      <p style={{ fontSize: 12, fontWeight: 500, color: "rgba(255,255,255,0.50)", margin: "0 0 12px" }}>
+        Topics you haven't covered yet
+        <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 400, color: "rgba(255,255,255,0.28)" }}>
+          — train your clone on these to improve answers
+        </span>
+      </p>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {unique.slice(0, 12).map((g, i) => (
+          <div key={i} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span style={{ fontSize: 12, color: "rgba(255,255,255,0.55)", flex: 1, lineHeight: 1.4 }}>{g.query}</span>
+            {g.freq > 1 && (
+              <span style={{
+                fontSize: 10, padding: "1px 7px", borderRadius: 999,
+                background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.07)",
+                color: "rgba(255,255,255,0.28)", flexShrink: 0,
+              }}>{g.freq}×</span>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Consumer feedback summary — shows how consumers rated the clone's answers
+// ---------------------------------------------------------------------------
+
+interface FeedbackSummary {
+  thumbs_up: number;
+  thumbs_down: number;
+  total: number;
+}
+
+function ConsumerFeedbackPanel({ handle }: { handle: string }) {
+  const { data, isLoading } = useSWR<FeedbackSummary>(
+    `/api/clones/${handle}/feedback-summary`,
+    fetcher,
+    { revalidateOnFocus: false }
+  );
+
+  if (isLoading || !data || data.total === 0) return null;
+
+  const pct = data.total > 0 ? Math.round((data.thumbs_up / data.total) * 100) : 0;
+  const warn = pct < 60;
+
+  return (
+    <div className="card" style={{ marginBottom: 20, padding: "16px 20px" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+        <p style={{ fontSize: 12, fontWeight: 500, color: "rgba(255,255,255,0.50)", margin: 0 }}>How people rate the answers</p>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16 }}>
+        <div>
+          <p style={{ fontSize: 22, fontWeight: 300, color: warn ? "rgba(251,191,36,0.70)" : "rgba(255,255,255,0.80)", margin: "0 0 3px" }}>{pct}%</p>
+          <p style={{ fontSize: 10, color: "rgba(255,255,255,0.35)", margin: 0 }}>helpful</p>
+        </div>
+        <div>
+          <p style={{ fontSize: 22, fontWeight: 300, color: "rgba(255,255,255,0.80)", margin: "0 0 3px" }}>{data.thumbs_up}</p>
+          <p style={{ fontSize: 10, color: "rgba(255,255,255,0.35)", margin: 0 }}>thumbs up</p>
+        </div>
+        <div>
+          <p style={{ fontSize: 22, fontWeight: 300, color: "rgba(255,255,255,0.80)", margin: "0 0 3px" }}>{data.thumbs_down}</p>
+          <p style={{ fontSize: 10, color: "rgba(255,255,255,0.35)", margin: 0 }}>thumbs down</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
 // ---------------------------------------------------------------------------
@@ -717,6 +825,14 @@ export default function ActivityPage() {
 
       {/* Quality header only relevant for owner interactions (where feedback is collected) */}
       {tab === "review" && clone && queryMode === "owner" && <QualityHeader cloneId={clone.clone_id} />}
+
+      {/* Consumer mode panels — knowledge gaps + consumer feedback rating */}
+      {tab === "review" && clone && queryMode === "consumer" && (
+        <>
+          <ConsumerFeedbackPanel handle={clone.handle} />
+          <KnowledgeGapsPanel handle={clone.handle} />
+        </>
+      )}
 
       {tab === "review" && allTraces.length > 0 && queryMode === "owner" && (
         <div style={{

@@ -17,9 +17,12 @@ export default defineConfig(({ mode }) => {
       emptyOutDir: true,
       rollupOptions: {
         input: {
-          main:     path.resolve(__dirname, "src/renderer/index.html"),
-          pill:     path.resolve(__dirname, "src/renderer/pill.html"),
-          response: path.resolve(__dirname, "src/renderer/response.html"),
+          main:      path.resolve(__dirname, "src/renderer/index.html"),
+          pill:      path.resolve(__dirname, "src/renderer/pill.html"),
+          response:  path.resolve(__dirname, "src/renderer/response.html"),
+          quickask:  path.resolve(__dirname, "src/renderer/quickask.html"),
+          debate:    path.resolve(__dirname, "src/renderer/debate.html"),
+          voicecall: path.resolve(__dirname, "src/renderer/voicecall.html"),
         },
       },
     },

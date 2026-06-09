@@ -9909,3 +9909,196 @@ async def computer_task_stream(
         except Exception:
             pass
     return {"status": "deleted"}
+
+
+# ---------------------------------------------------------------------------
+# KNOWLEDGE GAPS — surfaces unanswered questions to the clone owner
+# ---------------------------------------------------------------------------
+
+@app.get("/clones/{handle}/knowledge-gaps")
+async def get_knowledge_gaps(
+    handle: str,
+    limit: int = Query(default=50, le=200),
+    request: Request = None,
+    session: AsyncSession = Depends(get_session),
+):
+    """Return recent queries the clone couldn't answer from its training data."""
+    caller_user_id = request.headers.get("X-User-Id") if request else None
+    row = await session.execute(
+        sql_text("SELECT clone_id, user_id FROM clone_identity WHERE handle = :h"),
+        {"h": handle},
+    )
+    rec = row.mappings().first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Clone not found")
+    if rec["user_id"] != caller_user_id:
+        raise HTTPException(status_code=403, detail="Not your clone")
+
+    gaps_row = await session.execute(
+        sql_text("""
+            SELECT query, asked_at,
+                   COUNT(*) OVER (PARTITION BY query) AS freq
+            FROM knowledge_gaps
+            WHERE clone_id = :cid
+            ORDER BY asked_at DESC
+            LIMIT :limit
+        """),
+        {"cid": str(rec["clone_id"]), "limit": limit},
+    )
+    gaps = [dict(r) for r in gaps_row.mappings().all()]
+    return {"gaps": gaps, "total": len(gaps)}
+
+
+# ---------------------------------------------------------------------------
+# RESPONSE FEEDBACK — per-message thumbs up/down
+# ---------------------------------------------------------------------------
+
+class FeedbackRequest(BaseModel):
+    trace_id: str | None = None
+    session_id: str | None = None
+    helpful: bool
+    note: str | None = None
+
+
+@app.post("/clones/{handle}/feedback")
+async def submit_response_feedback(
+    handle: str,
+    body: FeedbackRequest,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+):
+    """Consumer submits thumbs up or down on a response."""
+    caller_user_id = request.headers.get("X-User-Id")
+    row = await session.execute(
+        sql_text("SELECT clone_id FROM clone_identity WHERE handle = :h"),
+        {"h": handle},
+    )
+    rec = row.mappings().first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Clone not found")
+
+    await session.execute(
+        sql_text("""
+            INSERT INTO response_feedback
+              (clone_id, trace_id, session_id, rater_user_id, helpful, note)
+            VALUES (:cid, :tid, :sid, :uid, :helpful, :note)
+        """),
+        {
+            "cid": str(rec["clone_id"]),
+            "tid": body.trace_id,
+            "sid": body.session_id,
+            "uid": caller_user_id,
+            "helpful": body.helpful,
+            "note": body.note,
+        },
+    )
+    await session.commit()
+    return {"ok": True}
+
+
+@app.get("/clones/{handle}/feedback-summary")
+async def get_feedback_summary(
+    handle: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+):
+    """Return helpful/unhelpful counts for the clone owner."""
+    caller_user_id = request.headers.get("X-User-Id")
+    row = await session.execute(
+        sql_text("SELECT clone_id, user_id FROM clone_identity WHERE handle = :h"),
+        {"h": handle},
+    )
+    rec = row.mappings().first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Clone not found")
+    if rec["user_id"] != caller_user_id:
+        raise HTTPException(status_code=403, detail="Not your clone")
+
+    counts = await session.execute(
+        sql_text("""
+            SELECT
+                COUNT(*) FILTER (WHERE helpful = true)  AS thumbs_up,
+                COUNT(*) FILTER (WHERE helpful = false) AS thumbs_down,
+                COUNT(*)                                AS total
+            FROM response_feedback
+            WHERE clone_id = :cid
+        """),
+        {"cid": str(rec["clone_id"])},
+    )
+    c = counts.mappings().first()
+    return {
+        "thumbs_up": int(c["thumbs_up"] or 0),
+        "thumbs_down": int(c["thumbs_down"] or 0),
+        "total": int(c["total"] or 0),
+    }
+
+
+# ---------------------------------------------------------------------------
+# CHAT CONSENT — record consumer consent for memory building
+# ---------------------------------------------------------------------------
+
+class ConsentRequest(BaseModel):
+    consent: bool  # True = accept, False = decline (anonymous mode)
+
+
+@app.post("/clones/{handle}/consent")
+async def record_chat_consent(
+    handle: str,
+    body: ConsentRequest,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+):
+    """Record whether the consumer agreed to have the clone remember them."""
+    caller_user_id = request.headers.get("X-User-Id")
+    if not caller_user_id:
+        raise HTTPException(status_code=401, detail="Login required")
+
+    row = await session.execute(
+        sql_text("SELECT clone_id FROM clone_identity WHERE handle = :h"),
+        {"h": handle},
+    )
+    rec = row.mappings().first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Clone not found")
+
+    await session.execute(
+        sql_text("""
+            INSERT INTO consumer_profiles (clone_id, consumer_user_id, consent_given, consent_given_at)
+            VALUES (:cid, :uid, :consent, NOW())
+            ON CONFLICT (clone_id, consumer_user_id) DO UPDATE
+              SET consent_given = :consent, consent_given_at = NOW()
+        """),
+        {"cid": str(rec["clone_id"]), "uid": caller_user_id, "consent": body.consent},
+    )
+    await session.commit()
+    return {"ok": True, "consent": body.consent}
+
+
+@app.get("/clones/{handle}/consent")
+async def get_chat_consent(
+    handle: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+):
+    """Return the user's current consent status for this clone."""
+    caller_user_id = request.headers.get("X-User-Id")
+    if not caller_user_id:
+        return {"consent": None}
+
+    row = await session.execute(
+        sql_text("SELECT clone_id FROM clone_identity WHERE handle = :h"),
+        {"h": handle},
+    )
+    rec = row.mappings().first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Clone not found")
+
+    consent_row = await session.execute(
+        sql_text("""
+            SELECT consent_given FROM consumer_profiles
+            WHERE clone_id = :cid AND consumer_user_id = :uid
+        """),
+        {"cid": str(rec["clone_id"]), "uid": caller_user_id},
+    )
+    result = consent_row.mappings().first()
+    return {"consent": result["consent_given"] if result else None}

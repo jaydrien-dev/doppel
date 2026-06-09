@@ -30,9 +30,11 @@ from doppel.ingestion.status import (
     start_job,
     update_job,
 )
+from doppel.ingestion.decision_extractor import extract_epistemic_profile, fetch_decision_sample_texts
 from doppel.ingestion.style_extractor import extract_style_fingerprint, fetch_sample_texts
 
 _STYLE_TRIGGER_THRESHOLD = 30   # min authored chunks before style extraction
+_EPISTEMIC_TRIGGER_THRESHOLD = 30  # same threshold — decision patterns need enough text too
 _PROGRESS_EVERY = 10            # update job status every N items processed
 
 
@@ -82,8 +84,9 @@ class IngestionPipeline:
 
             print(f"[pipeline] Done. {processed} stored, {failed} failed for clone {clone_id}")
 
-            # Trigger style extraction if we have enough data
+            # Trigger style + decision-making extraction if we have enough data
             await self._maybe_extract_style(clone_id, clone_name)
+            await self._maybe_extract_epistemic(clone_id, clone_name)
 
         except Exception as e:
             print(f"[pipeline] Fatal error for job {job_id}: {e}")
@@ -162,10 +165,34 @@ class IngestionPipeline:
                 sample_texts=samples,
                 clone_name=clone_name,
             )
+            from doppel.brain.identity.layer import invalidate_identity_cache
+            invalidate_identity_cache(clone_id)
             print(f"[pipeline] Style extracted: formality={fingerprint.preferred_formality:.2f}, "
                   f"directness={fingerprint.directness:.2f}, warmth={fingerprint.warmth:.2f}")
         except Exception as e:
             print(f"[pipeline] Style extraction failed (non-fatal): {e}")
+
+    async def _maybe_extract_epistemic(self, clone_id: UUID, clone_name: str) -> None:
+        """Extract decision-making profile if there's enough authored content."""
+        samples = await fetch_decision_sample_texts(self._session, clone_id, limit=300)
+        if len(samples) < _EPISTEMIC_TRIGGER_THRESHOLD:
+            print(f"[pipeline] Only {len(samples)} samples — skipping epistemic extraction (need {_EPISTEMIC_TRIGGER_THRESHOLD})")
+            return
+
+        print(f"[pipeline] Extracting epistemic profile from {len(samples)} samples...")
+        try:
+            profile = await extract_epistemic_profile(
+                session=self._session,
+                clone_id=clone_id,
+                sample_texts=samples,
+                clone_name=clone_name,
+            )
+            from doppel.brain.identity.layer import invalidate_identity_cache
+            invalidate_identity_cache(clone_id)
+            print(f"[pipeline] Epistemic profile extracted: approach='{profile.decision_approach}', "
+                  f"frameworks={profile.reasoning_frameworks}, domains={profile.knowledge_domains}")
+        except Exception as e:
+            print(f"[pipeline] Epistemic extraction failed (non-fatal): {e}")
 
 
 async def _store_chunk_with_embedding(

@@ -274,6 +274,9 @@ function TrainCloneContent({ clone }: { clone: CloneOwnerInfo }) {
 
   return (
     <>
+      {/* Data privacy promise — shown once, dismissable */}
+      <DataPrivacyCard />
+
       {/* Memory usage bar */}
       {memoryStats && (
         <MemoryUsageBar used={memoryStats.memory_used} limit={memoryStats.memory_limit} />
@@ -287,8 +290,9 @@ function TrainCloneContent({ clone }: { clone: CloneOwnerInfo }) {
           icon={<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M2 5.5l8 5.5 8-5.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/><rect x="2" y="4" width="16" height="12" rx="2" stroke="currentColor" strokeWidth="1.4"/></svg>}
           iconColor="#F87171"
           title="Gmail"
-          description="Imports your sent mail. Best signal for tone."
+          description="Imports your sent mail — only what you've written, not received. Best signal for tone."
           badge="recommended"
+          privacyNote="Source emails are processed and deleted within 24h. Only extracted knowledge is retained."
           connected={connectorStatus?.gmail.connected}
         >
           {activeJobId ? (
@@ -320,7 +324,8 @@ function TrainCloneContent({ clone }: { clone: CloneOwnerInfo }) {
           icon={<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M7 3a2 2 0 100 4H9V3H7zM3 7a2 2 0 104 0V5H3v2zM13 17a2 2 0 100-4h-2v4h2zM17 13a2 2 0 10-4 0v2h4v-2z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"/><path d="M13 3a2 2 0 100 4h2V3h-2zM17 7a2 2 0 10-4 0v2h4V7zM7 17a2 2 0 100-4H5v4h2zM3 13a2 2 0 104 0v-2H3v2z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"/></svg>}
           iconColor="#A78BFA"
           title="Slack"
-          description="Threads where you actually decide things."
+          description="Threads where you actually decide things. Only channels you select."
+          privacyNote="Messages are processed and deleted within 24h. Recipient names and emails are redacted."
           connected={slackStatus?.connected}
         >
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -409,6 +414,7 @@ function TrainCloneContent({ clone }: { clone: CloneOwnerInfo }) {
           title="Upload files"
           description="Drop PDFs, docs, transcripts."
           stat="Any format"
+          privacyNote="Files are processed locally and deleted after extraction. Raw content never stored."
         >
           <div
             onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
@@ -874,6 +880,7 @@ function SourceCard({
   badge,
   connected,
   stat,
+  privacyNote,
   children,
 }: {
   icon: React.ReactNode;
@@ -883,6 +890,7 @@ function SourceCard({
   badge?: "recommended" | "soon";
   connected?: boolean;
   stat?: string;
+  privacyNote?: string;
   children?: React.ReactNode;
 }) {
   return (
@@ -926,6 +934,60 @@ function SourceCard({
 
       {/* Actions */}
       {children && <div>{children}</div>}
+
+      {/* Privacy note */}
+      {privacyNote && (
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 6, padding: "7px 10px", borderRadius: 8, background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)" }}>
+          <svg width="11" height="11" viewBox="0 0 14 14" fill="none" style={{ flexShrink: 0, marginTop: 1, color: "rgba(255,255,255,0.25)" }}>
+            <path d="M7 1L2 3.5V7c0 2.8 2.1 5.4 5 6 2.9-.6 5-3.2 5-6V3.5L7 1z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
+          </svg>
+          <p style={{ fontSize: 10, color: "rgba(255,255,255,0.28)", lineHeight: 1.5, margin: 0 }}>{privacyNote}</p>
+        </div>
+      )}
     </div>
   );
 }
+
+// ---------------------------------------------------------------------------
+// Data Privacy Card
+// ---------------------------------------------------------------------------
+
+function DataPrivacyCard() {
+  const [dismissed, setDismissed] = useState(() => {
+    try { return localStorage.getItem("doppel:privacyCardDismissed") === "1"; } catch { return false; }
+  });
+
+  if (dismissed) return null;
+
+  return (
+    <div style={{
+      display: "flex", alignItems: "flex-start", gap: 14, padding: "14px 18px",
+      borderRadius: 14, background: "rgba(255,255,255,0.02)",
+      border: "1px solid rgba(255,255,255,0.08)",
+    }}>
+      <div style={{ width: 32, height: 32, borderRadius: 9, flexShrink: 0, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.09)", display: "flex", alignItems: "center", justifyContent: "center", color: "rgba(255,255,255,0.45)" }}>
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+          <path d="M8 1L2 4v5c0 3.2 2.4 6.2 6 7 3.6-.8 6-3.8 6-7V4L8 1z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"/>
+          <path d="M5.5 8l2 2 3-3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+      </div>
+      <div style={{ flex: 1 }}>
+        <p style={{ fontSize: 13, fontWeight: 500, color: "rgba(255,255,255,0.72)", margin: "0 0 5px" }}>Your data is processed, not stored</p>
+        <p style={{ fontSize: 12, color: "rgba(255,255,255,0.38)", lineHeight: 1.6, margin: 0 }}>
+          Source files and messages are deleted within 24 hours of ingestion. Only the extracted knowledge — beliefs, writing patterns, frameworks — is retained in your clone.
+          Emails, names, and identifiers are redacted automatically before anything is stored.
+          Your data trains only your clone — never a shared model.{" "}
+          <a href="/privacy" style={{ color: "rgba(255,255,255,0.45)", textDecoration: "underline", textUnderlineOffset: 2 }}>Full privacy policy →</a>
+        </p>
+      </div>
+      <button
+        onClick={() => { try { localStorage.setItem("doppel:privacyCardDismissed", "1"); } catch {} setDismissed(true); }}
+        style={{ color: "rgba(255,255,255,0.22)", background: "none", border: "none", cursor: "pointer", fontSize: 18, lineHeight: 1, padding: "0 0 0 4px", flexShrink: 0 }}
+        aria-label="Dismiss"
+      >
+        ×
+      </button>
+    </div>
+  );
+}
+

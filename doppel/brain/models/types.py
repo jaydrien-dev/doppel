@@ -208,6 +208,32 @@ class ValueSystem(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# EPISTEMIC PROFILE — how the person thinks and makes decisions
+# ---------------------------------------------------------------------------
+
+class EpistemicProfile(BaseModel):
+    """
+    How the clone's owner thinks, reasons, and makes decisions.
+    Loaded alongside ValueSystem and StyleFingerprint and injected into every
+    LLM prompt so decision-type queries get the right framing.
+    """
+    # Which mental models / frameworks they rely on
+    reasoning_frameworks: list[str] = Field(
+        default_factory=lambda: ["First principles"]
+    )
+    # How they express confidence: e.g. "High confidence, decisive" / "Calibrated uncertainty"
+    confidence_style: str = "Calibrated uncertainty"
+    # Core approach to decisions: data-driven, intuition-led, etc.
+    decision_approach: str = "Data-driven, then gut check"
+    # Topics / industries they know deeply
+    knowledge_domains: list[str] = Field(default_factory=list)
+    # Types of evidence they trust most
+    preferred_evidence_types: list[str] = Field(
+        default_factory=lambda: ["First-hand experience", "Empirical data"]
+    )
+
+
+# ---------------------------------------------------------------------------
 # REASONING
 # ---------------------------------------------------------------------------
 

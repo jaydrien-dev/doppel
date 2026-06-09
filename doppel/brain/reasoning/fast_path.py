@@ -77,6 +77,15 @@ async def run_stream(
                 "After every 3-4 questions, briefly summarise what you've learned so far. "
                 "Every response must end with exactly one focused question."
             )
+    if brain_input.metadata.get("_knowledge_gap"):
+        system_prompt += (
+            "\n\n## Honest Knowledge Boundary\n"
+            "You don't have specific information about this topic in your memory. "
+            "Be upfront about that in your response — say something like \"I haven't covered this specifically\" "
+            "or \"I don't have detail on that\". Don't make things up or guess. "
+            "You can still share your general perspective, but make clear it's not from direct experience or training."
+        )
+
     user_content = _build_user_message(brain_input.message, context_block, perceived)
     sources = _extract_sources(memory)
     full_text = ""
