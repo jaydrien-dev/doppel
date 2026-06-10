@@ -115,11 +115,12 @@ async def run_stream(
 
     if brain_input.metadata.get("_knowledge_gap"):
         _slow_system += (
-            "\n\n## Honest Knowledge Boundary\n"
-            "You don't have specific information about this topic in your memory. "
-            "Be upfront about that — say something like \"I haven't covered this specifically\" "
-            "or \"I don't have detail on that\". Don't make things up or guess. "
-            "You can still share your general perspective, but make clear it's not from direct experience or training."
+            "\n\n## Memory match was weak — clarify before deflecting\n"
+            "The memory search didn't find a strong direct match for this question. "
+            "That often means the person phrased it differently from how your knowledge is stored — not that you don't know. "
+            "Ask ONE short, specific clarifying question to understand exactly what they're after. "
+            "For example: 'Are you asking about X, or more about Y?' "
+            "Only say you genuinely don't have information after you've tried to understand what they're actually asking."
         )
 
     _slow_messages = [{

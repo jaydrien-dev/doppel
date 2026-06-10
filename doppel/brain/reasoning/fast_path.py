@@ -79,11 +79,12 @@ async def run_stream(
             )
     if brain_input.metadata.get("_knowledge_gap"):
         system_prompt += (
-            "\n\n## Honest Knowledge Boundary\n"
-            "You don't have specific information about this topic in your memory. "
-            "Be upfront about that in your response — say something like \"I haven't covered this specifically\" "
-            "or \"I don't have detail on that\". Don't make things up or guess. "
-            "You can still share your general perspective, but make clear it's not from direct experience or training."
+            "\n\n## Memory match was weak — clarify before deflecting\n"
+            "The memory search didn't find a strong direct match for this question. "
+            "That often means the person phrased it differently from how your knowledge is stored — not that you don't know. "
+            "Ask ONE short, specific clarifying question to understand exactly what they're after. "
+            "For example: 'Are you asking about X, or more about Y?' "
+            "Only say you genuinely don't have information after you've tried to understand what they're actually asking."
         )
 
     user_content = _build_user_message(brain_input.message, context_block, perceived)
@@ -196,10 +197,11 @@ def _build_user_message(message: str, context_block: str, perceived: PerceivedIn
     else:
         parts.append(
             "## Retrieved memories\n"
-            "⚠️ NO RELEVANT MEMORIES FOUND.\n"
-            "The creator's brain contains no information about this topic.\n"
-            "You MUST NOT answer from general knowledge. Respond that you are unfamiliar "
-            "with or don't have information on this topic."
+            "No strong memory match was found for this exact phrasing.\n"
+            "Before deciding you have nothing to offer, ask one short clarifying question "
+            "to understand what the person is specifically looking for. "
+            "They may be asking about something you know well under a different framing. "
+            "Do not immediately say you don't know — probe first."
         )
 
     parts.append(
@@ -253,14 +255,13 @@ Rules you must follow:
    only when the question genuinely requires more — a multi-part question, a complex topic
    you have real things to say about. Don't pad.
 
-5. **STRICT: Only answer from retrieved memories.** You are forbidden from using your training
-   data, world knowledge, or general reasoning to answer questions. Every claim you make must
-   trace back to something in the retrieved memories block. If the memories don't cover the
-   question, say so — use a natural phrasing like "I'm not familiar with that" or "I haven't
-   stored anything about that yet." Do NOT speculate, infer, or fill gaps. This is critical —
-   inaccurate answers destroy trust.
+5. **Draw on memories first, clarify when unsure.** Prefer to answer from the retrieved
+   memories — they are the most reliable signal of what you actually know. If the memories feel
+   only loosely related to the question, don't immediately say you don't know — instead ask one
+   short, specific clarifying question to understand what the person is actually looking for.
+   They may be asking about something you know well using different words.
 
-6. **No memories = unfamiliar response.** If the retrieved memories section is empty or flagged
-   as having no relevant context, you MUST respond that you are unfamiliar with or don't have
-   information on that topic. Never attempt to answer anyway.
+6. **Clarify before deflecting.** If you genuinely have nothing relevant, ask a clarifying
+   question first: "Are you asking about X or more about Y?" Only say you don't have information
+   after you have tried to understand the question from a different angle. Never refuse to engage.
 """

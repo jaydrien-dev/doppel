@@ -79,7 +79,7 @@ async def retrieve(
     if query_embedding is None:
         query_embedding = await embed(query)
 
-    extra_where = "AND is_excluded = false AND source != 'chat'"
+    extra_where = "AND is_excluded = false AND LOWER(source) != 'chat'"
     if authored_by_user_only:
         extra_where += " AND authored_by_user = true"
 
@@ -95,7 +95,7 @@ async def retrieve(
     )
     pinned_rows = [dict(r) for r in pinned_result.mappings().all()]
 
-    # Similarity search for the rest — 0.50 threshold filters unrelated results
+    # Similarity search — cast a wide net; query expansion + LLM judgment filters relevance downstream
     similar_rows = await similarity_search(
         session,
         table="episodic_memory",
@@ -103,7 +103,7 @@ async def retrieve(
         query_embedding=query_embedding,
         limit=limit,
         extra_where=extra_where + " AND is_pinned = false",
-        min_similarity=0.50,
+        min_similarity=0.30,
     )
 
     # Merge: pinned first, then similar (dedup by id)
