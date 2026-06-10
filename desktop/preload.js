@@ -5,11 +5,16 @@ contextBridge.exposeInMainWorld("electronAPI", {
   openPill:        (cloneInfo) => ipcRenderer.send("open-pill", cloneInfo),
   minimize:        ()          => ipcRenderer.send("win-minimize"),
   close:           ()          => ipcRenderer.send("win-close"),
+  toggleFullscreen:()          => ipcRenderer.send("win-fullscreen"),
   getSettings:     ()          => ipcRenderer.invoke("get-settings"),
   saveSettings:    (data)      => ipcRenderer.send("save-settings", data),
   openExternal:    (url)       => ipcRenderer.send("open-external", url),
   onOverlayChanged: (cb) => {
     ipcRenderer.on("overlay-changed", (_, val) => cb(val));
     return () => ipcRenderer.removeAllListeners("overlay-changed");
+  },
+  onFullscreenChanged: (cb) => {
+    ipcRenderer.on("fullscreen-changed", (_, val) => cb(val));
+    return () => ipcRenderer.removeAllListeners("fullscreen-changed");
   },
 });

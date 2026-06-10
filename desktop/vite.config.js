@@ -10,7 +10,7 @@ export default defineConfig(({ mode }) => {
     root: "src/renderer",
     define: {
       "import.meta.env.VITE_OPENAI_API_KEY": JSON.stringify(env.VITE_OPENAI_API_KEY ?? ""),
-      "import.meta.env.VITE_FASTAPI_URL":    JSON.stringify(env.VITE_FASTAPI_URL    ?? "http://localhost:8000"),
+      "import.meta.env.VITE_FASTAPI_URL":    JSON.stringify(env.VITE_FASTAPI_URL    ?? "https://doppel.up.railway.app"),
     },
     build: {
       outDir: path.resolve(__dirname, "dist/renderer"),

@@ -6,7 +6,6 @@ import { ClonePicker } from "@/components/dashboard/ClonePicker";
 import type { CloneOwnerInfo } from "@/lib/types";
 import { extractStyle, getGithubAuthUrl, getGmailAuthUrl, getNotionAuthUrl, getSlackInstallUrl, getSlackStatus, ingestText, triggerGithubSync, triggerGmailSync, triggerNotionSync } from "@/lib/api";
 import { IngestionJobBanner } from "@/components/dashboard/IngestionJobBanner";
-import { SeedQAPanel } from "@/components/dashboard/SeedQAPanel";
 import { TopicCoverageCard } from "@/components/dashboard/TopicCoverageCard";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 
@@ -513,9 +512,6 @@ function TrainCloneContent({ clone }: { clone: CloneOwnerInfo }) {
         </SourceCard>
 
       </div>
-
-      {/* Full-width: Seed Q&A */}
-      <SeedQAPanel cloneId={clone.clone_id} />
 
       {/* Full-width: Topic coverage */}
       <TopicCoverageCard cloneId={clone.clone_id} />

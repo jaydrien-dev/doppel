@@ -270,14 +270,14 @@ function Hero() {
           </div>
 
           <h1 className="hero__h1">
-            Knowledge
+            Be in two
             <br />
-            that <span className="accent">outlasts you.</span>
+            places <span className="accent">at once.</span>
           </h1>
 
           <p className="hero__sub">
-            Train an AI clone on your work. Anyone can ask it.
-            You don&apos;t have to be in the room.
+            An AI clone trained on your actual work.
+            It answers while you&apos;re somewhere else.
           </p>
 
           <div className="hero__ctas">
@@ -1018,25 +1018,25 @@ function ScreenwatchSection() {
 const CARDS = [
   {
     num: "01", title: "Capture",
-    body: "Connect Gmail, Slack, GitHub, Notion. Every email, decision, and thread becomes searchable memory.",
+    body: "Connect Gmail, Slack, GitHub, Notion. Everything you've ever decided becomes permanent, searchable memory.",
     meta: "Takes 5 minutes",
     bg: "linear-gradient(135deg, #1A73E8 0%, #0D47A1 100%)", dot: "#4A90E2",
   },
   {
     num: "02", title: "Train",
-    body: "Doppel learns your voice, your patterns, your shortcuts. Not just facts — the way you think.",
+    body: "Doppel learns your voice, your reasoning, your shortcuts. Not just what you know — how you think.",
     meta: "Runs in the background",
     bg: "linear-gradient(135deg, #7B1FA2 0%, #4A148C 100%)", dot: "#A78BFA",
   },
   {
     num: "03", title: "Deploy",
-    body: "Share a link, an API key, or a Slack bot. Anyone you give access can ask. You answer once, for everyone.",
+    body: "Share a link. Anyone you give access can ask your clone — while you're in a meeting, asleep, or off the grid.",
     meta: "One click",
     bg: "linear-gradient(135deg, #E91E63 0%, #880E4F 100%)", dot: "#F06292",
   },
   {
     num: "04", title: "Compound",
-    body: "Individual clones aggregate into role brains. Knowledge that doesn't leave when the person does.",
+    body: "Your knowledge doesn't leave when you do. It compounds. Every answer makes the clone sharper.",
     meta: "Free → Enterprise",
     bg: "linear-gradient(135deg, #00838F 0%, #006064 100%)", dot: "#34D399",
   },
@@ -1086,7 +1086,7 @@ function CardStack() {
           <span className="eyebrow__dot" /> Why doppel
         </div>
         <h2 className="sec-h2" style={{ margin: "0 auto", ["--accent-c" as string]: "#A78BFA" }}>
-          <em>You</em> are the bottleneck. <br /> Your knowledge doesn&apos;t have to be.
+          Knowledge shouldn&apos;t have <br /> <em>a lifespan.</em>
         </h2>
       </div>
 

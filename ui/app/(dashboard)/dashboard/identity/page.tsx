@@ -425,10 +425,11 @@ function VoiceTab({
   onSaveStyle:  (patch: Partial<StyleFingerprint>) => Promise<void>;
   cloneId: string;
 }) {
-  const [answers, setAnswers] = useState<Record<string, string>>({ opinion: "", wontdo: "", describes: "" });
-  const [saving,  setSaving]  = useState(false);
-  const [done,    setDone]    = useState(false);
-  const [focused, setFocused] = useState<string | null>(null);
+  const [answers,      setAnswers]      = useState<Record<string, string>>({ opinion: "", wontdo: "", describes: "" });
+  const [extraContext, setExtraContext] = useState("");
+  const [saving,       setSaving]       = useState(false);
+  const [done,         setDone]         = useState(false);
+  const [focused,      setFocused]      = useState<string | null>(null);
 
   const allFilled = VOICE_PROMPTS.every(p => answers[p.id].trim().length > 0);
 
@@ -456,6 +457,16 @@ function VoiceTab({
       const descText = answers["describes"].trim();
       if (descText) await onSaveStyle({ signature_phrases: [descText.slice(0, 120)] });
 
+      // Ingest extra context if provided
+      const extra = extraContext.trim();
+      if (extra) {
+        await fetch("/api/ingestion/text", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ clone_id: cloneId, text: extra, source: "words" }),
+        });
+      }
+
       setDone(true);
     } finally {
       setSaving(false);
@@ -469,7 +480,7 @@ function VoiceTab({
         <p style={{ fontSize: 13, color: "rgba(255,255,255,0.38)", marginBottom: 20, lineHeight: 1.6 }}>
           Your clone has learned how you communicate and what you stand for.
         </p>
-        <button onClick={() => { setDone(false); setAnswers({ opinion: "", wontdo: "", describes: "" }); }} className="btn btn--sm">
+        <button onClick={() => { setDone(false); setAnswers({ opinion: "", wontdo: "", describes: "" }); setExtraContext(""); }} className="btn btn--sm">
           Update
         </button>
       </div>
@@ -517,6 +528,30 @@ function VoiceTab({
           </div>
         );
       })}
+
+      {/* Free-form extra context — optional */}
+      <div style={{
+        display: "flex", flexDirection: "column", gap: 8, padding: "18px 20px", borderRadius: 14,
+        background: focused === "__extra" ? "rgba(255,255,255,0.05)" : "rgba(255,255,255,0.02)",
+        border: `1.5px solid ${focused === "__extra" ? "rgba(255,255,255,0.16)" : extraContext.trim() ? "rgba(255,255,255,0.10)" : "rgba(255,255,255,0.07)"}`,
+        transition: "all 180ms",
+      }}>
+        <p style={{ fontSize: 13, color: focused === "__extra" ? "rgba(255,255,255,0.60)" : "rgba(255,255,255,0.38)", lineHeight: 1.5, margin: 0, fontStyle: "italic" }}>
+          Anything else your clone should know about you:
+        </p>
+        <textarea
+          className="voice-textarea"
+          value={extraContext}
+          onChange={e => setExtraContext(e.target.value)}
+          placeholder="e.g. I'm currently raising a Series A. I care a lot about team morale. I prefer async communication. I'm skeptical of consensus-driven decisions."
+          rows={3}
+          onFocus={() => setFocused("__extra")}
+          onBlur={() => setFocused(null)}
+          onInput={e => { const ta = e.currentTarget; ta.style.height = "auto"; ta.style.height = `${ta.scrollHeight}px`; }}
+          style={{ background: "transparent", border: "none", outline: "none", resize: "none", fontSize: 14, color: "rgba(255,255,255,0.85)", lineHeight: 1.6, fontFamily: "inherit", width: "100%", padding: 0 }}
+        />
+        <p style={{ fontSize: 10, color: "rgba(255,255,255,0.22)", margin: 0 }}>Optional · your clone will use this as direct context</p>
+      </div>
 
       <button
         onClick={save}

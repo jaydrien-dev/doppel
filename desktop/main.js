@@ -28,11 +28,18 @@ const IS_DEV = process.env.NODE_ENV !== "production";
 let _settings = {};
 let _settingsPath = "";   // populated after app is ready
 
+const PROD_URL = "https://doppel.up.railway.app";
+
 function loadSettings() {
   try {
     _settingsPath = path.join(app.getPath("userData"), "settings.json");
     _settings = JSON.parse(fs.readFileSync(_settingsPath, "utf8"));
   } catch { _settings = {}; }
+  // Migrate stale localhost URL to production
+  if (!_settings.fastapiUrl || _settings.fastapiUrl.startsWith("http://localhost")) {
+    _settings.fastapiUrl = PROD_URL;
+    try { fs.writeFileSync(_settingsPath, JSON.stringify(_settings, null, 2)); } catch {}
+  }
 }
 
 function persistSettings(data) {
@@ -92,6 +99,10 @@ function createWindow() {
   if (IS_DEV) {
     win.webContents.openDevTools({ mode: "detach" });
   }
+
+  // Emit fullscreen state changes to renderer
+  win.on("enter-full-screen", () => win.webContents.send("fullscreen-changed", true));
+  win.on("leave-full-screen",  () => win.webContents.send("fullscreen-changed", false));
 
   // Hide to tray on close
   win.on("close", (e) => {
@@ -389,7 +400,7 @@ function refreshNudgeLoop() {
 
 async function sendProactiveNudge() {
   const { proactiveCloneId, proactiveCloneName, proactiveCloneHandle } = _settings;
-  const apiUrl = _settings.fastapiUrl ?? "http://localhost:8000";
+  const apiUrl = _settings.fastapiUrl ?? "https://doppel.up.railway.app";
   const userId = _settings.userId ?? "";
   if (!proactiveCloneId) return;
 
@@ -463,7 +474,7 @@ function checkVoiceCallTime() {
 
 async function triggerVoiceCall() {
   const { voiceCallCloneId, voiceCallCloneName, voiceCallCloneHandle } = _settings;
-  const apiUrl = _settings.fastapiUrl ?? "http://localhost:8000";
+  const apiUrl = _settings.fastapiUrl ?? "https://doppel.up.railway.app";
   const userId = _settings.userId ?? "";
   if (!voiceCallCloneId) return;
 
@@ -580,8 +591,13 @@ function getActiveApp(callback) {
 
 // ─── IPC ─────────────────────────────────────────────────────────────────────
 
-ipcMain.on("win-minimize", () => win?.minimize());
-ipcMain.on("win-close",    () => { win?.hide(); });
+ipcMain.on("win-minimize",    () => win?.minimize());
+ipcMain.on("win-close",       () => { win?.hide(); });
+ipcMain.on("win-fullscreen",  () => {
+  if (!win) return;
+  const next = !win.isFullScreen();
+  win.setFullScreen(next);
+});
 
 // Settings
 ipcMain.handle("get-settings",  ()        => _settings);

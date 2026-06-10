@@ -73,7 +73,7 @@ export default function Pill() {
   const readerRef     = useRef<ReadableStreamDefaultReader<Uint8Array> | null>(null);
   const messagesEnd   = useRef<HTMLDivElement>(null);
   const inputRef      = useRef<HTMLInputElement>(null);
-  const apiRef        = useRef("http://localhost:8000");
+  const apiRef        = useRef("https://doppel.up.railway.app");
   const openaiKeyRef  = useRef("");
   const userIdRef     = useRef("");
 
