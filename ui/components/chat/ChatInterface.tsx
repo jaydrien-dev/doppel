@@ -16,6 +16,12 @@ declare global {
 import { MessageBubble } from "./MessageBubble";
 import { TypingIndicator } from "./TypingIndicator";
 
+interface KnowledgeArea {
+  area: string;
+  depth: string;
+  fact_count?: number;
+}
+
 interface ChatInterfaceProps {
   cloneId: string;
   cloneHandle?: string;
@@ -25,6 +31,7 @@ interface ChatInterfaceProps {
   contextType?: ContextType;
   ownerMode?: boolean;
   suggestedQuestions?: string[];
+  knowledgeAreas?: KnowledgeArea[];
   placeholder?: string;
   onFirstMessage?: () => void;
   initialInput?: string;
@@ -947,6 +954,7 @@ export function ChatInterface({
   contextType = "chat",
   ownerMode = false,
   suggestedQuestions,
+  knowledgeAreas,
   placeholder = "Ask anything…",
   onFirstMessage,
   initialInput,
@@ -1413,6 +1421,43 @@ export function ChatInterface({
                   <p className="chat-intro__sub">Ask me anything — I&apos;ll answer in their voice.</p>
                 </div>
               </div>
+
+              {/* Knowledge areas */}
+              {knowledgeAreas && knowledgeAreas.length > 0 && (
+                <div style={{ marginTop: 14 }}>
+                  <p style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.1em", color: "rgba(255,255,255,0.25)", margin: "0 0 8px" }}>
+                    Knows well
+                  </p>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {knowledgeAreas.map((a, i) => {
+                      const opacity =
+                        a.depth === "deep" ? 0.75
+                        : a.depth === "solid" ? 0.50
+                        : 0.32;
+                      const bgOpacity =
+                        a.depth === "deep" ? 0.10
+                        : a.depth === "solid" ? 0.06
+                        : 0.03;
+                      const borderOpacity =
+                        a.depth === "deep" ? 0.18
+                        : a.depth === "solid" ? 0.11
+                        : 0.06;
+                      return (
+                        <span key={i} style={{
+                          fontSize: 11, fontWeight: 500,
+                          padding: "3px 9px", borderRadius: 20,
+                          background: `rgba(255,255,255,${bgOpacity})`,
+                          border: `1px solid rgba(255,255,255,${borderOpacity})`,
+                          color: `rgba(255,255,255,${opacity})`,
+                        }}>
+                          {a.area}
+                        </span>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
               {/* Training mode prompt */}
               <button
                 onClick={() => setTrainingMode(true)}
@@ -1422,7 +1467,7 @@ export function ChatInterface({
                   border: "1px solid rgba(52,211,153,0.14)",
                   background: "rgba(52,211,153,0.04)",
                   cursor: "pointer", textAlign: "left",
-                  marginTop: 4, transition: "all 150ms",
+                  marginTop: 14, transition: "all 150ms",
                   fontFamily: "inherit",
                 }}
                 onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(52,211,153,0.08)"; e.currentTarget.style.borderColor = "rgba(52,211,153,0.22)"; }}
@@ -1445,19 +1490,6 @@ export function ChatInterface({
                   </p>
                 </div>
               </button>
-
-              {suggestedQuestions && suggestedQuestions.length > 0 && (
-                <>
-                  <span className="chat-intro__caption">Or try one of these</span>
-                  <div className="suggest">
-                    {suggestedQuestions.map((q, i) => (
-                      <button key={i} className="suggest__chip" onClick={() => handleSuggest(q)}>
-                        <span className="suggest__chip__icon"><IMsg /></span>{q}
-                      </button>
-                    ))}
-                  </div>
-                </>
-              )}
             </div>
           ) : null}
 
@@ -1466,6 +1498,7 @@ export function ChatInterface({
             return (
               <MessageBubble key={msg.id} message={msg}
                 cloneId={ownerMode ? cloneId : undefined}
+                cloneName={cloneName}
                 ownerMode={ownerMode} cloneInitial={cloneInitial} cloneColor={avatarColor}
                 onFeedback={makeConsFeedback(msg.trace_id)} />
             );
@@ -1510,6 +1543,44 @@ export function ChatInterface({
 
         {/* Composer area */}
         <div className="composer-wrap">
+          {/* Adaptive suggested questions — visible above composer when there are suggestions */}
+          {suggestedQuestions && suggestedQuestions.length > 0 && (() => {
+            const trimmed = input.trim().toLowerCase();
+            const visible = trimmed.length < 2
+              ? suggestedQuestions
+              : suggestedQuestions.filter(q => {
+                  const words = trimmed.split(/\s+/).filter(w => w.length > 2);
+                  return words.some(w => q.toLowerCase().includes(w));
+                });
+            if (!visible.length) return null;
+            return (
+              <div style={{
+                maxWidth: 920, margin: "0 auto 6px",
+                display: "flex", gap: 6, flexWrap: "wrap",
+              }}>
+                {visible.slice(0, 4).map((q, i) => (
+                  <button
+                    key={i}
+                    onClick={() => handleSuggest(q)}
+                    style={{
+                      fontSize: 11, padding: "4px 10px", borderRadius: 20,
+                      background: "rgba(255,255,255,0.04)",
+                      border: "1px solid rgba(255,255,255,0.09)",
+                      color: "rgba(255,255,255,0.50)",
+                      cursor: "pointer", fontFamily: "inherit",
+                      transition: "all 120ms", whiteSpace: "nowrap",
+                      maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis",
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,255,255,0.08)"; e.currentTarget.style.color = "rgba(255,255,255,0.75)"; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = "rgba(255,255,255,0.04)"; e.currentTarget.style.color = "rgba(255,255,255,0.50)"; }}
+                  >
+                    {q}
+                  </button>
+                ))}
+              </div>
+            );
+          })()}
+
           {/* Inline voice status bar */}
           {voiceEnabled && (listening || speaking) && (
             <div style={{ maxWidth: 920, margin: "0 auto 8px", display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}>

@@ -7,6 +7,7 @@ import type { ChatMessage, FeedbackSignalType, MemorySource } from "@/lib/types"
 interface MessageBubbleProps {
   message: ChatMessage;
   cloneId?: string;
+  cloneName?: string;
   ownerMode?: boolean;
   cloneInitial?: string;
   cloneColor?: string;
@@ -48,6 +49,18 @@ const IEdit = () => (
     <path d="M9.5 2.5l2 2-7 7H2.5v-2l7-7z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
   </svg>
 );
+const IEmail = () => (
+  <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
+    <rect x="1.5" y="3" width="11" height="8" rx="1.2" stroke="currentColor" strokeWidth="1.2"/>
+    <path d="M1.5 4.5l5 3.5 5-3.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+  </svg>
+);
+const INote = () => (
+  <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
+    <path d="M3 2h6l3 3v7a1 1 0 01-1 1H3a1 1 0 01-1-1V3a1 1 0 011-1z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
+    <path d="M9 2v3h3M4.5 7.5h5M4.5 9.5h3" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round"/>
+  </svg>
+);
 
 function sourceKind(source: string): string {
   const s = source.toLowerCase();
@@ -80,6 +93,7 @@ function ConfidenceBar({ value }: { value: number }) {
 export function MessageBubble({
   message,
   cloneId,
+  cloneName = "Clone",
   ownerMode,
   cloneInitial = "A",
   cloneColor = "#1A73E8",
@@ -91,6 +105,8 @@ export function MessageBubble({
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(message.content);
   const [copied, setCopied] = useState(false);
+  const [emailCopied, setEmailCopied] = useState(false);
+  const [noteSaved, setNoteSaved] = useState(false);
 
   async function sendFeedback(type: FeedbackSignalType, corrected?: string) {
     if (!message.trace_id || !cloneId) return;
@@ -107,6 +123,28 @@ export function MessageBubble({
     navigator.clipboard.writeText(message.content);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
+  }
+
+  function handleEmailDraft() {
+    const subject = message.content.split(/[.!?\n]/)[0].trim().slice(0, 80);
+    const draft = `Subject: ${subject}\n\n${message.content}\n\n— ${cloneName}`;
+    navigator.clipboard.writeText(draft);
+    setEmailCopied(true);
+    setTimeout(() => setEmailCopied(false), 2000);
+  }
+
+  function handleSaveNote() {
+    const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 16);
+    const md = `# Note from ${cloneName}\n_${ts}_\n\n${message.content}\n`;
+    const blob = new Blob([md], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${cloneName.toLowerCase().replace(/\s+/g, "-")}-${ts}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setNoteSaved(true);
+    setTimeout(() => setNoteSaved(false), 2000);
   }
 
   const conf = message.confidence;
@@ -209,6 +247,22 @@ export function MessageBubble({
               title="Copy"
             >
               <ICopy />
+            </button>
+            <button
+              className={`msg__act${emailCopied ? " msg__act--active" : ""}`}
+              onClick={handleEmailDraft}
+              aria-label="Copy as email draft"
+              title={emailCopied ? "Copied!" : "Email draft"}
+            >
+              <IEmail />
+            </button>
+            <button
+              className={`msg__act${noteSaved ? " msg__act--active" : ""}`}
+              onClick={handleSaveNote}
+              aria-label="Save as note"
+              title={noteSaved ? "Saved!" : "Save note"}
+            >
+              <INote />
             </button>
             <button className="msg__act" aria-label="Regenerate" title="Regenerate">
               <IRefresh />

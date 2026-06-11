@@ -350,6 +350,9 @@ export default function MarketplaceClonePage() {
   const [submittingRating, setSubmittingRating] = useState(false);
   const [ratingSubmitted, setRatingSubmitted] = useState(false);
 
+  const [suggestedQs, setSuggestedQs] = useState<string[] | null>(null);
+  const [knowledgeAreas, setKnowledgeAreas] = useState<{ area: string; depth: string; fact_count: number }[] | null>(null);
+
   useEffect(() => {
     fetch(`/api/marketplace/${handle}`)
       .then((r) => { if (!r.ok) { setNotFound(true); return null; } return r.json(); })
@@ -364,6 +367,16 @@ export default function MarketplaceClonePage() {
       fetch("/api/credits/balance").then(r => r.json()).then(d => setCredits(d.credits_remaining ?? 0));
       fetch("/api/credits/packs").then(r => r.json()).then(d => setPacks(d.packs ?? []));
     }
+
+    fetch(`/api/clones/${handle}/suggested-questions`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.questions?.length) setSuggestedQs(d.questions); })
+      .catch(() => {});
+
+    fetch(`/api/clones/${handle}/knowledge-map`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.areas?.length) setKnowledgeAreas(d.areas); })
+      .catch(() => {});
   }, [handle, user]);
 
   async function buyPack(packId: string) {
@@ -411,10 +424,10 @@ export default function MarketplaceClonePage() {
   const catKey = clone.category ?? "other";
   const cat = CATS[catKey] ?? CATS.other;
   const isPaid = clone.price_per_query > 0;
-  const chatUrl = `/home?clone=${clone.handle}`;
+  const chatUrl = `/c/${clone.handle}`;
   const canAfford = !isPaid || (credits !== null && credits >= Math.round(clone.price_per_query));
   const totalMemory = (clone.memory_stats.episodic ?? 0) + (clone.memory_stats.semantic ?? 0) + (clone.memory_stats.procedural ?? 0);
-  const sampleQs = SAMPLE_QUESTIONS[catKey] ?? SAMPLE_QUESTIONS.default;
+  const displayQs = suggestedQs ?? (SAMPLE_QUESTIONS[catKey] ?? SAMPLE_QUESTIONS.default);
 
   return (
     <div className="mk-root">
@@ -539,6 +552,41 @@ export default function MarketplaceClonePage() {
             </ul>
           </section>
 
+          {/* Knowledge map */}
+          {knowledgeAreas && knowledgeAreas.length > 0 && (
+            <section className="panel" style={{ "--clone-color": cat.color } as React.CSSProperties}>
+              <div className="panel__title">
+                What this clone knows
+                <span className="panel__title__hint">Depth from training data</span>
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 2 }}>
+                {knowledgeAreas.map((a, i) => {
+                  const depthStyle: React.CSSProperties =
+                    a.depth === "deep"
+                      ? { background: "rgba(255,255,255,0.10)", borderColor: "rgba(255,255,255,0.18)", color: "rgba(255,255,255,0.82)" }
+                      : a.depth === "solid"
+                      ? { background: "rgba(255,255,255,0.06)", borderColor: "rgba(255,255,255,0.12)", color: "rgba(255,255,255,0.60)" }
+                      : { background: "rgba(255,255,255,0.03)", borderColor: "rgba(255,255,255,0.07)", color: "rgba(255,255,255,0.40)" };
+                  return (
+                    <span
+                      key={i}
+                      style={{
+                        display: "inline-flex", alignItems: "center", gap: 5,
+                        border: "1px solid", borderRadius: 20, padding: "4px 10px",
+                        fontSize: 12, fontWeight: 500, ...depthStyle,
+                      }}
+                    >
+                      {a.area}
+                      <span style={{ fontSize: 10, opacity: 0.65, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                        {a.depth}
+                      </span>
+                    </span>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+
           {/* Sample questions */}
           <section className="panel" style={{ "--clone-color": cat.color } as React.CSSProperties}>
             <div className="panel__title">
@@ -546,8 +594,8 @@ export default function MarketplaceClonePage() {
               <span className="panel__title__hint">Tap to start a chat</span>
             </div>
             <div className="qs">
-              {sampleQs.map((q, i) => (
-                <Link key={i} href={chatUrl} className="q-row">
+              {displayQs.map((q, i) => (
+                <Link key={i} href={`${chatUrl}?q=${encodeURIComponent(q)}`} className="q-row">
                   <span className="q-row__icon">{I.msg}</span>
                   <span>{q}</span>
                   <span className="q-row__arrow">{I.arrow}</span>

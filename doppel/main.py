@@ -9950,6 +9950,172 @@ async def get_knowledge_gaps(
 
 
 # ---------------------------------------------------------------------------
+# KNOWLEDGE MAP — what areas the clone knows well (public)
+# ---------------------------------------------------------------------------
+
+@app.get("/clones/{handle}/knowledge-map")
+async def get_knowledge_map(
+    handle: str,
+    session: AsyncSession = Depends(get_session),
+):
+    """Return knowledge depth per domain — public endpoint, no auth needed."""
+    row = await session.execute(
+        sql_text("SELECT clone_id FROM clone_identity WHERE handle = :h"),
+        {"h": handle},
+    )
+    rec = row.mappings().first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Clone not found")
+    clone_id = str(rec["clone_id"])
+
+    domain_rows = await session.execute(
+        sql_text("""
+            SELECT domain, COUNT(*) AS count, AVG(confidence) AS avg_confidence
+            FROM semantic_memory
+            WHERE clone_id = :cid
+            GROUP BY domain
+            ORDER BY count DESC
+            LIMIT 20
+        """),
+        {"cid": clone_id},
+    )
+    domains = [dict(r) for r in domain_rows.mappings().all()]
+
+    topic_rows = await session.execute(
+        sql_text("""
+            SELECT unnest(topics) AS topic, COUNT(*) AS count
+            FROM episodic_memory
+            WHERE clone_id = :cid AND topics IS NOT NULL AND array_length(topics, 1) > 0
+            GROUP BY topic
+            ORDER BY count DESC
+            LIMIT 20
+        """),
+        {"cid": clone_id},
+    )
+    topics = [dict(r) for r in topic_rows.mappings().all()]
+
+    def depth_label(count: int, max_c: int) -> str:
+        if max_c == 0:
+            return "some"
+        frac = count / max_c
+        if frac > 0.45:
+            return "deep"
+        if frac > 0.18:
+            return "solid"
+        return "some"
+
+    max_domain = max((d["count"] for d in domains), default=1)
+    areas = []
+    seen: set[str] = set()
+
+    for d in domains:
+        label = (d["domain"] or "general").strip()
+        if label and label not in seen:
+            seen.add(label)
+            areas.append({
+                "area": label,
+                "depth": depth_label(d["count"], max_domain),
+                "fact_count": d["count"],
+            })
+
+    max_topic = max((t["count"] for t in topics), default=1)
+    for t in topics:
+        label = (t["topic"] or "").strip()
+        if label and label not in seen and len(areas) < 14:
+            seen.add(label)
+            areas.append({
+                "area": label,
+                "depth": depth_label(t["count"], max_topic),
+                "fact_count": t["count"],
+            })
+
+    return {"areas": areas[:12]}
+
+
+# ---------------------------------------------------------------------------
+# SUGGESTED QUESTIONS — dynamically generated from top knowledge (public)
+# ---------------------------------------------------------------------------
+
+@app.get("/clones/{handle}/suggested-questions")
+async def get_suggested_questions(
+    handle: str,
+    session: AsyncSession = Depends(get_session),
+):
+    """Return 5 Haiku-generated questions specific to what this clone knows best."""
+    import json as _json
+
+    row = await session.execute(
+        sql_text("SELECT clone_id, display_name FROM clone_identity WHERE handle = :h"),
+        {"h": handle},
+    )
+    rec = row.mappings().first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Clone not found")
+    clone_id = str(rec["clone_id"])
+    name = rec["display_name"] or handle
+
+    fact_rows = await session.execute(
+        sql_text("""
+            SELECT fact, domain
+            FROM semantic_memory
+            WHERE clone_id = :cid
+            ORDER BY confidence DESC
+            LIMIT 10
+        """),
+        {"cid": clone_id},
+    )
+    facts = [dict(r) for r in fact_rows.mappings().all()]
+
+    topic_rows = await session.execute(
+        sql_text("""
+            SELECT unnest(topics) AS topic, COUNT(*) AS count
+            FROM episodic_memory
+            WHERE clone_id = :cid AND topics IS NOT NULL AND array_length(topics, 1) > 0
+            GROUP BY topic
+            ORDER BY count DESC
+            LIMIT 8
+        """),
+        {"cid": clone_id},
+    )
+    topics = [dict(r) for r in topic_rows.mappings().all()]
+
+    if not facts and not topics:
+        return {"questions": []}
+
+    fact_lines = "\n".join(f"- {f['fact'][:120]}" for f in facts[:6])
+    topic_str = ", ".join(t["topic"] for t in topics[:6] if t.get("topic"))
+
+    prompt = (
+        f"You are generating suggested questions for a knowledge clone named {name}.\n"
+        f"Their strongest knowledge areas: {topic_str or 'various topics'}\n"
+        f"Sample facts from their training data:\n{fact_lines}\n\n"
+        f"Generate exactly 5 specific, concrete questions a person would genuinely want to ask this person. "
+        f"Make them specific to what this person actually knows, not generic. "
+        f"Sound like a real question a colleague or fan would ask. "
+        f"Return a JSON array of exactly 5 question strings. No other text."
+    )
+
+    client = get_anthropic_client()
+    msg = await client.messages.create(
+        model=settings.classification_model,
+        max_tokens=300,
+        messages=[{"role": "user", "content": prompt}],
+    )
+
+    try:
+        raw = msg.content[0].text.strip()
+        # Strip markdown code fences if present
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        questions = _json.loads(raw)
+        return {"questions": [str(q) for q in questions[:5]]}
+    except Exception:
+        return {"questions": []}
+
+
+# ---------------------------------------------------------------------------
 # RESPONSE FEEDBACK — per-message thumbs up/down
 # ---------------------------------------------------------------------------
 

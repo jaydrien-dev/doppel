@@ -18,6 +18,8 @@ const SUGGESTED_ONBOARDING: string[] = [
   "What trips up new people most often?",
 ];
 
+type KnowledgeArea = { area: string; depth: string; fact_count: number };
+
 // Deterministic avatar color from name
 const COLOR_PALETTE = [
   "#1A73E8", "#7B1FA2", "#E91E63", "#F57C00",
@@ -77,7 +79,10 @@ export function PublicChatClient({
   const { isSignedIn } = useUser();
   const prefillQ = searchParams.get("q") ?? undefined;
   const [profile, setProfile] = useState<ConsumerProfile | null>(null);
-  const suggested = isOnboardingResource ? SUGGESTED_ONBOARDING : SUGGESTED_DEFAULT;
+  const [suggestedQs, setSuggestedQs] = useState<string[] | null>(null);
+  const [knowledgeAreas, setKnowledgeAreas] = useState<KnowledgeArea[] | null>(null);
+  const fallbackSuggested = isOnboardingResource ? SUGGESTED_ONBOARDING : SUGGESTED_DEFAULT;
+  const suggested = suggestedQs ?? fallbackSuggested;
 
   // Consent gate — null means we're still loading
   const [consent, setConsent] = useState<ConsentState | "loading">("loading");
@@ -146,6 +151,18 @@ export function PublicChatClient({
       .then((d) => setProfile(d))
       .catch(() => {});
   }, [isSignedIn, clone.handle]);
+
+  useEffect(() => {
+    fetch(`/api/clones/${clone.handle}/suggested-questions`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.questions?.length) setSuggestedQs(d.questions); })
+      .catch(() => {});
+
+    fetch(`/api/clones/${clone.handle}/knowledge-map`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.areas?.length) setKnowledgeAreas(d.areas); })
+      .catch(() => {});
+  }, [clone.handle]);
 
   async function handleConsent(accepted: boolean) {
     setConsent(accepted);
@@ -293,6 +310,7 @@ export function PublicChatClient({
             contextType="chat"
             ownerMode={false}
             suggestedQuestions={suggested}
+            knowledgeAreas={knowledgeAreas ?? undefined}
             placeholder={`Ask ${clone.display_name} anything…`}
             initialInput={prefillQ}
             pricePerQuery={clone.price_per_query ?? 0}

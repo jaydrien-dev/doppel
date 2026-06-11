@@ -312,6 +312,8 @@ export function ChatPage({ clone, onBack, hideBack }: { clone: Clone; onBack: ()
   const [cloneInfo, setCloneInfo] = useState<{ credit_cost?: number; is_paid?: boolean } | null>(null);
   // Consent: "loading" | null (not asked) | true | false
   const [consent, setConsent] = useState<"loading" | null | boolean>("loading");
+  const [suggestedQs, setSuggestedQs] = useState<string[]>(SUGGESTED_DEFAULT);
+  const [knowledgeAreas, setKnowledgeAreas] = useState<{ area: string; depth: string }[]>([]);
   const [showPrivacy, setShowPrivacy] = useState(false);
   const [deletingProfile, setDeletingProfile] = useState(false);
   const [profileDeleted, setProfileDeleted] = useState(false);
@@ -385,6 +387,19 @@ export function ChatPage({ clone, onBack, hideBack }: { clone: Clone; onBack: ()
     fetch(`${apiUrl}/marketplace/${clone.handle}`)
       .then(r => { if (r.ok) return r.json(); return null; })
       .then(d => { if (d) setCloneInfo({ credit_cost: d.credit_cost, is_paid: d.is_paid }); })
+      .catch(() => {});
+  }, [apiUrl, clone.handle]);
+
+  // Suggested questions + knowledge map (public, no auth needed)
+  useEffect(() => {
+    if (!apiUrl) return;
+    fetch(`${apiUrl}/clones/${clone.handle}/suggested-questions`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.questions?.length) setSuggestedQs(d.questions); })
+      .catch(() => {});
+    fetch(`${apiUrl}/clones/${clone.handle}/knowledge-map`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.areas?.length) setKnowledgeAreas(d.areas); })
       .catch(() => {});
   }, [apiUrl, clone.handle]);
 
@@ -665,20 +680,24 @@ export function ChatPage({ clone, onBack, hideBack }: { clone: Clone; onBack: ()
               </div>
             </div>
 
-            {/* Suggested questions */}
-            <span style={{ display: "block", fontSize: 11, letterSpacing: "0.16em", textTransform: "uppercase" as const, color: "rgba(255,255,255,0.50)", fontWeight: 500, margin: "20px 0 10px" }}>Try one of these</span>
-            <div style={{ display: "flex", flexWrap: "wrap" as const, gap: 8 }}>
-              {SUGGESTED_DEFAULT.map((q, i) => (
-                <button
-                  key={i}
-                  className="suggest-chip"
-                  onClick={() => handleSuggest(q)}
-                  style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 13px", borderRadius: 12, border: "1px solid rgba(255,255,255,0.09)", background: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.72)", fontSize: 13, cursor: "pointer", fontFamily: "inherit", transition: "all 240ms cubic-bezier(0.25,0.46,0.45,0.94)" }}
-                >
-                  <span style={{ color: "rgba(255,255,255,0.50)" }}><IMsg /></span>{q}
-                </button>
-              ))}
-            </div>
+            {/* Knowledge areas */}
+            {knowledgeAreas.length > 0 && (
+              <div style={{ marginTop: 14, marginBottom: 4 }}>
+                <span style={{ display: "block", fontSize: 10, letterSpacing: "0.12em", textTransform: "uppercase" as const, color: "rgba(255,255,255,0.30)", marginBottom: 8 }}>Knows well</span>
+                <div style={{ display: "flex", flexWrap: "wrap" as const, gap: 6 }}>
+                  {knowledgeAreas.map((a, i) => {
+                    const opacity = a.depth === "deep" ? 0.75 : a.depth === "solid" ? 0.50 : 0.32;
+                    const bg = a.depth === "deep" ? 0.10 : a.depth === "solid" ? 0.06 : 0.03;
+                    const border = a.depth === "deep" ? 0.18 : a.depth === "solid" ? 0.11 : 0.06;
+                    return (
+                      <span key={i} style={{ fontSize: 11, fontWeight: 500, padding: "3px 9px", borderRadius: 20, background: `rgba(255,255,255,${bg})`, border: `1px solid rgba(255,255,255,${border})`, color: `rgba(255,255,255,${opacity})` }}>
+                        {a.area}
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
         ) : (
           messages.map(msg => {
@@ -725,6 +744,31 @@ export function ChatPage({ clone, onBack, hideBack }: { clone: Clone; onBack: ()
       {/* Composer */}
       <div style={{ position: "sticky", bottom: 0, background: "linear-gradient(180deg, rgba(8,8,8,0) 0%, rgba(8,8,8,0.88) 30%, #080808 65%)", padding: "28px 20px 16px", flexShrink: 0 }}>
         <div style={{ maxWidth: 920, margin: "0 auto" }}>
+          {/* Adaptive suggested questions */}
+          {(() => {
+            const trimmed = input.trim().toLowerCase();
+            const visible = trimmed.length < 2
+              ? suggestedQs
+              : suggestedQs.filter(q => {
+                  const words = trimmed.split(/\s+/).filter((w: string) => w.length > 2);
+                  return words.some((w: string) => q.toLowerCase().includes(w));
+                });
+            if (!visible.length) return null;
+            return (
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" as const, marginBottom: 8 }}>
+                {visible.slice(0, 4).map((q, i) => (
+                  <button
+                    key={i}
+                    className="suggest-chip"
+                    onClick={() => handleSuggest(q)}
+                    style={{ fontSize: 11, padding: "4px 10px", borderRadius: 20, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.09)", color: "rgba(255,255,255,0.50)", cursor: "pointer", fontFamily: "inherit", transition: "all 120ms", whiteSpace: "nowrap" as const, maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis" }}
+                  >
+                    {q}
+                  </button>
+                ))}
+              </div>
+            );
+          })()}
           {/* Composer box */}
           <div
             style={{ display: "flex", alignItems: "flex-end", gap: 8, padding: "10px 12px", background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.09)", borderRadius: 18, transition: "border-color 120ms, box-shadow 120ms" }}
