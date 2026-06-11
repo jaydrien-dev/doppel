@@ -744,7 +744,9 @@ export function ChatPage({ clone, onBack, hideBack }: { clone: Clone; onBack: ()
       {/* Composer */}
       <div style={{ position: "sticky", bottom: 0, background: "linear-gradient(180deg, rgba(8,8,8,0) 0%, rgba(8,8,8,0.88) 30%, #080808 65%)", padding: "28px 20px 16px", flexShrink: 0 }}>
         <div style={{ maxWidth: 920, margin: "0 auto" }}>
-          {/* Adaptive suggested questions */}
+          {/* Composer box — relative container so popup anchors to it */}
+          <div style={{ position: "relative" }}>
+          {/* Suggested questions popup */}
           {(() => {
             const trimmed = input.trim().toLowerCase();
             const visible = trimmed.length < 2
@@ -755,21 +757,27 @@ export function ChatPage({ clone, onBack, hideBack }: { clone: Clone; onBack: ()
                 });
             if (!visible.length) return null;
             return (
-              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" as const, marginBottom: 8 }}>
-                {visible.slice(0, 4).map((q, i) => (
+              <div style={{ position: "absolute", bottom: "calc(100% + 6px)", left: 0, right: 0, background: "rgba(14,14,14,0.97)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)", border: "1px solid rgba(255,255,255,0.09)", borderRadius: 14, overflow: "hidden", zIndex: 20, boxShadow: "0 -8px 32px rgba(0,0,0,0.50)" }}>
+                {visible.slice(0, 5).map((q, i) => (
                   <button
                     key={i}
-                    className="suggest-chip"
                     onClick={() => handleSuggest(q)}
-                    style={{ fontSize: 11, padding: "4px 10px", borderRadius: 20, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.09)", color: "rgba(255,255,255,0.50)", cursor: "pointer", fontFamily: "inherit", transition: "all 120ms", whiteSpace: "nowrap" as const, maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis" }}
+                    style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "10px 14px", background: "none", border: "none", borderBottom: i < visible.slice(0, 5).length - 1 ? "1px solid rgba(255,255,255,0.05)" : "none", cursor: "pointer", fontFamily: "inherit", textAlign: "left" as const, transition: "background 100ms" }}
+                    onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,255,255,0.05)"; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = "none"; }}
                   >
-                    {q}
+                    <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" style={{ color: "rgba(255,255,255,0.22)", flexShrink: 0 }}>
+                      <path d="M8 2l1.2 3.6L13 7l-3.8 1.4L8 12l-1.2-3.6L3 7l3.8-1.4z"/>
+                    </svg>
+                    <span style={{ fontSize: 13, color: "rgba(255,255,255,0.65)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>{q}</span>
+                    <svg width="11" height="11" viewBox="0 0 16 16" fill="none" style={{ color: "rgba(255,255,255,0.18)", flexShrink: 0 }}>
+                      <path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
                   </button>
                 ))}
               </div>
             );
           })()}
-          {/* Composer box */}
           <div
             style={{ display: "flex", alignItems: "flex-end", gap: 8, padding: "10px 12px", background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.09)", borderRadius: 18, transition: "border-color 120ms, box-shadow 120ms" }}
             onFocus={e => { e.currentTarget.style.borderColor = "rgba(255,255,255,0.18)"; e.currentTarget.style.boxShadow = "0 0 0 4px rgba(26,115,232,0.22)"; e.currentTarget.style.transition = "all 280ms cubic-bezier(0.25,0.46,0.45,0.94)"; }}
@@ -796,6 +804,7 @@ export function ChatPage({ clone, onBack, hideBack }: { clone: Clone; onBack: ()
                 : <ISend />}
             </button>
           </div>
+          </div>{/* end relative wrapper */}
 
           {/* Meta bar */}
           <div style={{ maxWidth: 920, margin: "8px auto 0", display: "flex", alignItems: "center", gap: 8, fontSize: 11, color: "rgba(255,255,255,0.50)" }}>
