@@ -216,6 +216,14 @@ export function InterviewPanel({
     setListening(false);
   }, []);
 
+  // Fallback opening question per domain
+  const FALLBACK: Record<string, string> = {
+    expertise:  "What do you work on, and what's your main area of expertise?",
+    decisions:  "Walk me through how you make a hard decision.",
+    beliefs:    "What's something you believe that most people in your field disagree with?",
+    network:    "Who do you learn from the most right now, and why?",
+  };
+
   // Fetch next question from AI
   const fetchQuestion = useCallback(async (history: Exchange[]) => {
     setLoading(true);
@@ -225,21 +233,18 @@ export function InterviewPanel({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ clone_name: cloneName, domain, history }),
       });
-      const data = await res.json() as { question: string; done: boolean };
-      setCurrentQuestion(data.question);
+      const data = await res.json() as { question?: string; done?: boolean; error?: string };
+      const question = data.question ?? (domain ? FALLBACK[domain] : "Tell me more about yourself.");
+      setCurrentQuestion(question);
 
-      if (voiceEnabled) {
-        speak(data.question, () => {
-          // Auto-start listening after question is spoken
+      if (voiceEnabled && question) {
+        speak(question, () => {
           startListening((t) => setCurrentAnswer(t));
         });
       }
-
-      if (data.done) {
-        // Will show finish button after setting question
-      }
     } catch {
-      setCurrentQuestion("Tell me more about that.");
+      const fallback = domain ? FALLBACK[domain] : "What do you work on?";
+      setCurrentQuestion(fallback);
     } finally {
       setLoading(false);
     }
