@@ -6,17 +6,6 @@ import { useUser } from "@clerk/nextjs";
 import { ChatInterface } from "@/components/chat/ChatInterface";
 import type { ClonePublicInfo } from "@/lib/types";
 
-const SUGGESTED_DEFAULT: string[] = [
-  "What are you working on right now?",
-  "How do you make decisions under pressure?",
-  "What's your biggest priority this quarter?",
-];
-
-const SUGGESTED_ONBOARDING: string[] = [
-  "What's the most important thing I should know about your domain?",
-  "How do decisions get made on your team?",
-  "What trips up new people most often?",
-];
 
 type KnowledgeArea = { area: string; depth: string; fact_count: number };
 
@@ -79,10 +68,7 @@ export function PublicChatClient({
   const { isSignedIn } = useUser();
   const prefillQ = searchParams.get("q") ?? undefined;
   const [profile, setProfile] = useState<ConsumerProfile | null>(null);
-  const [suggestedQs, setSuggestedQs] = useState<string[] | null>(null);
   const [knowledgeAreas, setKnowledgeAreas] = useState<KnowledgeArea[] | null>(null);
-  const fallbackSuggested = isOnboardingResource ? SUGGESTED_ONBOARDING : SUGGESTED_DEFAULT;
-  const suggested = suggestedQs ?? fallbackSuggested;
 
   // Consent gate — null means we're still loading
   const [consent, setConsent] = useState<ConsentState | "loading">("loading");
@@ -153,11 +139,6 @@ export function PublicChatClient({
   }, [isSignedIn, clone.handle]);
 
   useEffect(() => {
-    fetch(`/api/clones/${clone.handle}/suggested-questions`)
-      .then(r => r.ok ? r.json() : null)
-      .then(d => { if (d?.questions?.length) setSuggestedQs(d.questions); })
-      .catch(() => {});
-
     fetch(`/api/clones/${clone.handle}/knowledge-map`)
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d?.areas?.length) setKnowledgeAreas(d.areas); })
@@ -309,7 +290,6 @@ export function PublicChatClient({
             cloneColor={cloneColor}
             contextType="chat"
             ownerMode={false}
-            suggestedQuestions={suggested}
             knowledgeAreas={knowledgeAreas ?? undefined}
             placeholder={`Ask ${clone.display_name} anything…`}
             initialInput={prefillQ}

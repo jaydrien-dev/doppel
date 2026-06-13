@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { MarkdownRenderer } from "../components/MarkdownRenderer";
 
 declare global {
   interface Window {
@@ -11,8 +12,11 @@ declare global {
       getSettings:         () => Promise<any>;
       saveSettings:        (data: Record<string, any>) => void;
       openExternal:        (url: string) => void;
+      getScreenSourceId:   () => Promise<string | null>;
       onOverlayChanged:    (cb: (val: boolean) => void) => () => void;
       onFullscreenChanged: (cb: (val: boolean) => void) => () => void;
+      getAgentSidecarUrl:  () => Promise<string | null>;
+      onAgentReady:        (cb: (url: string) => void) => () => void;
     };
   }
 }
@@ -29,6 +33,15 @@ interface ChatMessage {
 }
 
 type ResponseMode = "fast" | "pro" | "extended";
+
+type AgentEvent =
+  | { type: "status"; message: string }
+  | { type: "thought"; text: string }
+  | { type: "action"; action: string; detail: string }
+  | { type: "screenshot"; data: string }
+  | { type: "brain"; query: string; result: string }
+  | { type: "done"; result: string }
+  | { type: "error"; message: string };
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -73,6 +86,11 @@ const INewChat = () => (
     <path d="M8 3v10M3 8h10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
   </svg>
 );
+const ITrash = () => (
+  <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
+    <path d="M2 3.5h10M5.5 3.5V2.5h3v1M4 3.5l.7 8h4.6l.7-8M5.5 6v4M8.5 6v4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+  </svg>
+);
 const IShare = () => (
   <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
     <path d="M8 11V2M8 2L5 5M8 2l3 3M3 9v4a1 1 0 001 1h8a1 1 0 001-1V9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
@@ -96,6 +114,20 @@ const IMsg = () => (
 const ISparkle = () => (
   <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor">
     <path d="M8 2l1.2 3.6L13 7l-3.8 1.4L8 12l-1.2-3.6L3 7l3.8-1.4z" opacity="0.85"/>
+  </svg>
+);
+const IAgent = () => (
+  <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+    <rect x="2" y="5" width="12" height="8" rx="2" stroke="currentColor" strokeWidth="1.3" opacity="0.8"/>
+    <path d="M5 5V4a3 3 0 016 0v1" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" opacity="0.6"/>
+    <circle cx="5.5" cy="9" r="1" fill="currentColor" opacity="0.7"/>
+    <circle cx="10.5" cy="9" r="1" fill="currentColor" opacity="0.7"/>
+    <path d="M6.5 11.5h3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" opacity="0.5"/>
+  </svg>
+);
+const IStop = () => (
+  <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor">
+    <rect x="3" y="3" width="10" height="10" rx="2" opacity="0.80"/>
   </svg>
 );
 
@@ -243,7 +275,7 @@ function useDesktopChat({ clone, sessionId, apiUrl, userId, responseMode, memory
     setError(null);
   }
 
-  return { messages, isLoading, isThinking, error, sendMessage, clearMessages, scrollRef };
+  return { messages, setMessages, isLoading, isThinking, error, sendMessage, clearMessages, scrollRef };
 }
 
 // ─── MessageBubble ────────────────────────────────────────────────────────────
@@ -259,7 +291,7 @@ function MessageBubble({ msg, cloneColor, cloneInitial, cloneAvatarUrl }: {
   if (isUser) {
     return (
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 12, maxWidth: "100%", animation: "msg-in 380ms cubic-bezier(0.34,1.56,0.64,1) both" }}>
-        <div style={{ padding: "12px 15px", borderRadius: "14px 14px 4px 14px", background: DOPPEL_BLUE, color: "#fff", fontSize: 14, lineHeight: 1.55, maxWidth: "78%", wordBreak: "break-word" }}>
+        <div style={{ padding: "12px 15px", borderRadius: "14px 14px 4px 14px", background: DOPPEL_BLUE, color: "#fff", fontSize: 14, lineHeight: 1.55, maxWidth: "78%", wordBreak: "break-word", userSelect: "text", WebkitUserSelect: "text", cursor: "text" }}>
           {msg.content}
         </div>
       </div>
@@ -267,7 +299,6 @@ function MessageBubble({ msg, cloneColor, cloneInitial, cloneAvatarUrl }: {
   }
 
   // Clone message
-  const lines = msg.content ? msg.content.split("\n") : [];
   return (
     <div style={{ display: "flex", gap: 12, maxWidth: "100%", animation: "msg-in 420ms cubic-bezier(0.34,1.56,0.64,1) both" }}>
       <div style={{ width: 32, height: 32, borderRadius: 8, background: cloneColor, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 500, color: "#fff", flexShrink: 0, marginTop: 2, overflow: "hidden" }}>
@@ -276,7 +307,7 @@ function MessageBubble({ msg, cloneColor, cloneInitial, cloneAvatarUrl }: {
           : cloneInitial}
       </div>
       <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 8 }}>
-        <div style={{ padding: "12px 15px", borderRadius: "14px 14px 14px 4px", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.09)", fontSize: 14, lineHeight: 1.55, color: "rgba(255,255,255,0.93)", maxWidth: "82%", wordBreak: "break-word" }}>
+        <div style={{ padding: "12px 15px", borderRadius: "14px 14px 14px 4px", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.09)", maxWidth: "82%", wordBreak: "break-word", userSelect: "text", WebkitUserSelect: "text", cursor: "text" }}>
           {msg.isStreaming && !msg.content ? (
             <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
               {[0, 1, 2].map(i => (
@@ -284,12 +315,7 @@ function MessageBubble({ msg, cloneColor, cloneInitial, cloneAvatarUrl }: {
               ))}
             </div>
           ) : (
-            lines.map((line, i) => (
-              <React.Fragment key={i}>
-                {line}
-                {i < lines.length - 1 && <br />}
-              </React.Fragment>
-            ))
+            <MarkdownRenderer content={msg.content} />
           )}
         </div>
       </div>
@@ -304,7 +330,7 @@ export function ChatPage({ clone, onBack, hideBack }: { clone: Clone; onBack: ()
   const [responseMode, setResponseMode] = useState<ResponseMode>("fast");
   const [input, setInput] = useState("");
   const [profile, setProfile] = useState<{ exists: boolean; total_sessions?: number; summary?: string } | null>(null);
-  const [apiUrl, setApiUrl] = useState("https://doppel.up.railway.app");
+  const [apiUrl, setApiUrl] = useState("http://localhost:8000");
   const [userId, setUserId] = useState("");
   const [shareCopied, setShareCopied] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
@@ -312,20 +338,78 @@ export function ChatPage({ clone, onBack, hideBack }: { clone: Clone; onBack: ()
   const [cloneInfo, setCloneInfo] = useState<{ credit_cost?: number; is_paid?: boolean } | null>(null);
   // Consent: "loading" | null (not asked) | true | false
   const [consent, setConsent] = useState<"loading" | null | boolean>("loading");
-  const [suggestedQs, setSuggestedQs] = useState<string[]>(SUGGESTED_DEFAULT);
+  const [autoSuggestions, setAutoSuggestions] = useState<string[]>([]);
+  const [autoLoading, setAutoLoading] = useState(false);
+  const autoDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [knowledgeAreas, setKnowledgeAreas] = useState<{ area: string; depth: string }[]>([]);
-  const [showPrivacy, setShowPrivacy] = useState(false);
-  const [deletingProfile, setDeletingProfile] = useState(false);
-  const [profileDeleted, setProfileDeleted] = useState(false);
+  const [agentSidecarUrl, setAgentSidecarUrl] = useState<string | null>(null);
+  const [anthropicApiKey, setAnthropicApiKey] = useState<string>("");
+  // Agent mode
+  const [agentMode, setAgentMode] = useState(false);
+  const [agentEvents, setAgentEvents] = useState<AgentEvent[]>([]);
+  const [agentRunning, setAgentRunning] = useState(false);
+  const [agentTaskInstruction, setAgentTaskInstruction] = useState("");
+  const [agentPanelOpen, setAgentPanelOpen] = useState(false);
+  const wsRef = useRef<WebSocket | null>(null);
+  const agentPanelScrollRef = useRef<HTMLDivElement>(null);
+
+  // Capture screenshot via Electron's desktopCapturer (same as Pill)
+  async function captureScreen(): Promise<string | null> {
+    try {
+      const sourceId = await window.electronAPI?.getScreenSourceId?.();
+      if (!sourceId) return null;
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: { mandatory: { chromeMediaSource: "desktop", chromeMediaSourceId: sourceId } } as any,
+      });
+      const video = document.createElement("video");
+      video.srcObject = stream;
+      await new Promise<void>(res => { video.onloadedmetadata = () => res(); });
+      video.play();
+      await new Promise<void>(res => requestAnimationFrame(() => res()));
+      const MAX_W = 1280;
+      const scale = Math.min(1, MAX_W / (video.videoWidth || 1920));
+      const w = Math.round((video.videoWidth  || 1920) * scale);
+      const h = Math.round((video.videoHeight || 1080) * scale);
+      const canvas = document.createElement("canvas");
+      canvas.width = w; canvas.height = h;
+      canvas.getContext("2d")!.drawImage(video, 0, 0, w, h);
+      stream.getTracks().forEach(t => t.stop());
+      const dataUrl = canvas.toDataURL("image/jpeg", 0.75);
+      return dataUrl;
+    } catch {
+      return null;
+    }
+  }
   const moreRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Load settings
+  const { messages, setMessages, isLoading, isThinking, error, sendMessage, clearMessages, scrollRef } = useDesktopChat({
+    clone,
+    sessionId,
+    apiUrl,
+    userId,
+    responseMode,
+    memoryEnabled: consent === true,
+  });
+
+  // Auto-scroll agent panel as events arrive
+  useEffect(() => {
+    const el = agentPanelScrollRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+  }, [agentEvents]);
+
+  // Load settings + sidecar URL
   useEffect(() => {
     window.electronAPI?.getSettings().then((s: any) => {
-      if (s?.fastapiUrl) setApiUrl(s.fastapiUrl); else setApiUrl("https://doppel.up.railway.app");
+      if (s?.fastapiUrl) setApiUrl(s.fastapiUrl); else setApiUrl("http://localhost:8000");
       if (s?.userId) setUserId(s.userId);
+      if (s?.anthropicApiKey) setAnthropicApiKey(s.anthropicApiKey);
     });
+    window.electronAPI?.getAgentSidecarUrl?.().then(url => { if (url) setAgentSidecarUrl(url); });
+    const unsub = window.electronAPI?.onAgentReady?.((url) => setAgentSidecarUrl(url));
+    return () => unsub?.();
   }, []);
 
   // Resolve session
@@ -334,7 +418,7 @@ export function ChatPage({ clone, onBack, hideBack }: { clone: Clone; onBack: ()
     async function resolveSession() {
       const s = await window.electronAPI?.getSettings().catch(() => null);
       const uid = s?.userId;
-      const url = s?.fastapiUrl ?? "https://doppel.up.railway.app";
+      const url = s?.fastapiUrl ?? "http://localhost:8000";
       if (uid?.trim()) {
         try {
           const res = await fetch(`${url}/consumer/session?clone_handle=${encodeURIComponent(clone.handle)}`, {
@@ -390,18 +474,38 @@ export function ChatPage({ clone, onBack, hideBack }: { clone: Clone; onBack: ()
       .catch(() => {});
   }, [apiUrl, clone.handle]);
 
-  // Suggested questions + knowledge map (public, no auth needed)
+  // Knowledge map (public, no auth needed)
   useEffect(() => {
     if (!apiUrl) return;
-    fetch(`${apiUrl}/clones/${clone.handle}/suggested-questions`)
-      .then(r => r.ok ? r.json() : null)
-      .then(d => { if (d?.questions?.length) setSuggestedQs(d.questions); })
-      .catch(() => {});
     fetch(`${apiUrl}/clones/${clone.handle}/knowledge-map`)
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d?.areas?.length) setKnowledgeAreas(d.areas); })
       .catch(() => {});
   }, [apiUrl, clone.handle]);
+
+  // Live autocomplete — debounced 300ms, calls backend on every input change
+  useEffect(() => {
+    if (!apiUrl) return;
+    // Show opener suggestions on empty state; mid-conversation only when typing
+    if (messages.length > 0 && input.trim().length === 0) {
+      setAutoSuggestions([]);
+      return;
+    }
+    if (autoDebounceRef.current) clearTimeout(autoDebounceRef.current);
+    autoDebounceRef.current = setTimeout(async () => {
+      setAutoLoading(true);
+      try {
+        const res = await fetch(`${apiUrl}/clones/${clone.handle}/autocomplete?q=${encodeURIComponent(input.trim())}`);
+        const data = res.ok ? await res.json() : null;
+        setAutoSuggestions(data?.suggestions ?? []);
+      } catch {
+        setAutoSuggestions([]);
+      } finally {
+        setAutoLoading(false);
+      }
+    }, 300);
+    return () => { if (autoDebounceRef.current) clearTimeout(autoDebounceRef.current); };
+  }, [input, apiUrl, clone.handle, messages.length]);
 
   // Close more dropdown on outside click
   useEffect(() => {
@@ -423,29 +527,6 @@ export function ChatPage({ clone, onBack, hideBack }: { clone: Clone; onBack: ()
     }).catch(() => {});
   }
 
-  async function handleDeleteProfile() {
-    if (deletingProfile || !userId?.trim() || !apiUrl) return;
-    setDeletingProfile(true);
-    try {
-      await fetch(`${apiUrl}/clones/${clone.handle}/my-profile`, { method: "DELETE", headers: { "X-User-Id": userId } });
-      await fetch(`${apiUrl}/clones/${clone.handle}/consent`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-User-Id": userId },
-        body: JSON.stringify({ consent: false }),
-      });
-      setProfile(null); setProfileDeleted(true); setShowPrivacy(false); setConsent(false);
-    } catch { /* non-fatal */ } finally { setDeletingProfile(false); }
-  }
-
-  const { messages, isLoading, isThinking, error, sendMessage, clearMessages, scrollRef } = useDesktopChat({
-    clone,
-    sessionId,
-    apiUrl,
-    userId,
-    responseMode,
-    memoryEnabled: consent === true,
-  });
-
   // Auto-resize textarea
   useEffect(() => {
     const ta = textareaRef.current;
@@ -464,9 +545,110 @@ export function ChatPage({ clone, onBack, hideBack }: { clone: Clone; onBack: ()
 
   function handleSend() {
     if (!input.trim() || isLoading) return;
+    if (agentMode) {
+      void handleAgentSend();
+      return;
+    }
     sendMessage(input.trim());
     setInput("");
     if (textareaRef.current) textareaRef.current.style.height = "auto";
+  }
+
+  async function handleAgentSend() {
+    const instruction = input.trim();
+    if (!instruction || agentRunning) return;
+
+    // Close any existing WS
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+
+    setInput("");
+    if (textareaRef.current) textareaRef.current.style.height = "auto";
+    // Add user instruction to normal chat history so it's part of the record
+    const userTaskMsg: ChatMessage = { id: uuid(), role: "user", content: instruction };
+    setMessages(prev => [...prev, userTaskMsg]);
+    setAgentTaskInstruction(instruction);
+    setAgentEvents([{ type: "status", message: "Starting…" }]);
+    setAgentPanelOpen(true);
+    setAgentRunning(true);
+
+    // Capture screen in parallel (for initial context)
+    const screenshotDataUrl = await captureScreen();
+    const screenshotB64 = screenshotDataUrl ? screenshotDataUrl.split(",")[1] : null;
+
+    // Use local sidecar if ready; fall back to cloud WS (requires self-hosted backend)
+    const wsUrl = agentSidecarUrl
+      ? `${agentSidecarUrl}/task/stream?clone_name=${encodeURIComponent(clone.name)}&monitor_index=1`
+      : `${apiUrl.replace(/^http/, "ws")}/brain/task/stream?clone_id=${encodeURIComponent(clone.id)}&monitor_index=1`;
+
+    try {
+      const ws = new WebSocket(wsUrl);
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        const history = messages
+          .filter(m => !m.isStreaming && m.content)
+          .map(m => ({ role: m.role === "user" ? "user" : "assistant", content: m.content }));
+        const payload: Record<string, unknown> = { instruction, conversation_history: history };
+        if (agentSidecarUrl) {
+          if (!anthropicApiKey) {
+            ws.close();
+            setAgentEvents(prev => [...prev, {
+              type: "error" as const,
+              message: "Anthropic API key not set. Open Settings → API Keys → Anthropic API Key.",
+            }]);
+            setAgentRunning(false);
+            return;
+          }
+          payload.api_key = anthropicApiKey;
+        }
+        if (screenshotB64) payload.screenshot_base64 = screenshotB64 as string;
+        ws.send(JSON.stringify(payload));
+      };
+
+      ws.onmessage = (evt) => {
+        try {
+          const data = JSON.parse(evt.data) as AgentEvent;
+          setAgentEvents(prev => [...prev, data]);
+          if (data.type === "done") {
+            setAgentRunning(false);
+            wsRef.current = null;
+            // Inject the result into normal chat so the conversation continues naturally
+            const summary = (data.result || "Task complete.").trim();
+            const resultMsg: ChatMessage = { id: uuid(), role: "clone", content: summary };
+            setMessages(prev => [...prev, resultMsg]);
+          } else if (data.type === "error") {
+            setAgentRunning(false);
+            wsRef.current = null;
+          }
+        } catch { /* non-fatal */ }
+      };
+
+      ws.onerror = () => {
+        setAgentEvents(prev => [...prev, { type: "error", message: "Connection failed. Make sure the backend is running." }]);
+        setAgentRunning(false);
+        wsRef.current = null;
+      };
+
+      ws.onclose = () => {
+        if (agentRunning) setAgentRunning(false);
+        wsRef.current = null;
+      };
+    } catch (err) {
+      setAgentEvents(prev => [...prev, { type: "error", message: String(err) }]);
+      setAgentRunning(false);
+    }
+  }
+
+  function stopAgent() {
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+    setAgentRunning(false);
+    setAgentEvents(prev => [...prev, { type: "status", message: "Task stopped." }]);
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -515,6 +697,13 @@ export function ChatPage({ clone, onBack, hideBack }: { clone: Clone; onBack: ()
           to   { opacity: 1; transform: translateY(0)    scale(1);    }
         }
         @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes panel-in {
+          from { opacity: 0; transform: translateX(18px) scale(0.97); }
+          to   { opacity: 1; transform: translateX(0)    scale(1);    }
+        }
+        .agent-panel-scroll::-webkit-scrollbar { width: 3px; }
+        .agent-panel-scroll::-webkit-scrollbar-track { background: transparent; }
+        .agent-panel-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.10); border-radius: 3px; }
 
         /* iOS spring easing */
         :root { --spring: cubic-bezier(0.34, 1.56, 0.64, 1); --ease-out: cubic-bezier(0.25, 0.46, 0.45, 0.94); }
@@ -570,6 +759,20 @@ export function ChatPage({ clone, onBack, hideBack }: { clone: Clone; onBack: ()
             <button className="hdr-act" onClick={startNewConversation} aria-label="New conversation" title="New conversation" style={{ width: 32, height: 32, borderRadius: 8, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.09)", color: "rgba(255,255,255,0.50)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", transition: "all 240ms cubic-bezier(0.25,0.46,0.45,0.94)" }}>
               <INewChat />
             </button>
+            {/* Clear history — only visible when there are messages */}
+            {messages.length > 0 && (
+              <button
+                className="hdr-act"
+                onClick={startNewConversation}
+                aria-label="Clear chat history"
+                title="Clear chat history"
+                style={{ width: 32, height: 32, borderRadius: 8, background: "rgba(248,113,113,0.05)", border: "1px solid rgba(248,113,113,0.15)", color: "rgba(248,113,113,0.50)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", transition: "all 240ms cubic-bezier(0.25,0.46,0.45,0.94)" }}
+                onMouseEnter={e => { e.currentTarget.style.background = "rgba(248,113,113,0.10)"; e.currentTarget.style.borderColor = "rgba(248,113,113,0.28)"; e.currentTarget.style.color = "rgba(248,113,113,0.80)"; }}
+                onMouseLeave={e => { e.currentTarget.style.background = "rgba(248,113,113,0.05)"; e.currentTarget.style.borderColor = "rgba(248,113,113,0.15)"; e.currentTarget.style.color = "rgba(248,113,113,0.50)"; }}
+              >
+                <ITrash />
+              </button>
+            )}
             <button
               className="hdr-act"
               onClick={handleShare}
@@ -746,38 +949,32 @@ export function ChatPage({ clone, onBack, hideBack }: { clone: Clone; onBack: ()
         <div style={{ maxWidth: 920, margin: "0 auto" }}>
           {/* Composer box — relative container so popup anchors to it */}
           <div style={{ position: "relative" }}>
-          {/* Suggested questions popup */}
-          {(() => {
-            const trimmed = input.trim().toLowerCase();
-            const visible = trimmed.length < 2
-              ? suggestedQs
-              : suggestedQs.filter(q => {
-                  const words = trimmed.split(/\s+/).filter((w: string) => w.length > 2);
-                  return words.some((w: string) => q.toLowerCase().includes(w));
-                });
-            if (!visible.length) return null;
-            return (
-              <div style={{ position: "absolute", bottom: "calc(100% + 6px)", left: 0, right: 0, background: "rgba(14,14,14,0.97)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)", border: "1px solid rgba(255,255,255,0.09)", borderRadius: 14, overflow: "hidden", zIndex: 20, boxShadow: "0 -8px 32px rgba(0,0,0,0.50)" }}>
-                {visible.slice(0, 5).map((q, i) => (
-                  <button
-                    key={i}
-                    onClick={() => handleSuggest(q)}
-                    style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "10px 14px", background: "none", border: "none", borderBottom: i < visible.slice(0, 5).length - 1 ? "1px solid rgba(255,255,255,0.05)" : "none", cursor: "pointer", fontFamily: "inherit", textAlign: "left" as const, transition: "background 100ms" }}
-                    onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,255,255,0.05)"; }}
-                    onMouseLeave={e => { e.currentTarget.style.background = "none"; }}
-                  >
-                    <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" style={{ color: "rgba(255,255,255,0.22)", flexShrink: 0 }}>
-                      <path d="M8 2l1.2 3.6L13 7l-3.8 1.4L8 12l-1.2-3.6L3 7l3.8-1.4z"/>
-                    </svg>
-                    <span style={{ fontSize: 13, color: "rgba(255,255,255,0.65)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>{q}</span>
-                    <svg width="11" height="11" viewBox="0 0 16 16" fill="none" style={{ color: "rgba(255,255,255,0.18)", flexShrink: 0 }}>
-                      <path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                    </svg>
-                  </button>
-                ))}
-              </div>
-            );
-          })()}
+          {/* Live autocomplete popup */}
+          {(autoLoading || autoSuggestions.length > 0) && (
+            <div style={{ position: "absolute", bottom: "calc(100% + 6px)", left: 0, right: 0, background: "rgba(14,14,14,0.97)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)", border: "1px solid rgba(255,255,255,0.09)", borderRadius: 14, overflow: "hidden", zIndex: 20, boxShadow: "0 -8px 32px rgba(0,0,0,0.50)" }}>
+              {autoLoading && autoSuggestions.length === 0 ? (
+                <div style={{ padding: "12px 14px", display: "flex", alignItems: "center", gap: 5 }}>
+                  {[0,1,2].map(i => <div key={i} style={{ width: 5, height: 5, borderRadius: "50%", background: "rgba(255,255,255,0.25)", animation: `typing-dot 1.2s ease-in-out ${i*0.2}s infinite` }} />)}
+                </div>
+              ) : autoSuggestions.map((q, i) => (
+                <button
+                  key={i}
+                  onClick={() => handleSuggest(q)}
+                  style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "10px 14px", background: "none", border: "none", borderBottom: i < autoSuggestions.length - 1 ? "1px solid rgba(255,255,255,0.05)" : "none", cursor: "pointer", fontFamily: "inherit", textAlign: "left" as const, transition: "background 100ms" }}
+                  onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,255,255,0.05)"; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = "none"; }}
+                >
+                  <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" style={{ color: "rgba(255,255,255,0.22)", flexShrink: 0 }}>
+                    <path d="M8 2l1.2 3.6L13 7l-3.8 1.4L8 12l-1.2-3.6L3 7l3.8-1.4z"/>
+                  </svg>
+                  <span style={{ fontSize: 13, color: "rgba(255,255,255,0.65)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>{q}</span>
+                  <svg width="11" height="11" viewBox="0 0 16 16" fill="none" style={{ color: "rgba(255,255,255,0.18)", flexShrink: 0 }}>
+                    <path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                </button>
+              ))}
+            </div>
+          )}
           <div
             style={{ display: "flex", alignItems: "flex-end", gap: 8, padding: "10px 12px", background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.09)", borderRadius: 18, transition: "border-color 120ms, box-shadow 120ms" }}
             onFocus={e => { e.currentTarget.style.borderColor = "rgba(255,255,255,0.18)"; e.currentTarget.style.boxShadow = "0 0 0 4px rgba(26,115,232,0.22)"; e.currentTarget.style.transition = "all 280ms cubic-bezier(0.25,0.46,0.45,0.94)"; }}
@@ -789,37 +986,76 @@ export function ChatPage({ clone, onBack, hideBack }: { clone: Clone; onBack: ()
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={`Ask ${clone.name} anything…`}
+              placeholder={agentMode ? "Give me a task…" : `Ask ${clone.name} anything…`}
               rows={1}
               style={{ flex: 1, border: "none", outline: "none", resize: "none" as const, background: "transparent", color: "rgba(255,255,255,0.93)", fontSize: 14, lineHeight: 1.5, fontFamily: "inherit", minHeight: 22, maxHeight: 180, overflowY: "auto" }}
             />
-            <button
-              className="composer-send"
-              onClick={handleSend}
-              disabled={!input.trim() || isLoading}
-              style={{ width: 36, height: 36, borderRadius: 12, background: (!input.trim() || isLoading) ? "rgba(255,255,255,0.07)" : DOPPEL_BLUE, color: (!input.trim() || isLoading) ? "rgba(255,255,255,0.30)" : "#fff", border: "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: (!input.trim() || isLoading) ? "not-allowed" : "pointer", flexShrink: 0, transition: "opacity 120ms, transform 120ms" }}
-            >
-              {isLoading
-                ? <div style={{ width: 14, height: 14, borderRadius: "50%", border: "2px solid rgba(255,255,255,0.30)", borderTopColor: "rgba(255,255,255,0.80)", animation: "spin 0.8s linear infinite" }} />
-                : <ISend />}
-            </button>
+            {agentRunning ? (
+              <button
+                onClick={stopAgent}
+                title="Stop agent"
+                style={{ width: 36, height: 36, borderRadius: 12, background: "rgba(248,113,113,0.12)", border: "1px solid rgba(248,113,113,0.20)", color: "rgba(248,113,113,0.75)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0, transition: "background 120ms" }}
+                onMouseEnter={e => { e.currentTarget.style.background = "rgba(248,113,113,0.20)"; }}
+                onMouseLeave={e => { e.currentTarget.style.background = "rgba(248,113,113,0.12)"; }}
+              >
+                <IStop />
+              </button>
+            ) : (
+              <button
+                className="composer-send"
+                onClick={handleSend}
+                disabled={!input.trim() || isLoading}
+                style={{ width: 36, height: 36, borderRadius: 12, background: (!input.trim() || isLoading) ? "rgba(255,255,255,0.07)" : agentMode ? "rgba(52,211,153,0.18)" : DOPPEL_BLUE, color: (!input.trim() || isLoading) ? "rgba(255,255,255,0.30)" : "#fff", border: "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: (!input.trim() || isLoading) ? "not-allowed" : "pointer", flexShrink: 0, transition: "opacity 120ms, transform 120ms" }}
+              >
+                {isLoading
+                  ? <div style={{ width: 14, height: 14, borderRadius: "50%", border: "2px solid rgba(255,255,255,0.30)", borderTopColor: "rgba(255,255,255,0.80)", animation: "spin 0.8s linear infinite" }} />
+                  : <ISend />}
+              </button>
+            )}
           </div>
           </div>{/* end relative wrapper */}
 
           {/* Meta bar */}
           <div style={{ maxWidth: 920, margin: "8px auto 0", display: "flex", alignItems: "center", gap: 8, fontSize: 11, color: "rgba(255,255,255,0.50)" }}>
-            {/* Response mode selector */}
-            <div style={{ display: "flex", alignItems: "center", gap: 1, background: "rgba(255,255,255,0.04)", borderRadius: 8, padding: 2, border: "1px solid rgba(255,255,255,0.06)" }}>
-              {MODES.map(m => {
-                const active = responseMode === m.value;
-                return (
-                  <button key={m.value} onClick={() => setResponseMode(m.value)} title={m.hint}
-                    style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "3px 8px", borderRadius: 6, border: "none", fontSize: 11, fontWeight: 500, cursor: "pointer", fontFamily: "inherit", background: active ? "rgba(255,255,255,0.09)" : "transparent", color: active ? "rgba(255,255,255,0.75)" : "rgba(255,255,255,0.28)", transition: "all 240ms cubic-bezier(0.25,0.46,0.45,0.94)", whiteSpace: "nowrap" as const }}>
-                    {m.label}
-                  </button>
-                );
-              })}
-            </div>
+            {/* Response mode selector — hidden in agent mode */}
+            {!agentMode && (
+              <div style={{ display: "flex", alignItems: "center", gap: 1, background: "rgba(255,255,255,0.04)", borderRadius: 8, padding: 2, border: "1px solid rgba(255,255,255,0.06)" }}>
+                {MODES.map(m => {
+                  const active = responseMode === m.value;
+                  return (
+                    <button key={m.value} onClick={() => setResponseMode(m.value)} title={m.hint}
+                      style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "3px 8px", borderRadius: 6, border: "none", fontSize: 11, fontWeight: 500, cursor: "pointer", fontFamily: "inherit", background: active ? "rgba(255,255,255,0.09)" : "transparent", color: active ? "rgba(255,255,255,0.75)" : "rgba(255,255,255,0.28)", transition: "all 240ms cubic-bezier(0.25,0.46,0.45,0.94)", whiteSpace: "nowrap" as const }}>
+                      {m.label}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Agent mode toggle */}
+            {agentMode && (
+              <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 6, background: "rgba(255,255,255,0.03)", border: `1px solid ${agentSidecarUrl ? "rgba(52,211,153,0.15)" : "rgba(255,255,255,0.06)"}`, color: agentSidecarUrl ? "rgba(52,211,153,0.60)" : "rgba(255,255,255,0.25)" }}>
+                {agentSidecarUrl ? "Agent ready" : "Agent not running"}
+              </span>
+            )}
+            <button
+              onClick={() => { setAgentMode(v => !v); setAgentEvents([]); setAgentPanelOpen(false); }}
+              title="Agent mode — requires local backend running on this machine"
+              style={{
+                display: "inline-flex", alignItems: "center", gap: 5,
+                padding: "3px 10px", borderRadius: 8,
+                border: `1px solid ${agentMode ? "rgba(52,211,153,0.30)" : "rgba(255,255,255,0.07)"}`,
+                background: agentMode ? "rgba(52,211,153,0.10)" : "transparent",
+                color: agentMode ? "rgba(52,211,153,0.80)" : "rgba(255,255,255,0.28)",
+                fontSize: 11, fontWeight: 500, cursor: "pointer", fontFamily: "inherit",
+                transition: "all 220ms cubic-bezier(0.25,0.46,0.45,0.94)",
+              }}
+              onMouseEnter={e => { if (!agentMode) { e.currentTarget.style.background = "rgba(255,255,255,0.04)"; e.currentTarget.style.color = "rgba(255,255,255,0.55)"; e.currentTarget.style.borderColor = "rgba(255,255,255,0.12)"; }}}
+              onMouseLeave={e => { if (!agentMode) { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "rgba(255,255,255,0.28)"; e.currentTarget.style.borderColor = "rgba(255,255,255,0.07)"; }}}
+            >
+              <IAgent />
+              Agent
+            </button>
 
             {/* Credit info */}
             <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 5 }}>
@@ -847,55 +1083,112 @@ export function ChatPage({ clone, onBack, hideBack }: { clone: Clone; onBack: ()
         </div>
       </div>
 
-      {/* Privacy footer — "What does X know about me?" */}
-      {isSignedIn && (
-        <div style={{ borderTop: "1px solid rgba(255,255,255,0.05)", padding: "8px 16px", flexShrink: 0 }}>
-          {!showPrivacy ? (
-            <button
-              onClick={() => setShowPrivacy(true)}
-              style={{ fontSize: 11, color: "rgba(255,255,255,0.22)", background: "none", border: "none", cursor: "pointer", padding: 0, display: "flex", alignItems: "center", gap: 5, fontFamily: "inherit" }}
-              onMouseEnter={e => { e.currentTarget.style.color = "rgba(255,255,255,0.45)"; }}
-              onMouseLeave={e => { e.currentTarget.style.color = "rgba(255,255,255,0.22)"; }}
-            >
-              <svg width="10" height="10" viewBox="0 0 12 12" fill="none">
-                <path d="M6 1L2 3v3.5c0 2.3 1.7 4.4 4 5 2.3-.6 4-2.7 4-5V3L6 1z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/>
-              </svg>
-              What does {clone.name} know about me?
-            </button>
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <p style={{ fontSize: 11, fontWeight: 500, color: "rgba(255,255,255,0.45)", margin: 0 }}>What this clone knows about you</p>
-                <button onClick={() => setShowPrivacy(false)} style={{ fontSize: 14, color: "rgba(255,255,255,0.22)", background: "none", border: "none", cursor: "pointer", padding: 0, lineHeight: 1 }}>×</button>
-              </div>
-              {profileDeleted ? (
-                <p style={{ fontSize: 11, color: "rgba(52,211,153,0.65)", margin: 0 }}>All memory deleted. The clone no longer recognises you.</p>
-              ) : profile?.exists ? (
-                <>
-                  <p style={{ fontSize: 11, color: "rgba(255,255,255,0.38)", lineHeight: 1.55, margin: 0 }}>
-                    {profile.summary
-                      ? profile.summary
-                      : `${clone.name} has spoken with you ${profile.total_sessions ?? 1} time${(profile.total_sessions ?? 1) !== 1 ? "s" : ""}. No detailed notes yet.`}
-                  </p>
-                  <button
-                    onClick={handleDeleteProfile}
-                    disabled={deletingProfile}
-                    style={{ alignSelf: "flex-start", fontSize: 10, color: "rgba(248,113,113,0.55)", background: "none", border: "1px solid rgba(248,113,113,0.18)", borderRadius: 6, padding: "3px 9px", cursor: "pointer", fontFamily: "inherit" }}
-                    onMouseEnter={e => { e.currentTarget.style.color = "rgba(248,113,113,0.80)"; e.currentTarget.style.borderColor = "rgba(248,113,113,0.35)"; }}
-                    onMouseLeave={e => { e.currentTarget.style.color = "rgba(248,113,113,0.55)"; e.currentTarget.style.borderColor = "rgba(248,113,113,0.18)"; }}
-                  >
-                    {deletingProfile ? "Deleting…" : "Delete all memory"}
-                  </button>
-                </>
-              ) : (
-                <p style={{ fontSize: 11, color: "rgba(255,255,255,0.30)", margin: 0, lineHeight: 1.55 }}>
-                  {clone.name} doesn&apos;t have notes about you yet. This builds up over a few conversations. Your chats are never shared with other users.
-                </p>
-              )}
+      {/* Agent thinking panel — floats top-right */}
+      {agentPanelOpen && agentEvents.length > 0 && (
+        <div style={{
+          position: "absolute", top: 56, right: 12, width: 296,
+          background: "rgba(10,10,10,0.96)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)",
+          border: "1px solid rgba(255,255,255,0.09)", borderRadius: 14,
+          boxShadow: "0 8px 40px rgba(0,0,0,0.60)",
+          display: "flex", flexDirection: "column",
+          maxHeight: 460, zIndex: 40,
+          animation: "panel-in 0.22s cubic-bezier(0.25, 0.46, 0.45, 0.94) both",
+        }}>
+          {/* Panel header */}
+          <div style={{ display: "flex", alignItems: "center", gap: 7, padding: "10px 12px 9px", borderBottom: "1px solid rgba(255,255,255,0.07)", flexShrink: 0 }}>
+            <IAgent />
+            <span style={{ fontSize: 11, fontWeight: 500, color: "rgba(255,255,255,0.50)", flex: 1, letterSpacing: "0.06em" }}>Agent</span>
+            {agentRunning ? (
+              <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10, color: "rgba(52,211,153,0.70)" }}>
+                <span style={{ width: 5, height: 5, borderRadius: "50%", background: "rgba(52,211,153,0.70)", display: "inline-block", animation: "typing-dot 1.2s ease-in-out infinite" }} />
+                Running
+              </span>
+            ) : agentEvents.some(e => e.type === "done") ? (
+              <span style={{ fontSize: 10, color: "rgba(52,211,153,0.60)" }}>Done</span>
+            ) : agentEvents.some(e => e.type === "error") ? (
+              <span style={{ fontSize: 10, color: "rgba(248,113,113,0.60)" }}>Error</span>
+            ) : null}
+            {!agentRunning && (
+              <button
+                onClick={() => setAgentPanelOpen(false)}
+                style={{ background: "none", border: "none", cursor: "pointer", color: "rgba(255,255,255,0.28)", fontSize: 15, padding: "0 2px", lineHeight: 1, fontFamily: "inherit", marginLeft: 4 }}
+                onMouseEnter={e => { e.currentTarget.style.color = "rgba(255,255,255,0.60)"; }}
+                onMouseLeave={e => { e.currentTarget.style.color = "rgba(255,255,255,0.28)"; }}
+                title="Dismiss"
+              >×</button>
+            )}
+          </div>
+
+          {/* Task bubble */}
+          <div style={{ padding: "10px 12px 0", flexShrink: 0 }}>
+            <div style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.09)", borderRadius: 10, padding: "8px 11px" }}>
+              <p style={{ fontSize: 12, color: "rgba(255,255,255,0.75)", margin: 0, lineHeight: 1.5, wordBreak: "break-word" as const }}>{agentTaskInstruction}</p>
             </div>
-          )}
+          </div>
+
+          {/* Events feed */}
+          <div
+            className="agent-panel-scroll"
+            ref={agentPanelScrollRef}
+            style={{ flex: 1, overflowY: "auto", padding: "10px 12px 12px", display: "flex", flexDirection: "column", gap: 6 }}
+          >
+            {agentEvents.map((evt, i) => {
+              if (evt.type === "status") return (
+                <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 7 }}>
+                  <span style={{ width: 4, height: 4, borderRadius: "50%", background: "rgba(255,255,255,0.22)", flexShrink: 0, marginTop: 5 }} />
+                  <span style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", lineHeight: 1.55 }}>{evt.message}</span>
+                </div>
+              );
+              if (evt.type === "thought") return (
+                <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 7, padding: "7px 10px", borderRadius: 9, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}>
+                  <svg width="11" height="11" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0, marginTop: 2, color: "rgba(255,255,255,0.38)" }}>
+                    <circle cx="8" cy="8" r="3" fill="currentColor" opacity="0.7"/>
+                    <circle cx="3" cy="4.5" r="1.5" fill="currentColor" opacity="0.35"/>
+                    <circle cx="13" cy="4.5" r="1.5" fill="currentColor" opacity="0.35"/>
+                  </svg>
+                  <span style={{ fontSize: 12, color: "rgba(255,255,255,0.68)", lineHeight: 1.55 }}>{evt.text}</span>
+                </div>
+              );
+              if (evt.type === "action") return (
+                <div key={i} style={{ padding: "7px 10px", borderRadius: 9, background: "rgba(52,211,153,0.04)", border: "1px solid rgba(52,211,153,0.10)" }}>
+                  <span style={{ fontSize: 10, fontWeight: 500, color: "rgba(52,211,153,0.70)", display: "block", marginBottom: 2, textTransform: "uppercase" as const, letterSpacing: "0.08em" }}>{evt.action}</span>
+                  <span style={{ fontSize: 11, color: "rgba(255,255,255,0.48)", fontFamily: "monospace, monospace", wordBreak: "break-all" as const }}>{evt.detail}</span>
+                </div>
+              );
+              if (evt.type === "brain") return (
+                <div key={i} style={{ padding: "7px 10px", borderRadius: 9, background: "rgba(255,255,255,0.025)", border: "1px solid rgba(255,255,255,0.06)" }}>
+                  <span style={{ fontSize: 10, color: "rgba(255,255,255,0.35)", display: "block", marginBottom: 2 }}>↳ {evt.query}</span>
+                  <span style={{ fontSize: 11, color: "rgba(255,255,255,0.60)", lineHeight: 1.5 }}>{evt.result.length > 120 ? evt.result.slice(0, 120) + "…" : evt.result}</span>
+                </div>
+              );
+              if (evt.type === "screenshot") return (
+                <div key={i} style={{ borderRadius: 8, overflow: "hidden", border: "1px solid rgba(255,255,255,0.07)" }}>
+                  <img src={`data:image/png;base64,${evt.data}`} alt="Screenshot" style={{ width: "100%", display: "block" }} />
+                </div>
+              );
+              if (evt.type === "done") return (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 11px", borderRadius: 10, background: "rgba(52,211,153,0.06)", border: "1px solid rgba(52,211,153,0.15)" }}>
+                  <svg width="13" height="13" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0 }}>
+                    <path d="M3 8l4 4 6-7" stroke="rgba(52,211,153,0.85)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                  <span style={{ fontSize: 12, color: "rgba(52,211,153,0.80)", fontWeight: 500 }}>Done — see chat below</span>
+                </div>
+              );
+              if (evt.type === "error") return (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: 7, padding: "8px 10px", borderRadius: 9, background: "rgba(248,113,113,0.05)", border: "1px solid rgba(248,113,113,0.15)" }}>
+                  <svg width="11" height="11" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0 }}>
+                    <circle cx="8" cy="8" r="6.5" stroke="rgba(248,113,113,0.65)" strokeWidth="1.3"/>
+                    <path d="M8 5v4M8 11v.5" stroke="rgba(248,113,113,0.65)" strokeWidth="1.5" strokeLinecap="round"/>
+                  </svg>
+                  <span style={{ fontSize: 11, color: "rgba(248,113,113,0.70)" }}>{evt.message}</span>
+                </div>
+              );
+              return null;
+            })}
+          </div>
         </div>
       )}
+
     </div>
   );
 }

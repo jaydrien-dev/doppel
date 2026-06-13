@@ -537,55 +537,40 @@ function ConvSidebar({
       </div>
 
       {/* My Brain + Org shortcuts */}
-      <div style={{ padding: "0 8px 6px", display: "flex", flexDirection: "column", gap: 3 }}>
+      <div style={{ padding: "0 8px 6px", display: "flex", flexDirection: "column", gap: 4 }}>
         <Link href="/consumer/brain" style={{
-          display: "flex", alignItems: "center", gap: 8,
-          padding: "8px 14px", borderRadius: 10,
-          background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)",
-          color: "rgba(255,255,255,0.55)", fontSize: 12, fontWeight: 500,
+          display: "flex", alignItems: "center", gap: 10,
+          padding: "11px 16px", borderRadius: 12,
+          background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.09)",
+          color: "rgba(255,255,255,0.70)", fontSize: 13, fontWeight: 500,
           textDecoration: "none", transition: "all 150ms",
         }}
-          onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.08)"; e.currentTarget.style.color = "rgba(255,255,255,0.80)"; }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.04)"; e.currentTarget.style.color = "rgba(255,255,255,0.55)"; }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.09)"; e.currentTarget.style.color = "rgba(255,255,255,0.90)"; e.currentTarget.style.borderColor = "rgba(255,255,255,0.16)"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.05)"; e.currentTarget.style.color = "rgba(255,255,255,0.70)"; e.currentTarget.style.borderColor = "rgba(255,255,255,0.09)"; }}
         >
-          <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
             <path d="M8 2C5.2 2 3 4.2 3 7c0 1.7.8 3.2 2 4.1V13h6v-1.9c1.2-.9 2-2.4 2-4.1 0-2.8-2.2-5-5-5z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"/>
             <path d="M6 13h4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
           </svg>
           My Brain
         </Link>
         <Link href="/org" style={{
-          display: "flex", alignItems: "center", gap: 8,
-          padding: "8px 14px", borderRadius: 10,
-          background: "rgba(26,115,232,0.06)", border: "1px solid rgba(26,115,232,0.14)",
-          color: "rgba(107,174,255,0.65)", fontSize: 12, fontWeight: 500,
+          display: "flex", alignItems: "center", gap: 10,
+          padding: "11px 16px", borderRadius: 12,
+          background: "rgba(26,115,232,0.07)", border: "1px solid rgba(26,115,232,0.18)",
+          color: "rgba(107,174,255,0.75)", fontSize: 13, fontWeight: 500,
           textDecoration: "none", transition: "all 150ms",
         }}
-          onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(26,115,232,0.12)"; e.currentTarget.style.color = "rgba(107,174,255,0.95)"; e.currentTarget.style.borderColor = "rgba(26,115,232,0.30)"; }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(26,115,232,0.06)"; e.currentTarget.style.color = "rgba(107,174,255,0.65)"; e.currentTarget.style.borderColor = "rgba(26,115,232,0.14)"; }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(26,115,232,0.14)"; e.currentTarget.style.color = "rgba(107,174,255,0.95)"; e.currentTarget.style.borderColor = "rgba(26,115,232,0.34)"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(26,115,232,0.07)"; e.currentTarget.style.color = "rgba(107,174,255,0.75)"; e.currentTarget.style.borderColor = "rgba(26,115,232,0.18)"; }}
         >
-          <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
             <circle cx="6" cy="5.5" r="2" stroke="currentColor" strokeWidth="1.3"/>
             <circle cx="11.5" cy="5" r="1.6" stroke="currentColor" strokeWidth="1.2" opacity="0.6"/>
             <path d="M1.5 13.5c0-2.5 2-4.5 4.5-4.5s4.5 2 4.5 4.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
             <path d="M11.5 8.5c1.9.3 3 1.7 3 3.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" opacity="0.6"/>
           </svg>
           My Organisation
-        </Link>
-        <Link href="/synthesis" style={{
-          display: "flex", alignItems: "center", gap: 8,
-          padding: "8px 14px", borderRadius: 10,
-          background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)",
-          color: "rgba(255,255,255,0.45)", fontSize: 12, fontWeight: 500,
-          textDecoration: "none", transition: "all 150ms",
-        }}
-          onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.07)"; e.currentTarget.style.color = "rgba(255,255,255,0.75)"; }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.03)"; e.currentTarget.style.color = "rgba(255,255,255,0.45)"; }}
-        >
-          <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
-            <path d="M7 1L2 4l5 3 5-3-5-3zM2 7l5 3 5-3M2 10l5 3 5-3" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"/>
-          </svg>
-          Synthesis
         </Link>
       </div>
 

@@ -8,9 +8,15 @@ directories:
 files:
   - main.js
   - preload.js
+  - preload.pill.js
+  - preload.response.js
+  - preload.quickask.js
+  - preload.debate.js
+  - preload.voicecall.js
   - assets/**
   - package.json
   - node_modules/**
+  - dist/renderer/**
 
 mac:
   icon: assets/icon.icns
@@ -19,19 +25,28 @@ mac:
       arch: [x64, arm64]
   category: public.app-category.productivity
   darkModeSupport: true
+  extraResources:
+    - from: assets/bin/doppel-agent
+      to: bin/doppel-agent
 
 win:
   icon: assets/icon.ico
   target:
     - target: nsis
       arch: [x64]
-
-nsis:
-  oneClick: true
-  perMachine: false
-  deleteAppDataOnUninstall: false
+  extraResources:
+    - from: assets/bin/doppel-agent.exe
+      to: bin/doppel-agent.exe
 
 linux:
   icon: assets/icon.png
   target: AppImage
   category: Office
+  extraResources:
+    - from: assets/bin/doppel-agent
+      to: bin/doppel-agent
+
+nsis:
+  oneClick: true
+  perMachine: false
+  deleteAppDataOnUninstall: false

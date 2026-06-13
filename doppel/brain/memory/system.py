@@ -24,34 +24,43 @@ logger = logging.getLogger(__name__)
 _EXPANSION_COUNT = 3
 
 
-async def _expand_query(query: str) -> list[str]:
+async def _normalize_and_expand(query: str) -> tuple[str, list[str]]:
     """
-    Use Haiku to generate synonym/rephrasing variants of the query.
-    These are embedded alongside the original to widen the similarity search net.
-    Returns up to _EXPANSION_COUNT variants. Returns [] on any failure — caller
-    falls back to single-query search gracefully.
+    Two-in-one Haiku call:
+    1. Normalize — convert informal/broken/non-native English to standard English
+       so the embedding vector lands in the right neighbourhood of the vector space.
+    2. Expand — generate _EXPANSION_COUNT rephrasing variants for wider recall net.
+
+    Returns (normalized_query, variants).
+    Falls back to (original_query, []) on any failure — always safe to call.
     """
     from doppel.brain.context import get_anthropic_client
     try:
         client = get_anthropic_client()
         msg = await client.messages.create(
             model=settings.classification_model,
-            max_tokens=150,
+            max_tokens=220,
             system=(
-                "You are a search query expander. Given a question or statement, "
-                f"return a JSON array of exactly {_EXPANSION_COUNT} alternative phrasings. "
-                "Use synonyms, related concepts, and different framings of the same idea. "
-                "Keep each phrase short (under 12 words). Return ONLY the JSON array, nothing else."
+                "You are a language normalizer and query expander. "
+                "The input may be informal, broken, abbreviated, or non-native English. "
+                "Return a JSON object with exactly two fields:\n"
+                '  "normalized": a clean standard-English version of the same request/question '
+                "(same meaning, different phrasing only if needed). "
+                "If already well-formed, return it verbatim.\n"
+                f'  "variants": a JSON array of exactly {_EXPANSION_COUNT} short alternative phrasings '
+                "of the normalized version using synonyms and related concepts (max 12 words each).\n"
+                "Return ONLY the JSON object — no explanation, no markdown."
             ),
             messages=[{"role": "user", "content": query}],
         )
         raw = msg.content[0].text.strip()
-        variants = json.loads(raw)
-        if isinstance(variants, list):
-            return [str(v) for v in variants[:_EXPANSION_COUNT] if v]
+        data = json.loads(raw)
+        normalized = str(data.get("normalized") or query).strip() or query
+        variants = [str(v) for v in (data.get("variants") or [])[:_EXPANSION_COUNT] if v]
+        return normalized, variants
     except Exception as exc:
-        logger.debug("Query expansion failed (non-fatal): %s", exc)
-    return []
+        logger.debug("Query normalization/expansion failed (non-fatal): %s", exc)
+    return query, []
 
 
 def _merge_chunks(lists: list[list[MemoryChunk]], limit: int = 20) -> list[MemoryChunk]:
@@ -118,9 +127,11 @@ class MemorySystem:
         """
         from doppel.brain.db.connection import AsyncSessionLocal
 
-        # ── 1. Expand query ──────────────────────────────────────────────────
-        variants = await _expand_query(query)
-        all_queries = [query] + variants  # original always first
+        # ── 1. Normalize broken English + generate variants ──────────────────
+        # normalized_query is used for embeddings (better vector-space placement);
+        # the original query text still goes to the LLM unchanged.
+        normalized_query, variants = await _normalize_and_expand(query)
+        all_queries = [normalized_query] + variants  # normalized first
 
         # ── 2. Batch embed (one API round-trip for all) ───────────────────────
         all_embeddings = await embed_batch(all_queries)
@@ -217,7 +228,9 @@ class MemorySystem:
             char_budget = settings.max_episodic_tokens * 4  # rough chars per token
             chars_used = 0
             for chunk in memory.episodic:
-                excerpt = chunk.content[:800]
+                # Use full chunk content — truncating to 800 discards >50% of chunks
+                # ingested at 1800 chars. The char_budget check below is the real gate.
+                excerpt = chunk.content
                 if chars_used + len(excerpt) > char_budget:
                     break
                 source_label = f"[{chunk.source}, {'authored by you' if chunk.authored_by_user else 'received'}]"

@@ -627,6 +627,8 @@ ALTER TABLE clone_identity ADD COLUMN IF NOT EXISTS is_verified BOOLEAN DEFAULT 
 ALTER TABLE clone_identity ADD COLUMN IF NOT EXISTS verified_at TIMESTAMPTZ;
 ALTER TABLE clone_identity ADD COLUMN IF NOT EXISTS verification_note TEXT;
 ALTER TABLE clone_identity ADD COLUMN IF NOT EXISTS admin_tier_override BOOLEAN NOT NULL DEFAULT FALSE;
+-- Only one clone can be is_help_clone=TRUE at a time (enforced in application logic)
+ALTER TABLE clone_identity ADD COLUMN IF NOT EXISTS is_help_clone BOOLEAN NOT NULL DEFAULT FALSE;
 
 -- -------------------------------------------------------------------------
 -- Persistent consumer memory (clone remembers individual users across sessions)
@@ -838,3 +840,39 @@ CREATE INDEX IF NOT EXISTS response_feedback_clone_idx ON response_feedback (clo
 -- Migration: add consent columns to consumer_profiles
 ALTER TABLE consumer_profiles ADD COLUMN IF NOT EXISTS consent_given BOOLEAN DEFAULT NULL;
 ALTER TABLE consumer_profiles ADD COLUMN IF NOT EXISTS consent_given_at TIMESTAMPTZ;
+
+
+-- ---------------------------------------------------------------------------
+-- CLONE TEMPLATES  (Decision DNA)
+-- Pre-built reasoning profiles. When a clone is created from a template,
+-- its decision_profile is seeded from here. No persona, no style — purely
+-- quantified decision-making dimensions.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS clone_templates (
+    id               UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    slug             TEXT UNIQUE NOT NULL,   -- 'aristotle' | 'marcus' | 'sun' | 'benjamin'
+    name             TEXT NOT NULL,          -- display name
+    tagline          TEXT NOT NULL,          -- one-liner shown in UI
+    domain           TEXT NOT NULL,          -- 'general' | 'leadership' | 'strategy' | 'finance'
+    decision_profile JSONB NOT NULL,         -- 8 dimensions, each 0–100
+    is_active        BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS clone_templates_active_idx ON clone_templates (is_active, domain);
+
+-- decision_profile shape:
+-- {
+--   "risk_tolerance":        0-100,  -- 0=avoid all downside, 100=embrace variance
+--   "time_horizon":          0-100,  -- 0=immediate only, 100=long-term compounding
+--   "intuition_vs_analysis": 0-100,  -- 0=pure gut, 100=full deliberation
+--   "loss_aversion":         0-100,  -- 0=losses barely register, 100=losses weigh 2x gains
+--   "ambiguity_tolerance":   0-100,  -- 0=needs certainty, 100=acts freely in unknown terrain
+--   "contrarianism":         0-100,  -- 0=follows consensus, 100=ignores consensus
+--   "information_threshold": 0-100,  -- 0=decides on minimal data, 100=exhaustive research needed
+--   "sunk_cost_resistance":  0-100   -- 0=anchored to past investment, 100=purely forward-looking
+-- }
+
+-- Add decision DNA columns to clone_identity
+ALTER TABLE clone_identity ADD COLUMN IF NOT EXISTS template_id UUID REFERENCES clone_templates(id) ON DELETE SET NULL;
+ALTER TABLE clone_identity ADD COLUMN IF NOT EXISTS decision_profile JSONB NOT NULL DEFAULT '{}';

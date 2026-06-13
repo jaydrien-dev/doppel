@@ -15,6 +15,11 @@ const I = {
       <path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
     </svg>
   ),
+  back: (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+      <path d="M13 8H3M7 4l-4 4 4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  ),
   check: (
     <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
       <path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
@@ -57,6 +62,84 @@ const I = {
       <rect x="7" y="2" width="6" height="3" rx="0.8" stroke="currentColor" strokeWidth="1.4" fill="currentColor"/>
     </svg>
   ),
+};
+
+// ─── Decision model metadata ──────────────────────────────────────────────────
+
+const MODEL_META: Record<string, {
+  icon: React.ReactNode;
+  description: string;
+  traits: string[];
+  domain_label: string;
+}> = {
+  aristotle: {
+    domain_label: "General purpose",
+    description: "Weighs evidence from all angles, seeks the middle path, and recommends action when expected value is clear. Best all-around starting point.",
+    traits: ["Balanced risk", "Long-term focus", "Analytical"],
+    icon: (
+      <svg width="28" height="28" viewBox="0 0 32 32" fill="none">
+        {/* Balance scales */}
+        <line x1="16" y1="5" x2="16" y2="27" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+        <line x1="10" y1="27" x2="22" y2="27" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+        <line x1="6" y1="11" x2="26" y2="11" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+        <line x1="6" y1="11" x2="6" y2="18" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round"/>
+        <line x1="26" y1="11" x2="26" y2="18" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round"/>
+        <path d="M3 18 Q6 23 9 18" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round"/>
+        <path d="M23 18 Q26 23 29 18" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round"/>
+        <circle cx="16" cy="5" r="1.2" fill="currentColor"/>
+      </svg>
+    ),
+  },
+  marcus: {
+    domain_label: "Leadership",
+    description: "Duty-first reasoning hardened against loss aversion. Thinks in decades, not quarters. Unmoved by short-term noise or sunk costs.",
+    traits: ["10-year horizon", "Loss-immune", "Contrarian"],
+    icon: (
+      <svg width="28" height="28" viewBox="0 0 32 32" fill="none">
+        {/* Roman arch — enduring structure */}
+        <line x1="7" y1="27" x2="7" y2="13" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+        <line x1="25" y1="27" x2="25" y2="13" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+        <path d="M7 13 Q16 4 25 13" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round"/>
+        <line x1="4" y1="27" x2="28" y2="27" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+        <line x1="11" y1="27" x2="11" y2="19" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+        <line x1="21" y1="27" x2="21" y2="19" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+      </svg>
+    ),
+  },
+  sun: {
+    domain_label: "Strategy",
+    description: "Finds asymmetric angles others miss. Decides fast on incomplete information, avoids consensus traps, and adapts as facts emerge.",
+    traits: ["High-variance bets", "Acts in fog", "Strongly contrarian"],
+    icon: (
+      <svg width="28" height="28" viewBox="0 0 32 32" fill="none">
+        {/* Abstract eye — strategic sight */}
+        <path d="M3 16 Q16 5 29 16 Q16 27 3 16Z" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinejoin="round"/>
+        <circle cx="16" cy="16" r="4" stroke="currentColor" strokeWidth="1.4" fill="none"/>
+        <circle cx="16" cy="16" r="1.4" fill="currentColor"/>
+        <line x1="16" y1="2" x2="16" y2="5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+        <line x1="16" y1="27" x2="16" y2="30" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+      </svg>
+    ),
+  },
+  benjamin: {
+    domain_label: "Finance",
+    description: "Patient, evidence-driven, compounding-focused. Requires strong data before committing. Purely forward-looking — past spend is irrelevant.",
+    traits: ["Conservative risk", "Exhaustive research", "Forward-looking"],
+    icon: (
+      <svg width="28" height="28" viewBox="0 0 32 32" fill="none">
+        {/* Compound growth curve */}
+        <path d="M5 26 C8 26 10 25 13 22 C16 19 18 14 22 9 L27 5" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+        <circle cx="27" cy="5" r="1.8" fill="currentColor"/>
+        <line x1="5" y1="28" x2="28" y2="28" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round"/>
+        <line x1="5" y1="28" x2="5" y2="4" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round"/>
+        {/* tick marks */}
+        <line x1="12" y1="28" x2="12" y2="26" stroke="currentColor" strokeWidth="1" strokeLinecap="round"/>
+        <line x1="19" y1="28" x2="19" y2="26" stroke="currentColor" strokeWidth="1" strokeLinecap="round"/>
+        <line x1="5" y1="20" x2="7" y2="20" stroke="currentColor" strokeWidth="1" strokeLinecap="round"/>
+        <line x1="5" y1="13" x2="7" y2="13" stroke="currentColor" strokeWidth="1" strokeLinecap="round"/>
+      </svg>
+    ),
+  },
 };
 
 // ─── Sources data ────────────────────────────────────────────────────────────
@@ -183,20 +266,18 @@ function toHandle(name: string): string {
     .slice(0, 28) || "my-clone";
 }
 
-// ─── Step -1: Create clone ───────────────────────────────────────────────────
+// ─── Pre-step 1: Name + handle ───────────────────────────────────────────────
 
-function CreateStep({
+function NameStep({
   defaultName,
-  onCreated,
+  onNext,
 }: {
   defaultName: string;
-  onCreated: (clone: { clone_id: string; handle: string; display_name: string }) => void;
+  onNext: (name: string, handle: string) => void;
 }) {
-  const [name, setName]               = useState(defaultName);
-  const [handle, setHandle]           = useState(() => toHandle(defaultName));
+  const [name, setName]             = useState(defaultName);
+  const [handle, setHandle]         = useState(() => toHandle(defaultName));
   const [handleEdited, setHandleEdited] = useState(false);
-  const [creating, setCreating]       = useState(false);
-  const [error, setError]             = useState<string | null>(null);
 
   function onNameChange(v: string) {
     setName(v);
@@ -208,31 +289,12 @@ function CreateStep({
     setHandleEdited(true);
   }
 
-  async function handleCreate() {
-    const trimName   = name.trim();
-    const trimHandle = handle.trim();
-    if (!trimName)   { setError("Name is required."); return; }
-    if (trimHandle.length < 3) { setError("Handle must be at least 3 characters."); return; }
-    setError(null);
-    setCreating(true);
-    try {
-      const result = await createClone({ handle: trimHandle, display_name: trimName });
-      onCreated({ ...result, display_name: trimName });
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
-      if (msg.includes("409") || msg.toLowerCase().includes("unique") || msg.toLowerCase().includes("already")) {
-        setError("That handle is already taken. Try a different one.");
-        setHandleEdited(true);
-        setHandle(trimHandle + "-" + Math.random().toString(36).slice(2, 6));
-      } else {
-        setError("Failed to create clone. Please try again.");
-      }
-    } finally {
-      setCreating(false);
-    }
-  }
-
   const validHandle = /^[a-z0-9][a-z0-9-]{1,30}[a-z0-9]$/.test(handle);
+
+  function handleContinue() {
+    if (!name.trim() || !validHandle) return;
+    onNext(name.trim(), handle.trim());
+  }
 
   return (
     <>
@@ -251,7 +313,7 @@ function CreateStep({
             onChange={(e) => onNameChange(e.target.value)}
             placeholder="e.g. Elan Brightwater"
             autoFocus
-            onKeyDown={(e) => e.key === "Enter" && handleCreate()}
+            onKeyDown={(e) => e.key === "Enter" && handleContinue()}
             style={{
               width: "100%", boxSizing: "border-box",
               background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)",
@@ -268,13 +330,13 @@ function CreateStep({
           <label style={{ display: "block", fontSize: 11, fontWeight: 500, color: "rgba(255,255,255,0.40)", marginBottom: 7, textTransform: "uppercase", letterSpacing: "0.08em" }}>
             Handle
           </label>
-          <div style={{ display: "flex", alignItems: "center", gap: 0, background: "rgba(255,255,255,0.06)", border: `1px solid ${validHandle ? "rgba(255,255,255,0.12)" : "rgba(248,113,113,0.35)"}`, borderRadius: 12, overflow: "hidden" }}>
+          <div style={{ display: "flex", alignItems: "center", background: "rgba(255,255,255,0.06)", border: `1px solid ${validHandle ? "rgba(255,255,255,0.12)" : "rgba(248,113,113,0.35)"}`, borderRadius: 12, overflow: "hidden" }}>
             <span style={{ padding: "12px 10px 12px 14px", fontSize: 15, color: "rgba(255,255,255,0.30)", userSelect: "none" }}>@</span>
             <input
               type="text"
               value={handle}
               onChange={(e) => onHandleChange(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleCreate()}
+              onKeyDown={(e) => e.key === "Enter" && handleContinue()}
               style={{
                 flex: 1, background: "transparent", border: "none",
                 padding: "12px 14px 12px 0",
@@ -287,19 +349,262 @@ function CreateStep({
           </p>
         </div>
 
-        {error && (
-          <p style={{ fontSize: 12, color: "rgba(248,113,113,0.80)", padding: "10px 14px", borderRadius: 10, background: "rgba(248,113,113,0.07)", border: "1px solid rgba(248,113,113,0.15)" }}>
-            {error}
-          </p>
-        )}
+        <button
+          className="ob-btn ob-btn--primary ob-btn--lg"
+          onClick={handleContinue}
+          disabled={!name.trim() || !validHandle}
+          style={{ marginTop: 8 }}
+        >
+          Continue {I.arrow}
+        </button>
+      </div>
+    </>
+  );
+}
 
+// ─── Pre-step 2: Decision model ───────────────────────────────────────────────
+
+function DecisionModelStep({
+  name,
+  handle,
+  onCreated,
+  onBack,
+}: {
+  name: string;
+  handle: string;
+  onCreated: (clone: { clone_id: string; handle: string; display_name: string }) => void;
+  onBack: () => void;
+}) {
+  const [selected, setSelected]   = useState<string>("aristotle");
+  const [templates, setTemplates] = useState<{ slug: string; name: string; tagline: string; domain: string }[]>([]);
+  const [creating, setCreating]   = useState(false);
+  const [error, setError]         = useState<string | null>(null);
+  const [hoveredSlug, setHoveredSlug] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch("/fastapi/clone-templates")
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        if (d?.templates?.length) setTemplates(d.templates);
+        else {
+          // fallback: show all known models
+          setTemplates([
+            { slug: "aristotle", name: "Aristotle", tagline: "", domain: "general" },
+            { slug: "marcus",    name: "Marcus",    tagline: "", domain: "leadership" },
+            { slug: "sun",       name: "Sun",       tagline: "", domain: "strategy" },
+            { slug: "benjamin",  name: "Benjamin",  tagline: "", domain: "finance" },
+          ]);
+        }
+      })
+      .catch(() => {
+        setTemplates([
+          { slug: "aristotle", name: "Aristotle", tagline: "", domain: "general" },
+          { slug: "marcus",    name: "Marcus",    tagline: "", domain: "leadership" },
+          { slug: "sun",       name: "Sun",       tagline: "", domain: "strategy" },
+          { slug: "benjamin",  name: "Benjamin",  tagline: "", domain: "finance" },
+        ]);
+      });
+  }, []);
+
+  async function handleCreate() {
+    setError(null);
+    setCreating(true);
+    try {
+      const result = await createClone({ handle, display_name: name, template_slug: selected || undefined });
+      onCreated({ ...result, display_name: name });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg.includes("409") || msg.toLowerCase().includes("unique") || msg.toLowerCase().includes("already")) {
+        setError("That handle is already taken. Go back and choose a different one.");
+      } else {
+        setError("Failed to create clone. Please try again.");
+      }
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  return (
+    <>
+      <div className="ob-eyebrow"><span className="ob-eyebrow__dot" /> New clone · decision model</div>
+      <h1 className="ob-h-title">Pick a <em>decision model.</em></h1>
+      <p className="ob-h-sub">
+        Shapes how your clone reasons through trade-offs and recommends action.
+        Doesn&apos;t affect voice, style, or knowledge.
+      </p>
+
+      {/* Model cards — 2×2 grid */}
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(2, 1fr)",
+        gap: 10,
+        maxWidth: 580,
+        marginTop: 32,
+      }}>
+        <style>{`
+          @media (max-width: 500px) {
+            .dm-grid { grid-template-columns: 1fr !important; }
+          }
+        `}</style>
+        {templates.map(t => {
+          const meta = MODEL_META[t.slug];
+          const isSelected = selected === t.slug;
+          const isHovered  = hoveredSlug === t.slug && !isSelected;
+
+          return (
+            <button
+              key={t.slug}
+              type="button"
+              onClick={() => setSelected(t.slug)}
+              onMouseEnter={() => setHoveredSlug(t.slug)}
+              onMouseLeave={() => setHoveredSlug(null)}
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: 14,
+                padding: "20px 18px",
+                borderRadius: 16,
+                cursor: "pointer",
+                fontFamily: "inherit",
+                textAlign: "left",
+                background: isSelected
+                  ? "rgba(255,255,255,0.08)"
+                  : isHovered
+                    ? "rgba(255,255,255,0.05)"
+                    : "rgba(255,255,255,0.03)",
+                border: `1px solid ${
+                  isSelected
+                    ? "rgba(255,255,255,0.22)"
+                    : isHovered
+                      ? "rgba(255,255,255,0.12)"
+                      : "rgba(255,255,255,0.07)"
+                }`,
+                boxShadow: isSelected ? "0 0 0 1px rgba(255,255,255,0.06) inset" : "none",
+                transition: "background 160ms, border-color 160ms, box-shadow 160ms",
+                position: "relative",
+              }}
+            >
+              {/* Selection indicator dot */}
+              <div style={{
+                position: "absolute",
+                top: 14,
+                right: 14,
+                width: 16,
+                height: 16,
+                borderRadius: "50%",
+                border: `1.5px solid ${isSelected ? "rgba(255,255,255,0.60)" : "rgba(255,255,255,0.14)"}`,
+                background: isSelected ? "rgba(255,255,255,0.85)" : "transparent",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                transition: "all 160ms",
+                flexShrink: 0,
+              }}>
+                {isSelected && (
+                  <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
+                    <path d="M1.5 4l1.8 1.8L6.5 2.2" stroke="#080808" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                )}
+              </div>
+
+              {/* Icon container */}
+              <div style={{
+                width: 46,
+                height: 46,
+                borderRadius: 12,
+                background: isSelected ? "rgba(255,255,255,0.09)" : "rgba(255,255,255,0.04)",
+                border: `1px solid ${isSelected ? "rgba(255,255,255,0.14)" : "rgba(255,255,255,0.07)"}`,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                color: isSelected ? "rgba(255,255,255,0.85)" : "rgba(255,255,255,0.38)",
+                transition: "all 160ms",
+                flexShrink: 0,
+              }}>
+                {meta?.icon}
+              </div>
+
+              {/* Name + domain */}
+              <div>
+                <p style={{
+                  fontSize: 15,
+                  fontWeight: 500,
+                  color: isSelected ? "rgba(255,255,255,0.90)" : "rgba(255,255,255,0.60)",
+                  margin: "0 0 4px",
+                  transition: "color 160ms",
+                }}>
+                  {t.name}
+                </p>
+                <p style={{
+                  fontSize: 10,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.09em",
+                  color: isSelected ? "rgba(255,255,255,0.35)" : "rgba(255,255,255,0.22)",
+                  margin: 0,
+                  transition: "color 160ms",
+                }}>
+                  {meta?.domain_label || t.domain}
+                </p>
+              </div>
+
+              {/* Description */}
+              <p style={{
+                fontSize: 12,
+                color: isSelected ? "rgba(255,255,255,0.45)" : "rgba(255,255,255,0.28)",
+                margin: 0,
+                lineHeight: 1.65,
+                flexGrow: 1,
+                transition: "color 160ms",
+              }}>
+                {meta?.description || t.tagline}
+              </p>
+
+              {/* Trait pills */}
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+                {(meta?.traits || []).map(trait => (
+                  <span
+                    key={trait}
+                    style={{
+                      fontSize: 10,
+                      padding: "3px 8px",
+                      borderRadius: 99,
+                      background: isSelected ? "rgba(255,255,255,0.07)" : "rgba(255,255,255,0.04)",
+                      border: `1px solid ${isSelected ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.07)"}`,
+                      color: isSelected ? "rgba(255,255,255,0.50)" : "rgba(255,255,255,0.28)",
+                      transition: "all 160ms",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {trait}
+                  </span>
+                ))}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Description callout */}
+      <p style={{ fontSize: 11, color: "rgba(255,255,255,0.22)", marginTop: 12, maxWidth: 580 }}>
+        You can switch models later from your clone&apos;s settings.
+      </p>
+
+      {error && (
+        <p style={{ fontSize: 12, color: "rgba(248,113,113,0.80)", padding: "10px 14px", borderRadius: 10, background: "rgba(248,113,113,0.07)", border: "1px solid rgba(248,113,113,0.15)", maxWidth: 580, marginTop: 8 }}>
+          {error}
+        </p>
+      )}
+
+      <div className="ob-foot-row" style={{ marginTop: 20 }}>
         <button
           className="ob-btn ob-btn--primary ob-btn--lg"
           onClick={handleCreate}
-          disabled={creating || !name.trim() || !validHandle}
-          style={{ marginTop: 4 }}
+          disabled={creating}
         >
           {creating ? "Creating…" : <>Create clone {I.arrow}</>}
+        </button>
+        <button className="ob-btn ob-btn--ghost" onClick={onBack}>
+          {I.back} Back
         </button>
       </div>
     </>
@@ -329,7 +634,6 @@ function SourceStep({
   const [saving, setSaving] = useState(false);
   const first = userName.split(" ")[0] || "you";
 
-  // Auto-advance after Gmail redirect returns
   useEffect(() => {
     if (gmailConnected) {
       const t = setTimeout(onContinue, 900);
@@ -363,8 +667,7 @@ function SourceStep({
   function handleSource(src: typeof SOURCES[0]) {
     if (src.id === "gmail") { handleGmail(); return; }
     if (src.id === "paste") { setPasteMode(true); return; }
-    if (src.id === "upload") { onContinue(); return; } // advance — upload handled in brain
-    // soon sources — just skip to next step
+    if (src.id === "upload") { onContinue(); return; }
     onContinue();
   }
 
@@ -547,7 +850,6 @@ function TestStep({
           cloneName={cloneName}
           contextType="chat"
           ownerMode={false}
-          suggestedQuestions={["What are you working on?", "How do you make decisions?", "What motivates you?"]}
           onFirstMessage={() => setHasMessaged(true)}
         />
       </div>
@@ -582,7 +884,6 @@ function ShareStep({
   const publicUrl = `${appUrl}/c/${clone.handle}`;
   const first = clone.display_name.split(" ")[0] || clone.handle;
 
-  // Orbiting dots
   const dots = [
     { color: "#1A73E8", delay: 0,   dur: 6 },
     { color: "#A78BFA", delay: 0.4, dur: 7 },
@@ -625,7 +926,6 @@ function ShareStep({
         <div className="ob-share-grid" style={{ display: "grid", gap: 22 }}>
           {/* Preview card */}
           <div style={{ position: "relative", perspective: "1200px", display: "flex", justifyContent: "center", alignItems: "center", minHeight: 320 }}>
-            {/* Orbiting dots */}
             <div style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
               {dots.map((d, i) => (
                 <span key={i} style={{
@@ -640,7 +940,6 @@ function ShareStep({
                 }} />
               ))}
             </div>
-            {/* Card */}
             <div style={{
               width: "100%", maxWidth: 320,
               background: "linear-gradient(135deg, #1A73E8 0%, #0a0a2a 100%)",
@@ -650,9 +949,7 @@ function ShareStep({
               transform: "rotateY(-6deg) rotateX(3deg)",
               transition: "transform 420ms cubic-bezier(0.25,0.46,0.45,0.94)",
             }}>
-              {/* inner glow */}
               <div style={{ position: "absolute", inset: 0, background: "radial-gradient(circle at 85% 10%, rgba(255,255,255,0.18) 0%, transparent 50%), radial-gradient(circle at 10% 90%, rgba(0,0,0,0.18) 0%, transparent 50%)", pointerEvents: "none" }} />
-              {/* live chip */}
               <div style={{ position: "absolute", top: 20, right: 20, display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 10px", borderRadius: "999px", background: "rgba(255,255,255,0.18)", backdropFilter: "blur(8px)", fontSize: 10, color: "#fff", fontWeight: 500, zIndex: 1 }}>
                 <span style={{ width: 5, height: 5, borderRadius: "999px", background: "#34D399", animation: "pulse-glow 1.6s ease-in-out infinite" }} />
                 Live
@@ -679,7 +976,6 @@ function ShareStep({
 
           {/* Controls */}
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            {/* URL row */}
             <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "12px 14px", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12 }}>
               <span style={{ fontSize: 11, color: "rgba(255,255,255,0.30)", marginRight: 4 }}>URL</span>
               <span style={{ flex: 1, fontSize: 13, color: "rgba(255,255,255,0.70)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{publicUrl}</span>
@@ -699,7 +995,6 @@ function ShareStep({
               </button>
             </div>
 
-            {/* Options */}
             <div style={{ display: "flex", flexDirection: "column", gap: 12, padding: 16, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 14 }}>
               <label style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer" }}>
                 <input
@@ -751,6 +1046,7 @@ function ShareStep({
 // ─── Main wizard ─────────────────────────────────────────────────────────────
 
 type ActiveClone = { clone_id: string; handle: string; display_name: string };
+type PreStage = "name" | "model";
 
 function OnboardingWizard() {
   const router       = useRouter();
@@ -761,16 +1057,13 @@ function OnboardingWizard() {
   const isNewClone    = searchParams.get("new") === "1";
   const gmailConnected = searchParams.get("gmail_connected") === "1";
 
-  // null  = not yet determined
-  // false = need to create (show CreateStep)
-  // object = clone ready to use
   const [activeClone, setActiveClone] = useState<ActiveClone | null | false>(null);
+  const [preStage, setPreStage]       = useState<PreStage>("name");
+  const [draft, setDraft]             = useState<{ name: string; handle: string } | null>(null);
 
-  // Once primary clone loads, decide the starting state
   useEffect(() => {
     if (isLoading) return;
     if (isNewClone) {
-      // Always create a fresh clone when ?new=1
       setActiveClone(false);
     } else if (primaryClone) {
       setActiveClone({
@@ -779,13 +1072,10 @@ function OnboardingWizard() {
         display_name: primaryClone.display_name,
       });
     } else {
-      // No existing clone — must create one
       setActiveClone(false);
     }
   }, [isLoading, primaryClone, isNewClone]);
 
-  // Step starts at 0 (source picker) after clone is ready
-  // If returning from Gmail OAuth, jump to step 1
   const [step, setStep] = useState(gmailConnected ? 1 : 0);
 
   function markComplete() {
@@ -795,7 +1085,6 @@ function OnboardingWizard() {
     router.push("/dashboard/clones");
   }
 
-  // ── Loading state ──────────────────────────────────────────────────────────
   if (isLoading || activeClone === null) {
     return (
       <div className="flex items-center justify-center h-full flex-1">
@@ -804,17 +1093,14 @@ function OnboardingWizard() {
     );
   }
 
-  const userName = user?.fullName ?? user?.firstName ?? (activeClone ? activeClone.display_name : "you");
+  const userName   = user?.fullName ?? user?.firstName ?? (activeClone ? activeClone.display_name : "you");
   const defaultName = user?.fullName ?? user?.firstName ?? "";
 
-  // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <>
-      {/* Ambient background */}
       <div className="ob-bg" />
       <div className="ob-bg__dots" />
 
-      {/* Top bar */}
       <header style={{ position: "relative", zIndex: 10, padding: "18px 24px", display: "flex", alignItems: "center", gap: 16, maxWidth: 1100, margin: "0 auto", width: "100%" }}>
         <span style={{ fontSize: 16, fontWeight: 600, letterSpacing: "-0.025em", color: "rgba(255,255,255,0.85)" }}>doppel</span>
         {activeClone !== false && <StepRail current={step} total={4} />}
@@ -828,18 +1114,30 @@ function OnboardingWizard() {
         </button>
       </header>
 
-      {/* Stage */}
       <main style={{ flex: 1, position: "relative", zIndex: 1 }}>
         <div className="ob-stage">
 
-          {/* Pre-step: create the clone */}
-          {activeClone === false && (
-            <CreateStep
+          {/* Pre-clone: name */}
+          {activeClone === false && preStage === "name" && (
+            <NameStep
               defaultName={defaultName}
+              onNext={(name, handle) => {
+                setDraft({ name, handle });
+                setPreStage("model");
+              }}
+            />
+          )}
+
+          {/* Pre-clone: decision model + creation */}
+          {activeClone === false && preStage === "model" && draft && (
+            <DecisionModelStep
+              name={draft.name}
+              handle={draft.handle}
               onCreated={(clone) => {
                 setActiveClone(clone);
                 setStep(0);
               }}
+              onBack={() => setPreStage("name")}
             />
           )}
 

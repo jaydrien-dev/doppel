@@ -19,8 +19,8 @@ class Settings(BaseSettings):
     fast_reasoning_model: str = "claude-haiku-4-5-20251001"
     # Classification model — used for fast, cheap perception calls
     classification_model: str = "claude-haiku-4-5-20251001"
-    # Computer use agent model — must support computer-use-2025-01-24 beta
-    computer_use_model: str = "claude-opus-4-5"
+    # Computer use agent model — must support computer-use-2025-11-24 beta
+    computer_use_model: str = "claude-opus-4-6"
     # Embedding model
     embedding_model: str = "text-embedding-3-small"
     embedding_dim: int = 1536

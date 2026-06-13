@@ -341,7 +341,7 @@ option, optgroup {
 }
 .msg--me .msg__av { display: none; }
 .msg__col { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
-.msg__bubble { padding: 12px 15px; border-radius: 14px; font-size: 14px; line-height: 1.55; max-width: 82%; }
+.msg__bubble { padding: 12px 15px; border-radius: 14px; font-size: 14px; line-height: 1.55; max-width: 82%; user-select: text; -webkit-user-select: text; cursor: text; }
 .msg--me .msg__bubble { border-radius: 14px 14px 4px 14px; }
 .msg--ai .msg__bubble { border-radius: 14px 14px 14px 4px; }
 .msg__bubble p { margin: 0 0 8px; }

@@ -30,7 +30,6 @@ interface ChatInterfaceProps {
   cloneAvatarUrl?: string | null;
   contextType?: ContextType;
   ownerMode?: boolean;
-  suggestedQuestions?: string[];
   knowledgeAreas?: KnowledgeArea[];
   placeholder?: string;
   onFirstMessage?: () => void;
@@ -953,7 +952,6 @@ export function ChatInterface({
   cloneAvatarUrl,
   contextType = "chat",
   ownerMode = false,
-  suggestedQuestions,
   knowledgeAreas,
   placeholder = "Ask anything…",
   onFirstMessage,
@@ -961,8 +959,39 @@ export function ChatInterface({
   pricePerQuery = 0,
   sessionId: sessionIdProp,
 }: ChatInterfaceProps) {
-  const { messages, isLoading, isThinking, historyLoading, error, sendMessage, sessionId } = useChat({ cloneId, contextType, sessionId: sessionIdProp, ownerMode });
+  const { messages, isLoading, isThinking, historyLoading, error, sendMessage, clearMessages, sessionId } = useChat({ cloneId, contextType, sessionId: sessionIdProp, ownerMode });
   const [input, setInput] = useState(initialInput ?? "");
+
+  // Live autocomplete state
+  const [autoSuggestions, setAutoSuggestions] = useState<string[]>([]);
+  const [autoLoading, setAutoLoading] = useState(false);
+  const autoDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const isEmpty = messages.length === 0;
+
+  // Fetch live autocomplete suggestions, debounced 300ms
+  useEffect(() => {
+    if (!cloneHandle) return;
+    // Only show popup on empty state OR when actively typing
+    if (!isEmpty && input.trim().length === 0) {
+      setAutoSuggestions([]);
+      return;
+    }
+    if (autoDebounceRef.current) clearTimeout(autoDebounceRef.current);
+    autoDebounceRef.current = setTimeout(async () => {
+      setAutoLoading(true);
+      try {
+        const res = await fetch(`/api/clones/${cloneHandle}/autocomplete?q=${encodeURIComponent(input.trim())}`);
+        const data = await res.json();
+        setAutoSuggestions(data.suggestions ?? []);
+      } catch {
+        setAutoSuggestions([]);
+      } finally {
+        setAutoLoading(false);
+      }
+    }, 300);
+    return () => { if (autoDebounceRef.current) clearTimeout(autoDebounceRef.current); };
+  }, [input, cloneHandle, isEmpty]);
 
   // Consumer feedback callback — only active when cloneHandle is provided and not owner
   function makeConsFeedback(traceId?: string) {
@@ -1282,7 +1311,6 @@ export function ChatInterface({
     }
   }
 
-  const isEmpty = messages.length === 0;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "var(--bg-dark)", position: "relative" }}>
@@ -1597,55 +1625,51 @@ export function ChatInterface({
           />
 
           <div style={{ position: "relative", maxWidth: 920, margin: "0 auto" }}>
-            {/* Suggested questions popup */}
-            {suggestedQuestions && suggestedQuestions.length > 0 && (() => {
-              const trimmed = input.trim().toLowerCase();
-              const visible = trimmed.length < 2
-                ? suggestedQuestions
-                : suggestedQuestions.filter(q => {
-                    const words = trimmed.split(/\s+/).filter(w => w.length > 2);
-                    return words.some(w => q.toLowerCase().includes(w));
-                  });
-              if (!visible.length) return null;
-              return (
-                <div style={{
-                  position: "absolute", bottom: "calc(100% + 6px)", left: 0, right: 0,
-                  background: "rgba(14,14,14,0.97)",
-                  backdropFilter: "blur(20px)",
-                  WebkitBackdropFilter: "blur(20px)",
-                  border: "1px solid rgba(255,255,255,0.09)",
-                  borderRadius: 14,
-                  overflow: "hidden",
-                  zIndex: 20,
-                  boxShadow: "0 -8px 32px rgba(0,0,0,0.50)",
-                } as React.CSSProperties}>
-                  {visible.slice(0, 5).map((q, i) => (
-                    <button
-                      key={i}
-                      onClick={() => handleSuggest(q)}
-                      style={{
-                        display: "flex", alignItems: "center", gap: 10,
-                        width: "100%", padding: "10px 14px",
-                        background: "none", border: "none",
-                        borderBottom: i < visible.slice(0, 5).length - 1 ? "1px solid rgba(255,255,255,0.05)" : "none",
-                        cursor: "pointer", fontFamily: "inherit", textAlign: "left",
-                        transition: "background 100ms",
-                      }}
-                      onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,255,255,0.05)"; }}
-                      onMouseLeave={e => { e.currentTarget.style.background = "none"; }}
-                    >
-                      <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" style={{ color: "rgba(255,255,255,0.22)", flexShrink: 0 }}>
-                        <path d="M8 2l1.2 3.6L13 7l-3.8 1.4L8 12l-1.2-3.6L3 7l3.8-1.4z"/>
-                      </svg>
-                      <span style={{ fontSize: 13, color: "rgba(255,255,255,0.65)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{q}</span>
-                      <svg width="11" height="11" viewBox="0 0 16 16" fill="none" style={{ color: "rgba(255,255,255,0.18)", flexShrink: 0 }}>
-                        <path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                      </svg>
-                    </button>
-                  ))}
-                </div>
-              );
-            })()}
+            {/* Live autocomplete popup */}
+            {(autoLoading || autoSuggestions.length > 0) && cloneHandle && (
+              <div style={{
+                position: "absolute", bottom: "calc(100% + 6px)", left: 0, right: 0,
+                background: "rgba(14,14,14,0.97)",
+                backdropFilter: "blur(20px)",
+                WebkitBackdropFilter: "blur(20px)",
+                border: "1px solid rgba(255,255,255,0.09)",
+                borderRadius: 14,
+                overflow: "hidden",
+                zIndex: 20,
+                boxShadow: "0 -8px 32px rgba(0,0,0,0.50)",
+              } as React.CSSProperties}>
+                {autoLoading && autoSuggestions.length === 0 ? (
+                  <div style={{ padding: "12px 14px", display: "flex", alignItems: "center", gap: 8 }}>
+                    {[0,1,2].map(i => (
+                      <div key={i} style={{ width: 5, height: 5, borderRadius: "50%", background: "rgba(255,255,255,0.25)", animation: `typing-dot 1.2s ease-in-out ${i*0.2}s infinite` }} />
+                    ))}
+                  </div>
+                ) : autoSuggestions.map((q, i) => (
+                  <button
+                    key={i}
+                    onClick={() => handleSuggest(q)}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 10,
+                      width: "100%", padding: "10px 14px",
+                      background: "none", border: "none",
+                      borderBottom: i < autoSuggestions.length - 1 ? "1px solid rgba(255,255,255,0.05)" : "none",
+                      cursor: "pointer", fontFamily: "inherit", textAlign: "left",
+                      transition: "background 100ms",
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,255,255,0.05)"; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = "none"; }}
+                  >
+                    <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" style={{ color: "rgba(255,255,255,0.22)", flexShrink: 0 }}>
+                      <path d="M8 2l1.2 3.6L13 7l-3.8 1.4L8 12l-1.2-3.6L3 7l3.8-1.4z"/>
+                    </svg>
+                    <span style={{ fontSize: 13, color: "rgba(255,255,255,0.65)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{q}</span>
+                    <svg width="11" height="11" viewBox="0 0 16 16" fill="none" style={{ color: "rgba(255,255,255,0.18)", flexShrink: 0 }}>
+                      <path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                  </button>
+                ))}
+              </div>
+            )}
           <div className="composer" style={{ margin: 0 }}>
             <button className="composer__tool" aria-label="Attach image" title="Attach image" onClick={() => fileInputRef.current?.click()}><IPaperclip /></button>
             <textarea
@@ -1691,6 +1715,39 @@ export function ChatInterface({
                 );
               })}
             </div>
+
+            {/* Clear history — only shown when there are messages */}
+            {messages.length > 0 && (
+              <button
+                onClick={clearMessages}
+                title="Clear chat history"
+                disabled={isLoading}
+                style={{
+                  display: "inline-flex", alignItems: "center", gap: 5,
+                  padding: "3px 8px", borderRadius: 7, border: "1px solid transparent",
+                  fontSize: 11, fontWeight: 500, cursor: "pointer",
+                  fontFamily: "inherit",
+                  background: "transparent",
+                  color: "rgba(248,113,113,0.40)",
+                  transition: "all 130ms",
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = "rgba(248,113,113,0.06)";
+                  e.currentTarget.style.borderColor = "rgba(248,113,113,0.15)";
+                  e.currentTarget.style.color = "rgba(248,113,113,0.70)";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = "transparent";
+                  e.currentTarget.style.borderColor = "transparent";
+                  e.currentTarget.style.color = "rgba(248,113,113,0.40)";
+                }}
+              >
+                <svg width="10" height="10" viewBox="0 0 12 12" fill="none">
+                  <path d="M2 3h8M5 3V2h2v1M4.5 9.5V5M7.5 9.5V5M2.5 3l.6 7h5.8l.6-7" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+                Clear
+              </button>
+            )}
 
             {pricePerQuery > 0 ? (
               <span className="composer-meta__cost">

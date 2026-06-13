@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { submitFeedback } from "@/lib/api";
 import type { ChatMessage, FeedbackSignalType, MemorySource } from "@/lib/types";
+import { MarkdownRenderer } from "./MarkdownRenderer";
 
 interface MessageBubbleProps {
   message: ChatMessage;
@@ -192,7 +193,7 @@ export function MessageBubble({
               </div>
             </div>
           ) : (
-            paras.map((p, i) => <p key={i}>{p}</p>)
+            <MarkdownRenderer content={message.content} />
           )}
         </div>
 

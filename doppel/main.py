@@ -504,6 +504,7 @@ class CreateCloneRequest(BaseModel):
     user_id: str
     handle: str
     display_name: str
+    template_slug: str | None = None  # 'aristotle' | 'marcus' | 'sun' | 'benjamin'
 
 
 @app.post("/clones", status_code=201)
@@ -557,15 +558,29 @@ async def create_clone(
     org_rec = org_row.mappings().first()
     initial_access_mode = (org_rec["default_clone_access_mode"] if org_rec else None) or "private"
 
+    # Resolve template — copy decision_profile if a slug is provided
+    template_id = None
+    decision_profile = "{}"
+    if body.template_slug:
+        tmpl_row = await session.execute(
+            sql_text("SELECT id, decision_profile FROM clone_templates WHERE slug = :slug AND is_active = TRUE"),
+            {"slug": body.template_slug},
+        )
+        tmpl = tmpl_row.mappings().first()
+        if tmpl:
+            import json
+            template_id = str(tmpl["id"])
+            decision_profile = json.dumps(tmpl["decision_profile"])
+
     try:
         await session.execute(
             sql_text("""
                 INSERT INTO clone_identity
                   (clone_id, display_name, handle, user_id, access_mode,
-                   style_fingerprint, value_system)
+                   style_fingerprint, value_system, template_id, decision_profile)
                 VALUES
                   (:clone_id, :display_name, :handle, :user_id, :access_mode,
-                   '{}', '{}')
+                   '{}', '{}', :template_id, :decision_profile)
             """),
             {
                 "clone_id": str(clone_id),
@@ -573,6 +588,8 @@ async def create_clone(
                 "handle": body.handle,
                 "user_id": body.user_id,
                 "access_mode": initial_access_mode,
+                "template_id": template_id,
+                "decision_profile": decision_profile,
             },
         )
         await session.commit()
@@ -583,6 +600,16 @@ async def create_clone(
         raise HTTPException(status_code=500, detail="Internal server error")
 
     return {"clone_id": str(clone_id), "handle": body.handle}
+
+
+@app.get("/clone-templates")
+async def list_clone_templates(session: AsyncSession = Depends(get_session)) -> dict:
+    """Return all active clone templates for the create-clone UI."""
+    rows = await session.execute(
+        sql_text("SELECT id, slug, name, tagline, domain, decision_profile FROM clone_templates WHERE is_active = TRUE ORDER BY domain")
+    )
+    templates = [dict(r) for r in rows.mappings()]
+    return {"templates": templates}
 
 
 @app.get("/clones/me")
@@ -4974,6 +5001,83 @@ async def admin_revoke_verify(
         raise HTTPException(status_code=404, detail="Clone not found")
     await session.commit()
     return {"ok": True, "handle": handle, "is_verified": False}
+
+
+@app.post("/admin/help-clone/{handle}")
+async def admin_set_help_clone(
+    handle: str,
+    caller_user_id: str = Query(...),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Designate a clone as the site-wide help assistant. Clears any previous designation."""
+    _require_admin(caller_user_id)
+    # Clear any existing help clone first (only one allowed)
+    await session.execute(
+        sql_text("UPDATE clone_identity SET is_help_clone = FALSE WHERE is_help_clone = TRUE"),
+    )
+    result = await session.execute(
+        sql_text("""
+            UPDATE clone_identity
+            SET is_help_clone = TRUE
+            WHERE handle = :handle
+            RETURNING clone_id, display_name, avatar_url
+        """),
+        {"handle": handle},
+    )
+    row = result.mappings().first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Clone not found")
+    await session.commit()
+    return {"ok": True, "handle": handle, "display_name": row["display_name"], "is_help_clone": True}
+
+
+@app.delete("/admin/help-clone/{handle}")
+async def admin_remove_help_clone(
+    handle: str,
+    caller_user_id: str = Query(...),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Remove the help clone designation from a clone."""
+    _require_admin(caller_user_id)
+    result = await session.execute(
+        sql_text("""
+            UPDATE clone_identity
+            SET is_help_clone = FALSE
+            WHERE handle = :handle
+            RETURNING clone_id
+        """),
+        {"handle": handle},
+    )
+    if not result.mappings().first():
+        raise HTTPException(status_code=404, detail="Clone not found")
+    await session.commit()
+    return {"ok": True, "handle": handle, "is_help_clone": False}
+
+
+@app.get("/help/clone")
+async def get_help_clone(
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Public endpoint: returns the designated help clone, or null if none set."""
+    result = await session.execute(
+        sql_text("""
+            SELECT clone_id, handle, display_name, avatar_url
+            FROM clone_identity
+            WHERE is_help_clone = TRUE
+            LIMIT 1
+        """),
+    )
+    row = result.mappings().first()
+    if not row:
+        return {"clone": None}
+    return {
+        "clone": {
+            "clone_id": str(row["clone_id"]),
+            "handle": row["handle"],
+            "display_name": row["display_name"],
+            "avatar_url": row["avatar_url"],
+        }
+    }
 
 
 @app.post("/admin/migrate")
@@ -9828,6 +9932,19 @@ async def computer_task_stream(
         await websocket.close()
         return
 
+    # Build a compact conversation context string from the session history
+    conversation_history: list[dict] = payload.get("conversation_history", [])
+    session_context: str = ""
+    if conversation_history:
+        lines = []
+        for msg in conversation_history[-20:]:  # last 20 messages max
+            role = "User" if msg.get("role") == "user" else "Clone"
+            content = str(msg.get("content", "")).strip()
+            if content:
+                lines.append(f"{role}: {content}")
+        if lines:
+            session_context = "\n".join(lines)
+
     # Build brain query fn — queries all 4 memory layers
     async def brain_query(query: str) -> str:
         try:
@@ -9889,6 +10006,7 @@ async def computer_task_stream(
             monitor_index=monitor_index,
             brain_query_fn=brain_query,
             api_key=anthropic_api_key,
+            session_context=session_context,
         ):
             if stop_event.is_set():
                 await websocket.send_json({"type": "done", "result": "Task stopped by user."})
@@ -10035,6 +10153,92 @@ async def get_knowledge_map(
 # ---------------------------------------------------------------------------
 # SUGGESTED QUESTIONS — dynamically generated from top knowledge (public)
 # ---------------------------------------------------------------------------
+
+@app.get("/clones/{handle}/autocomplete")
+async def get_autocomplete(
+    handle: str,
+    q: str = "",
+    session: AsyncSession = Depends(get_session),
+):
+    """
+    Live autocomplete for the chat composer.
+    q = partial input typed by the user (can be empty for opening suggestions).
+    Returns up to 4 completions fast (Haiku, ~200ms target).
+    """
+    import json as _json
+
+    row = await session.execute(
+        sql_text("SELECT clone_id, display_name FROM clone_identity WHERE handle = :h"),
+        {"h": handle},
+    )
+    rec = row.mappings().first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Clone not found")
+    clone_id = str(rec["clone_id"])
+    name = rec["display_name"] or handle
+
+    # Fetch lightweight context — top facts + topic labels
+    fact_rows = await session.execute(
+        sql_text("""
+            SELECT fact FROM semantic_memory
+            WHERE clone_id = :cid
+            ORDER BY confidence DESC LIMIT 8
+        """),
+        {"cid": clone_id},
+    )
+    facts = [r["fact"][:100] for r in fact_rows.mappings().all()]
+
+    topic_rows = await session.execute(
+        sql_text("""
+            SELECT unnest(topics) AS topic, COUNT(*) AS c
+            FROM episodic_memory
+            WHERE clone_id = :cid AND topics IS NOT NULL AND array_length(topics,1) > 0
+            GROUP BY topic ORDER BY c DESC LIMIT 6
+        """),
+        {"cid": clone_id},
+    )
+    topics = [r["topic"] for r in topic_rows.mappings().all() if r.get("topic")]
+
+    if not facts and not topics:
+        return {"suggestions": []}
+
+    context = f"Areas: {', '.join(topics) or 'various'}. Sample facts: {'; '.join(facts[:4])}"
+    q_stripped = q.strip()
+
+    if q_stripped:
+        prompt = (
+            f"Knowledge clone: {name}. Context: {context}\n"
+            f"User is typing: \"{q_stripped}\"\n"
+            f"Complete this into 4 specific questions they might be asking, "
+            f"each building on what they already typed. Be concrete — use real topics from the context. "
+            f"Return JSON array of 4 strings. No other text."
+        )
+    else:
+        prompt = (
+            f"Knowledge clone: {name}. Context: {context}\n"
+            f"Generate 4 specific opening questions a user would genuinely want to ask this person. "
+            f"Use real topics from the context, not generic questions. "
+            f"Return JSON array of 4 strings. No other text."
+        )
+
+    client = get_anthropic_client()
+    msg = await client.messages.create(
+        model=settings.classification_model,
+        max_tokens=200,
+        messages=[{"role": "user", "content": prompt}],
+    )
+
+    try:
+        raw = msg.content[0].text.strip()
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        suggestions = _json.loads(raw)
+        return {"suggestions": [str(s) for s in suggestions[:4]]}
+    except Exception:
+        return {"suggestions": []}
+
 
 @app.get("/clones/{handle}/suggested-questions")
 async def get_suggested_questions(

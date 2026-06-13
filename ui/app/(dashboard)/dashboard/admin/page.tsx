@@ -90,6 +90,101 @@ function GrantCreditsPanel({ prefillUserId, onGranted }: { prefillUserId?: strin
 }
 
 // ---------------------------------------------------------------------------
+// Help Clone panel
+// ---------------------------------------------------------------------------
+function HelpClonePanel() {
+  const [handle, setHandle] = useState("");
+  const [currentHandle, setCurrentHandle] = useState<string | null>(null);
+  const [status, setStatus] = useState<null | { ok: boolean; msg: string }>(null);
+  const [loading, setLoading] = useState<"set" | "remove" | "fetch" | null>(null);
+
+  // Load current help clone on mount
+  useEffect(() => {
+    setLoading("fetch");
+    fetch("/api/help/clone")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.clone) setCurrentHandle(data.clone.handle);
+      })
+      .catch(() => {})
+      .finally(() => setLoading(null));
+  }, []);
+
+  async function act(action: "set" | "remove") {
+    const h = action === "set" ? handle.trim() : (currentHandle ?? handle.trim());
+    if (!h) return;
+    setLoading(action);
+    setStatus(null);
+    try {
+      const res = await fetch(`/api/admin/help-clone/${h}`, {
+        method: action === "set" ? "POST" : "DELETE",
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setStatus({ ok: true, msg: action === "set" ? `@${h} is now the help clone` : `Help clone removed` });
+        setCurrentHandle(action === "set" ? h : null);
+        setHandle("");
+      } else {
+        setStatus({ ok: false, msg: data.detail ?? data.error ?? `Error ${res.status}` });
+      }
+    } catch (e) {
+      setStatus({ ok: false, msg: String(e) });
+    } finally {
+      setLoading(null);
+    }
+  }
+
+  return (
+    <div className="card" style={{ marginBottom: 14 }}>
+      <p className="card-title">Help clone</p>
+      <p style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", marginBottom: 16 }}>
+        The help widget on every page will chat using this clone. Only you can set it.
+        {currentHandle && (
+          <span style={{ color: "rgba(52,211,153,0.70)", marginLeft: 6 }}>
+            Currently: @{currentHandle}
+          </span>
+        )}
+      </p>
+      <div style={{ display: "flex", alignItems: "flex-end", gap: 10, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+          <label style={{ fontSize: 11, fontWeight: 500, color: "rgba(255,255,255,0.40)" }}>Clone handle</label>
+          <input
+            value={handle}
+            onChange={(e) => setHandle(e.target.value)}
+            placeholder={currentHandle ?? "your-handle"}
+            className="input"
+            style={{ width: 200, fontFamily: "ui-monospace, Menlo, monospace", fontSize: 12 }}
+          />
+        </div>
+        <button
+          onClick={() => act("set")}
+          disabled={loading !== null || !handle.trim()}
+          className="btn"
+          style={{ color: "rgba(52,211,153,0.70)", borderColor: "rgba(52,211,153,0.15)" }}
+        >
+          {loading === "set" ? "Setting…" : "Set as help clone"}
+        </button>
+        {currentHandle && (
+          <button
+            onClick={() => act("remove")}
+            disabled={loading !== null}
+            className="btn"
+            style={{ color: "rgba(248,113,113,0.60)", borderColor: "rgba(248,113,113,0.15)" }}
+          >
+            {loading === "remove" ? "Removing…" : "Remove"}
+          </button>
+        )}
+        {status && (
+          <p style={{ fontSize: 12, color: status.ok ? "rgba(52,211,153,0.70)" : "rgba(248,113,113,0.60)", margin: 0 }}>
+            {status.msg}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Verify Clone panel
 // ---------------------------------------------------------------------------
 function VerifyClonePanel() {
@@ -279,6 +374,7 @@ function AdminContent() {
       </div>
 
       <GrantCreditsPanel prefillUserId={prefillUserId} onGranted={load} />
+      <HelpClonePanel />
       <VerifyClonePanel />
 
       {/* Search */}

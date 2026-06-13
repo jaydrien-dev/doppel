@@ -14,7 +14,7 @@ const {
 } = require("electron");
 const path = require("path");
 const fs   = require("fs");
-const { exec } = require("child_process");
+const { exec, spawn } = require("child_process");
 
 // Allow getUserMedia without a browser-level permission dialog.
 app.commandLine.appendSwitch("use-fake-ui-for-media-stream");
@@ -22,6 +22,76 @@ app.commandLine.appendSwitch("use-fake-ui-for-media-stream");
 const ALLOWED_PERMS = ["microphone", "media", "display-capture", "screen", "camera"];
 
 const IS_DEV = process.env.NODE_ENV !== "production";
+
+// ─── Agent Sidecar ────────────────────────────────────────────────────────────
+
+const AGENT_PORT   = 8001;
+const AGENT_WS_URL = `ws://127.0.0.1:${AGENT_PORT}`;
+const AGENT_HEALTH = `http://127.0.0.1:${AGENT_PORT}/health`;
+
+let _agentProc  = null;   // ChildProcess | null
+let _agentReady = false;  // true once /health responds 200
+
+function _getAgentBinaryPath() {
+  const ext  = process.platform === "win32" ? ".exe" : "";
+  const name = `doppel-agent${ext}`;
+  return IS_DEV
+    ? path.join(__dirname, "assets", "bin", name)
+    : path.join(process.resourcesPath, "bin", name);
+}
+
+function launchAgentSidecar() {
+  const binPath = _getAgentBinaryPath();
+  if (!fs.existsSync(binPath)) {
+    console.log(`[agent] Binary not found at ${binPath} — run agent/build.bat first`);
+    return;
+  }
+
+  console.log(`[agent] Launching ${binPath}`);
+  _agentProc = spawn(binPath, [], {
+    env: {
+      ...process.env,
+      DOPPEL_AGENT_PORT:  String(AGENT_PORT),
+      ANTHROPIC_API_KEY:  _settings.anthropicApiKey || "",
+      COMPUTER_USE_MODEL: "claude-opus-4-6",
+    },
+    detached: false,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  _agentProc.stdout.on("data", d => console.log(`[agent] ${d.toString().trim()}`));
+  _agentProc.stderr.on("data", d => console.error(`[agent:err] ${d.toString().trim()}`));
+  _agentProc.on("error", err => {
+    console.error("[agent] Failed to start:", err.message);
+    _agentProc = null; _agentReady = false;
+  });
+  _agentProc.on("exit", (code, signal) => {
+    console.log(`[agent] Exited — code=${code} signal=${signal}`);
+    _agentProc = null; _agentReady = false;
+  });
+
+  // Poll /health until ready (max 30 s)
+  let attempts = 0;
+  const poll = setInterval(async () => {
+    if (++attempts > 60) { clearInterval(poll); console.error("[agent] Health check timed out"); return; }
+    try {
+      const res = await fetch(AGENT_HEALTH);
+      if (res.ok) {
+        clearInterval(poll);
+        _agentReady = true;
+        console.log(`[agent] Ready after ${attempts} polls`);
+        BrowserWindow.getAllWindows().forEach(w => w.webContents.send("agent-ready", AGENT_WS_URL));
+      }
+    } catch { /* still starting */ }
+  }, 500);
+}
+
+function killAgentSidecar() {
+  if (!_agentProc) return;
+  try { _agentProc.kill("SIGTERM"); } catch {}
+  _agentProc = null; _agentReady = false;
+  console.log("[agent] Sidecar killed");
+}
 
 // ─── Persistent Settings ───────────────────────────────────────────────────────
 
@@ -35,8 +105,7 @@ function loadSettings() {
     _settingsPath = path.join(app.getPath("userData"), "settings.json");
     _settings = JSON.parse(fs.readFileSync(_settingsPath, "utf8"));
   } catch { _settings = {}; }
-  // Migrate stale localhost URL to production
-  if (!_settings.fastapiUrl || _settings.fastapiUrl.startsWith("http://localhost")) {
+  if (!_settings.fastapiUrl) {
     _settings.fastapiUrl = PROD_URL;
     try { fs.writeFileSync(_settingsPath, JSON.stringify(_settings, null, 2)); } catch {}
   }
@@ -100,9 +169,11 @@ function createWindow() {
     win.webContents.openDevTools({ mode: "detach" });
   }
 
-  // Emit fullscreen state changes to renderer
+  // Emit fullscreen/maximize state changes to renderer
   win.on("enter-full-screen", () => win.webContents.send("fullscreen-changed", true));
   win.on("leave-full-screen",  () => win.webContents.send("fullscreen-changed", false));
+  win.on("maximize",           () => win.webContents.send("fullscreen-changed", true));
+  win.on("unmaximize",         () => win.webContents.send("fullscreen-changed", false));
 
   // Hide to tray on close
   win.on("close", (e) => {
@@ -595,8 +666,15 @@ ipcMain.on("win-minimize",    () => win?.minimize());
 ipcMain.on("win-close",       () => { win?.hide(); });
 ipcMain.on("win-fullscreen",  () => {
   if (!win) return;
-  const next = !win.isFullScreen();
-  win.setFullScreen(next);
+  // On Windows, maximize/unmaximize is more reliable than setFullScreen
+  // for frameless transparent windows
+  if (win.isFullScreen()) {
+    win.setFullScreen(false);
+  } else if (win.isMaximized()) {
+    win.unmaximize();
+  } else {
+    win.maximize();
+  }
 });
 
 // Settings
@@ -610,6 +688,9 @@ ipcMain.on("save-settings", (_, data) => {
 
 // Open external URL in default browser
 ipcMain.on("open-external", (_, url) => shell.openExternal(url));
+
+// Agent sidecar URL — null if binary not built or not yet ready
+ipcMain.handle("get-agent-sidecar-url", () => _agentReady ? AGENT_WS_URL : null);
 
 // Active window query
 ipcMain.handle("get-active-app", () =>
@@ -783,6 +864,7 @@ app.whenReady().then(() => {
   refreshQuickAccessHotkeys();
   refreshNudgeLoop();
   refreshVoiceScheduler();
+  launchAgentSidecar();
 
   globalShortcut.register("CommandOrControl+Shift+Space", () => {
     if (pillWin && !pillWin.isDestroyed()) {
@@ -809,4 +891,4 @@ app.whenReady().then(() => {
 });
 
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
-app.on("will-quit", () => globalShortcut.unregisterAll());
+app.on("will-quit", () => { globalShortcut.unregisterAll(); killAgentSidecar(); });

@@ -29,6 +29,19 @@ html, body {
   user-select: none;
 }
 
+/* Chat messages must be selectable — users need to copy responses */
+.chat-scroll-area,
+.chat-scroll-area * {
+  user-select: text;
+  -webkit-user-select: text;
+}
+/* Restore none only on interactive elements inside the chat */
+.chat-scroll-area button,
+.chat-scroll-area input {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
 /* Rounded window — clips everything inside */
 #root {
   height: 100%;

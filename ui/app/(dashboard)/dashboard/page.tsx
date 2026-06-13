@@ -1,10 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import useSWR from "swr";
 import { useClones } from "@/lib/hooks/useClones";
 import { ClonePicker } from "@/components/dashboard/ClonePicker";
+import { useTour } from "@/components/tour/TourProvider";
+import { useAdvancedMode } from "@/lib/context/AdvancedModeContext";
 import type { BrainStats, ActivityTrace, CloneOwnerInfo } from "@/lib/types";
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
@@ -18,7 +20,7 @@ function rel(iso: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Stats bar (4 tiles only — memory bars handled by AllClonesMemoryBars below)
+// Stats bar (advanced only)
 // ---------------------------------------------------------------------------
 function StatsBar({ cloneId }: { cloneId: string }) {
   const { data: stats } = useSWR<BrainStats>(
@@ -96,7 +98,9 @@ function StatsBar({ cloneId }: { cloneId: string }) {
   );
 }
 
-// Per-clone memory bar — fetches its own stats
+// ---------------------------------------------------------------------------
+// Memory bars (advanced only)
+// ---------------------------------------------------------------------------
 function CloneMemoryBar({ clone }: { clone: CloneOwnerInfo }) {
   const { data: stats } = useSWR<BrainStats>(
     `/api/brain/stats?clone_id=${clone.clone_id}`,
@@ -154,7 +158,7 @@ function AllClonesMemoryBars() {
 // ---------------------------------------------------------------------------
 // Recent queries
 // ---------------------------------------------------------------------------
-function RecentQueries({ cloneId }: { cloneId: string }) {
+function RecentQueries({ cloneId, advanced }: { cloneId: string; advanced: boolean }) {
   const { data, isLoading } = useSWR<{ traces: ActivityTrace[] }>(
     `/api/activity?clone_id=${cloneId}&limit=8`,
     fetcher,
@@ -201,10 +205,10 @@ function RecentQueries({ cloneId }: { cloneId: string }) {
             <span className="act-row__dot" style={{ background: dotColor }} />
             <span className="act-row__text">{trace.input_message}</span>
             <span className="act-row__meta">
-              {trace.confidence != null && (
+              {advanced && trace.confidence != null && (
                 <span className="act-row__conf">{trace.confidence}%</span>
               )}
-              {trace.needs_escalation && (
+              {advanced && trace.needs_escalation && (
                 <span className="badge badge--warn" style={{ padding: "1px 7px", fontSize: 10 }}>
                   escalated
                 </span>
@@ -219,7 +223,7 @@ function RecentQueries({ cloneId }: { cloneId: string }) {
 }
 
 // ---------------------------------------------------------------------------
-// Data sources panel
+// Sources panel (advanced only)
 // ---------------------------------------------------------------------------
 const SOURCE_LABELS: Record<string, string> = {
   gmail:   "Gmail",
@@ -272,6 +276,39 @@ function SourcesPanel({ cloneId }: { cloneId: string }) {
   );
 }
 
+// Compact sources summary for simple mode
+function SourcesSummary({ cloneId }: { cloneId: string }) {
+  const { data } = useSWR<BrainStats>(
+    `/api/brain/stats?clone_id=${cloneId}`,
+    fetcher,
+    { refreshInterval: 60_000 }
+  );
+  const count = data?.sources?.length ?? 0;
+
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", justifyContent: "space-between",
+      padding: "10px 14px", borderRadius: 12,
+      background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)",
+      marginTop: 20,
+    }}>
+      <span style={{ fontSize: 13, color: "rgba(255,255,255,0.40)" }}>
+        {count > 0 ? (
+          <>
+            <span style={{ color: "rgba(52,211,153,0.80)" }}>●</span>
+            {" "}{count} source{count !== 1 ? "s" : ""} connected
+          </>
+        ) : (
+          "No sources connected yet"
+        )}
+      </span>
+      <Link href="/dashboard/train" style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", textDecoration: "none" }}>
+        Manage →
+      </Link>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // No-clone state
 // ---------------------------------------------------------------------------
@@ -294,11 +331,45 @@ function NoCloneState() {
 }
 
 // ---------------------------------------------------------------------------
+// Tour button
+// ---------------------------------------------------------------------------
+function TourTrigger() {
+  const { startTour, tourDone } = useTour();
+  const [done, setDone] = useState(false);
+
+  useEffect(() => {
+    try {
+      setDone(!!localStorage.getItem("doppel_tour_done:getting_started"));
+    } catch { /* non-fatal */ }
+  }, []);
+
+  if (done || tourDone) return null;
+
+  return (
+    <button
+      onClick={() => startTour("getting_started", { force: true })}
+      style={{
+        fontSize: 11, textTransform: "uppercase", letterSpacing: "0.12em",
+        color: "rgba(255,255,255,0.40)", border: "1px solid rgba(255,255,255,0.07)",
+        borderRadius: 8, padding: "5px 12px", background: "transparent",
+        cursor: "pointer", fontFamily: "inherit",
+        transition: "background 180ms, color 180ms, border-color 180ms",
+      }}
+      onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.04)"; e.currentTarget.style.color = "rgba(255,255,255,0.60)"; e.currentTarget.style.borderColor = "rgba(255,255,255,0.12)"; }}
+      onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "rgba(255,255,255,0.40)"; e.currentTarget.style.borderColor = "rgba(255,255,255,0.07)"; }}
+    >
+      Take the tour →
+    </button>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
 export default function DashboardPage() {
   const { clones, isLoading } = useClones();
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const { advanced } = useAdvancedMode();
   const clone = clones.find(c => c.clone_id === selectedId) ?? clones[0] ?? null;
 
   if (isLoading) {
@@ -321,6 +392,7 @@ export default function DashboardPage() {
           </h1>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <TourTrigger />
           <ClonePicker clones={clones} selected={clone} onSelect={c => setSelectedId(c.clone_id)} />
           <Link href="/dashboard/test" className="btn btn--primary">
             Test clone →
@@ -328,12 +400,31 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      <StatsBar cloneId={clone.clone_id} />
-      <AllClonesMemoryBars />
+      {/* Advanced-only: stats + memory */}
+      {advanced && (
+        <>
+          <StatsBar cloneId={clone.clone_id} />
+          <AllClonesMemoryBars />
+        </>
+      )}
 
-      {/* Two-col layout: activity list + sidebar */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 280px", gap: 20, alignItems: "start" }}>
-        {/* Left: recent queries */}
+      {/* Two-col in advanced, single-col in simple */}
+      {advanced ? (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 280px", gap: 20, alignItems: "start" }}>
+          <div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+              <h3 className="db-h3">Recent queries</h3>
+              <Link href="/dashboard/activity" className="btn btn--ghost btn--sm">
+                View all →
+              </Link>
+            </div>
+            <RecentQueries cloneId={clone.clone_id} advanced={advanced} />
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            <SourcesPanel cloneId={clone.clone_id} />
+          </div>
+        </div>
+      ) : (
         <div>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
             <h3 className="db-h3">Recent queries</h3>
@@ -341,14 +432,10 @@ export default function DashboardPage() {
               View all →
             </Link>
           </div>
-          <RecentQueries cloneId={clone.clone_id} />
+          <RecentQueries cloneId={clone.clone_id} advanced={advanced} />
+          <SourcesSummary cloneId={clone.clone_id} />
         </div>
-
-        {/* Right: sources */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          <SourcesPanel cloneId={clone.clone_id} />
-        </div>
-      </div>
+      )}
     </div>
   );
 }

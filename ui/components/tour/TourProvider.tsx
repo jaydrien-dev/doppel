@@ -13,87 +13,119 @@ import { TourOverlay } from "./TourOverlay";
 // Types
 // ---------------------------------------------------------------------------
 export interface TourStep {
-  target: string;        // CSS selector
+  target?: string;       // CSS selector — undefined means centered modal
   title: string;
   description: string;
   position?: "top" | "bottom" | "left" | "right";
+  route?: string;        // navigate before showing this step
 }
 
 interface TourCtx {
-  startTour: (tourId: keyof typeof TOURS) => void;
+  startTour: (tourId: keyof typeof TOURS, opts?: { force?: boolean }) => void;
   isActive: boolean;
+  tourDone: boolean;
 }
+
+const TOUR_DONE_KEY = "doppel_tour_done:getting_started";
 
 // ---------------------------------------------------------------------------
 // Tour definitions
 // ---------------------------------------------------------------------------
 export const TOURS = {
   getting_started: [
+    // 0 — Welcome (centered modal)
+    {
+      title: "Welcome to doppel",
+      description:
+        "In the next 2 minutes you'll learn how to train your clone, shape its personality, and share it with the world. Let's go.",
+    },
+    // 1 — Dashboard
     {
       target: 'a[href="/dashboard"]',
-      title: "Your clone's home base",
+      title: "Your command center.",
       description:
-        "Track memory count, recent queries, connected data sources, and response approval rate — all at a glance.",
-      position: "right",
+        "Real-time stats: memory count, recent queries, approval rate.",
+      position: "right" as const,
     },
+    // 2 — Train
     {
       target: 'a[href="/dashboard/train"]',
-      title: "Feed your clone",
+      title: "Feed it knowledge.",
       description:
-        "Upload documents or connect Gmail, Slack, GitHub, and Notion. Everything you add shapes how your clone thinks and answers.",
-      position: "right",
+        "Connect Gmail, Slack, GitHub, Notion, or upload files. Every source becomes retrievable memory.",
+      position: "right" as const,
     },
+    // 3 — Identity
     {
       target: 'a[href="/dashboard/identity"]',
-      title: "Shape your clone's personality",
+      title: "Make it sound like you.",
       description:
-        "Set your communication style, values, and areas of expertise. This is what makes your clone sound like you — not a generic chatbot.",
-      position: "right",
+        "Set tone, values, areas of expertise. The difference between a generic bot and your digital twin.",
+      position: "right" as const,
     },
+    // 4 — Brain inspector
     {
       target: 'a[href="/dashboard/brain"]',
-      title: "Inspect your clone's memory",
+      title: "See exactly what it knows.",
       description:
-        "Browse, pin, or exclude individual memory chunks. Verify what your clone knows and remove anything inaccurate.",
-      position: "right",
+        "Browse individual memory chunks. Pin the important ones, exclude bad ones, verify accuracy before going live.",
+      position: "right" as const,
     },
+    // 5 — Test chat
     {
       target: 'a[href="/dashboard/test"]',
-      title: "Test before you share",
+      title: "Try it before you share it.",
       description:
-        "Chat with your clone directly to verify its responses before making it public. Confidence indicators show how certain each answer is.",
-      position: "right",
+        "Chat with your clone right now. Green confidence bars show how certain each answer is. Red flags show what needs more training.",
+      position: "right" as const,
     },
+    // 6 — Deploy
     {
       target: 'a[href="/dashboard/deploy"]',
-      title: "Control access",
+      title: "Control who has access.",
       description:
-        "Set to Private, Allowlist, Org-scoped, or Public. Embed your clone on any website with one line of code.",
-      position: "right",
+        "Toggle between Private, Allowlist, Org, and Public. Embed anywhere with one <script> tag.",
+      position: "right" as const,
     },
-    {
-      target: 'a[href="/marketplace"]',
-      title: "Browse the marketplace",
-      description:
-        "Discover expert clones from other users. Pay per question — no subscriptions. Query anyone's knowledge directly.",
-      position: "right",
-    },
+    // 7 — Email
     {
       target: 'a[href="/dashboard/email"]',
-      title: "Email drafting",
+      title: "Drafts in your voice.",
       description:
-        "Your clone drafts replies in your voice. Approve, edit, or reject each one — every interaction improves it.",
-      position: "right",
+        "Your clone writes email replies that sound like you. You review each one — nothing sends without your approval.",
+      position: "right" as const,
     },
+    // 8 — Marketplace
+    {
+      target: 'a[href="/marketplace"]',
+      title: "Your public profile.",
+      description:
+        "Once public, your clone appears in the marketplace. Others pay per question. You earn 80% of every query.",
+      position: "right" as const,
+    },
+    // 9 — API
     {
       target: 'a[href="/dashboard/api"]',
-      title: "Developer API",
+      title: "Build with your clone.",
       description:
-        "Generate API keys to call your clone from any app, script, or AI agent. Full programmatic access with the same response quality.",
-      position: "right",
+        "Generate API keys to call your clone from any app, script, or AI pipeline.",
+      position: "right" as const,
+    },
+    // 10 — Desktop app
+    {
+      target: 'a[href="/dashboard/deploy"]',
+      title: "Take it everywhere.",
+      description:
+        "Download the doppel desktop app for instant access via hotkey from any app, plus overlay mode that floats over your work.",
+      position: "right" as const,
+    },
+    // 11 — Done (centered modal)
+    {
+      title: "You're ready.",
+      description:
+        "Your clone is waiting. Start by connecting a data source or chatting directly in Test mode. The more you feed it, the better it gets.",
     },
   ] as TourStep[],
-
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -102,6 +134,7 @@ export const TOURS = {
 const TourContext = createContext<TourCtx>({
   startTour: () => {},
   isActive: false,
+  tourDone: false,
 });
 
 export function useTour() {
@@ -114,16 +147,44 @@ export function useTour() {
 export function TourProvider({ children }: { children: React.ReactNode }) {
   const [steps, setSteps] = useState<TourStep[] | null>(null);
   const [idx, setIdx] = useState(0);
+  const [tourDone, setTourDone] = useState(false);
 
-  const startTour = useCallback((tourId: keyof typeof TOURS) => {
+  // Read localStorage on mount
+  useEffect(() => {
+    try {
+      if (typeof window !== "undefined" && localStorage.getItem(TOUR_DONE_KEY) === "1") {
+        setTourDone(true);
+      }
+    } catch { /* non-fatal */ }
+  }, []);
+
+  const startTour = useCallback((tourId: keyof typeof TOURS, opts?: { force?: boolean }) => {
+    // Skip if already done (unless force)
+    if (!opts?.force) {
+      try {
+        if (typeof window !== "undefined" && localStorage.getItem(TOUR_DONE_KEY) === "1") return;
+      } catch { /* non-fatal */ }
+    }
     setSteps([...TOURS[tourId]]);
     setIdx(0);
   }, []);
 
   function next() {
     if (!steps) return;
-    if (idx < steps.length - 1) setIdx((i) => i + 1);
-    else end();
+    const nextIdx = idx + 1;
+    if (nextIdx < steps.length) {
+      const nextStep = steps[nextIdx];
+      // Navigate if step has a route
+      if (nextStep.route && typeof window !== "undefined") {
+        const currentPath = window.location.pathname;
+        if (nextStep.route !== currentPath) {
+          window.location.href = nextStep.route;
+        }
+      }
+      setIdx(nextIdx);
+    } else {
+      end();
+    }
   }
 
   function prev() {
@@ -131,6 +192,12 @@ export function TourProvider({ children }: { children: React.ReactNode }) {
   }
 
   function end() {
+    try {
+      if (typeof window !== "undefined") {
+        localStorage.setItem(TOUR_DONE_KEY, "1");
+      }
+    } catch { /* non-fatal */ }
+    setTourDone(true);
     setSteps(null);
     setIdx(0);
   }
@@ -148,7 +215,7 @@ export function TourProvider({ children }: { children: React.ReactNode }) {
   });
 
   return (
-    <TourContext.Provider value={{ startTour, isActive: !!steps }}>
+    <TourContext.Provider value={{ startTour, isActive: !!steps, tourDone }}>
       {children}
       {steps && (
         <TourOverlay

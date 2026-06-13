@@ -37,6 +37,15 @@ function color(name: string) {
 type State = "idle" | "recording" | "thinking" | "speaking";
 interface Msg { role: "user" | "clone"; text: string; fromCache?: boolean; }
 
+type AgentEvent =
+  | { type: "status"; message: string }
+  | { type: "thought"; text: string }
+  | { type: "action"; action: string; detail: string }
+  | { type: "screenshot"; data: string }
+  | { type: "brain"; query: string; result: string }
+  | { type: "done"; result: string }
+  | { type: "error"; message: string };
+
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export default function Pill() {
@@ -57,6 +66,11 @@ export default function Pill() {
   const [clipboardText,  setClipboardText]  = useState<string | null>(null);
   const [clipboardDone,  setClipboardDone]  = useState(false);
   const [activeAppLabel, setActiveAppLabel] = useState<string | null>(null);
+  // Agent mode
+  const [agentMode,      setAgentMode]      = useState(false);
+  const [agentEvents,    setAgentEvents]    = useState<AgentEvent[]>([]);
+  const [agentRunning,   setAgentRunning]   = useState(false);
+  const wsAgentRef = useRef<WebSocket | null>(null);
 
   // Persist session ID per clone so working memory survives pill close/reopen (Redis TTL: 4h)
   const sessionId = useRef<string>((() => {
@@ -73,7 +87,7 @@ export default function Pill() {
   const readerRef     = useRef<ReadableStreamDefaultReader<Uint8Array> | null>(null);
   const messagesEnd   = useRef<HTMLDivElement>(null);
   const inputRef      = useRef<HTMLInputElement>(null);
-  const apiRef        = useRef("https://doppel.up.railway.app");
+  const apiRef        = useRef("http://localhost:8000");
   const openaiKeyRef  = useRef("");
   const userIdRef     = useRef("");
 
@@ -319,6 +333,86 @@ export default function Pill() {
     }
   }, [cloneId, cloneHandle]);
 
+  // ── Agent task ────────────────────────────────────────────────────────────
+
+  async function sendAgentTask(instruction: string) {
+    if (!instruction.trim() || agentRunning) return;
+
+    if (wsAgentRef.current) {
+      wsAgentRef.current.close();
+      wsAgentRef.current = null;
+    }
+
+    // Capture screen in parallel for initial context
+    const [dataUrl] = await Promise.all([captureScreen()]);
+    const screenshotB64 = dataUrl ? dataUrl.split(",")[1] : null;
+
+    setAgentEvents([{ type: "status", message: instruction }]);
+    setAgentRunning(true);
+    setPillState("thinking"); setStatusText("running task…");
+    // Auto-expand so user sees the event log
+    setExpanded(true);
+
+    const wsUrl = `${apiRef.current.replace(/^http/, "ws")}/brain/task/stream?clone_id=${encodeURIComponent(cloneId)}&monitor_index=1`;
+
+    try {
+      const ws = new WebSocket(wsUrl);
+      wsAgentRef.current = ws;
+
+      ws.onopen = () => {
+        const payload: Record<string, string> = { instruction };
+        if (screenshotB64) payload.screenshot_base64 = screenshotB64;
+        ws.send(JSON.stringify(payload));
+      };
+
+      ws.onmessage = (evt) => {
+        try {
+          const data = JSON.parse(evt.data) as AgentEvent;
+          setAgentEvents(prev => [...prev, data]);
+          if (data.type === "done") {
+            setAgentRunning(false);
+            wsAgentRef.current = null;
+            // Add result as a normal message + speak it
+            const result = data.result;
+            setMessages(prev => [...prev, { role: "clone", text: result }]);
+            setPillState("speaking"); setStatusText("speaking…");
+            speakText(result);
+          } else if (data.type === "error") {
+            setAgentRunning(false);
+            wsAgentRef.current = null;
+            setPillState("idle"); setStatusText("watching");
+          }
+        } catch { /* non-fatal */ }
+      };
+
+      ws.onerror = () => {
+        setAgentEvents(prev => [...prev, { type: "error", message: "Connection failed." }]);
+        setAgentRunning(false);
+        wsAgentRef.current = null;
+        setPillState("idle"); setStatusText("watching");
+      };
+
+      ws.onclose = () => {
+        setAgentRunning(false);
+        wsAgentRef.current = null;
+        setPillState(s => s === "thinking" ? "idle" : s);
+        setStatusText(t => t === "running task…" ? "watching" : t);
+      };
+    } catch (err) {
+      setAgentEvents(prev => [...prev, { type: "error", message: String(err) }]);
+      setAgentRunning(false);
+      setPillState("idle"); setStatusText("watching");
+    }
+  }
+
+  function stopAgent() {
+    wsAgentRef.current?.close();
+    wsAgentRef.current = null;
+    setAgentRunning(false);
+    setAgentEvents(prev => [...prev, { type: "status", message: "Task stopped." }]);
+    setPillState("idle"); setStatusText("watching");
+  }
+
   // ── TTS ───────────────────────────────────────────────────────────────────
 
   async function speakText(text: string) {
@@ -483,6 +577,42 @@ export default function Pill() {
               <div ref={messagesEnd} />
             </div>
 
+            {/* ── Agent event log ── */}
+            {agentEvents.length > 0 && (
+              <div style={{ margin: "0 12px 4px", borderTop: "1px solid rgba(255,255,255,0.06)", paddingTop: 8, display: "flex", flexDirection: "column", gap: 4, maxHeight: 160, overflowY: "auto" } as React.CSSProperties}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
+                  <span style={{ fontSize: 9, letterSpacing: "0.12em", textTransform: "uppercase" as const, color: "rgba(255,255,255,0.25)" }}>Agent</span>
+                  {agentRunning && <div style={{ width: 5, height: 5, borderRadius: "50%", background: "rgba(52,211,153,0.70)", animation: "spin 1s linear infinite" }} />}
+                  {!agentRunning && (
+                    <button onClick={() => setAgentEvents([])} style={{ marginLeft: "auto", fontSize: 9, color: "rgba(255,255,255,0.20)", background: "none", border: "none", cursor: "pointer", padding: 0, fontFamily: "inherit" }}>clear</button>
+                  )}
+                </div>
+                {agentEvents.map((evt, i) => {
+                  if (evt.type === "status") return (
+                    <div key={i} style={{ fontSize: 10, color: "rgba(255,255,255,0.30)", display: "flex", gap: 5, alignItems: "flex-start" }}>
+                      <span style={{ flexShrink: 0, marginTop: 2 }}>·</span>{evt.message}
+                    </div>
+                  );
+                  if (evt.type === "thought") return (
+                    <div key={i} style={{ fontSize: 10, color: "rgba(255,255,255,0.50)", padding: "4px 7px", borderRadius: 6, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.05)" }}>{evt.text}</div>
+                  );
+                  if (evt.type === "action") return (
+                    <div key={i} style={{ fontSize: 10, color: "rgba(52,211,153,0.65)", display: "flex", gap: 5 }}>
+                      <span style={{ fontWeight: 600, flexShrink: 0, textTransform: "uppercase" as const }}>{evt.action}</span>
+                      <span style={{ color: "rgba(255,255,255,0.35)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>{evt.detail}</span>
+                    </div>
+                  );
+                  if (evt.type === "done") return (
+                    <div key={i} style={{ fontSize: 10, color: "rgba(52,211,153,0.80)", padding: "3px 7px", borderRadius: 6, background: "rgba(52,211,153,0.07)", border: "1px solid rgba(52,211,153,0.15)" }}>✓ {evt.result.slice(0, 80)}{evt.result.length > 80 ? "…" : ""}</div>
+                  );
+                  if (evt.type === "error") return (
+                    <div key={i} style={{ fontSize: 10, color: "rgba(248,113,113,0.70)" }}>✗ {evt.message}</div>
+                  );
+                  return null;
+                })}
+              </div>
+            )}
+
             {/* ── Clipboard chip ── */}
             {clipboardText && !clipboardDone && (
               <div style={{
@@ -519,13 +649,47 @@ export default function Pill() {
 
             {/* ── Text input ── */}
             <div style={{ padding: "6px 12px 10px", borderTop: "1px solid rgba(255,255,255,0.06)", WebkitAppRegion: "no-drag" } as React.CSSProperties}>
+              {/* Agent / mode row */}
+              <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 5 }}>
+                <button
+                  onClick={() => { setAgentMode(v => !v); setAgentEvents([]); }}
+                  style={{
+                    fontSize: 9, padding: "2px 8px", borderRadius: 6,
+                    border: `1px solid ${agentMode ? "rgba(52,211,153,0.30)" : "rgba(255,255,255,0.09)"}`,
+                    background: agentMode ? "rgba(52,211,153,0.10)" : "rgba(255,255,255,0.04)",
+                    color: agentMode ? "rgba(52,211,153,0.80)" : "rgba(255,255,255,0.30)",
+                    cursor: "pointer", fontFamily: "inherit", letterSpacing: "0.05em",
+                    display: "flex", alignItems: "center", gap: 4, transition: "all 150ms",
+                  }}
+                >
+                  <svg width="9" height="9" viewBox="0 0 16 16" fill="none">
+                    <rect x="2" y="5" width="12" height="8" rx="2" stroke="currentColor" strokeWidth="1.4" opacity="0.8"/>
+                    <path d="M5 5V4a3 3 0 016 0v1" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" opacity="0.6"/>
+                    <circle cx="5.5" cy="9" r="1" fill="currentColor" opacity="0.7"/>
+                    <circle cx="10.5" cy="9" r="1" fill="currentColor" opacity="0.7"/>
+                  </svg>
+                  Agent
+                </button>
+                {agentRunning && (
+                  <button
+                    onClick={stopAgent}
+                    style={{ fontSize: 9, padding: "2px 8px", borderRadius: 6, border: "1px solid rgba(248,113,113,0.25)", background: "rgba(248,113,113,0.10)", color: "rgba(248,113,113,0.75)", cursor: "pointer", fontFamily: "inherit" }}
+                  >
+                    Stop
+                  </button>
+                )}
+                <span style={{ marginLeft: "auto", fontSize: 9, color: "rgba(255,255,255,0.18)" }}>
+                  {agentMode ? "give me a task" : "quick chat"}
+                </span>
+              </div>
               <form
                 onSubmit={(e) => {
                   e.preventDefault();
                   const t = inputText.trim();
-                  if (!t || pillState !== "idle") return;
+                  if (!t) return;
                   setInputText("");
-                  sendMessage(t);
+                  if (agentMode) { void sendAgentTask(t); }
+                  else if (pillState === "idle") sendMessage(t);
                 }}
                 style={{ display: "flex", gap: 6, alignItems: "center" }}
               >
@@ -533,23 +697,29 @@ export default function Pill() {
                   ref={inputRef}
                   value={inputText}
                   onChange={e => setInputText(e.target.value)}
-                  placeholder="Type a message…"
-                  disabled={pillState !== "idle"}
+                  placeholder={agentMode ? "Give me a task…" : "Type a message…"}
+                  disabled={!agentMode && pillState !== "idle"}
                   style={{
                     flex: 1, background: "rgba(255,255,255,0.05)",
-                    border: "1px solid rgba(255,255,255,0.10)", borderRadius: 8,
+                    border: `1px solid ${agentMode ? "rgba(52,211,153,0.18)" : "rgba(255,255,255,0.10)"}`,
+                    borderRadius: 8,
                     padding: "6px 10px", fontSize: 12, color: "rgba(255,255,255,0.75)",
-                    outline: "none", opacity: pillState !== "idle" ? 0.4 : 1,
+                    outline: "none",
+                    opacity: (!agentMode && pillState !== "idle") ? 0.4 : 1,
                   }}
                 />
                 <button
                   type="submit"
-                  disabled={!inputText.trim() || pillState !== "idle"}
+                  disabled={!inputText.trim() || (agentRunning) || (!agentMode && pillState !== "idle")}
                   style={{
                     width: 30, height: 30, borderRadius: 8, border: "none", cursor: "pointer",
                     display: "flex", alignItems: "center", justifyContent: "center",
-                    background: inputText.trim() && pillState === "idle" ? "rgba(99,102,241,0.50)" : "rgba(255,255,255,0.05)",
-                    color: inputText.trim() && pillState === "idle" ? "rgba(255,255,255,0.90)" : "rgba(255,255,255,0.25)",
+                    background: (inputText.trim() && !agentRunning && (agentMode || pillState === "idle"))
+                      ? (agentMode ? "rgba(52,211,153,0.35)" : "rgba(99,102,241,0.50)")
+                      : "rgba(255,255,255,0.05)",
+                    color: (inputText.trim() && !agentRunning && (agentMode || pillState === "idle"))
+                      ? "rgba(255,255,255,0.90)"
+                      : "rgba(255,255,255,0.25)",
                     transition: "all 150ms",
                   }}
                 >

@@ -6,8 +6,9 @@ import { usePathname } from "next/navigation";
 import { UserButton, useUser, useClerk } from "@clerk/nextjs";
 import { useClone } from "@/lib/hooks/useClone";
 import { useTour } from "@/components/tour/TourProvider";
+import { useAdvancedMode } from "@/lib/context/AdvancedModeContext";
 
-type NavItem = { href: string; label: string; icon: React.ReactNode };
+type NavItem = { href: string; label: string; icon: React.ReactNode; advancedOnly?: boolean };
 
 const CLONE: NavItem[] = [
   {
@@ -25,6 +26,7 @@ const CLONE: NavItem[] = [
   {
     href: "/dashboard/activity",
     label: "Activity",
+    advancedOnly: true,
     icon: (
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
         <path d="M1.5 8h2.5l2-5 3 10 2-5h3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" opacity="0.8"/>
@@ -56,6 +58,7 @@ const CLONE: NavItem[] = [
   {
     href: "/dashboard/identity",
     label: "Identity",
+    advancedOnly: true,
     icon: (
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
         <circle cx="8" cy="5.5" r="2.5" fill="currentColor" opacity="0.7"/>
@@ -66,6 +69,7 @@ const CLONE: NavItem[] = [
   {
     href: "/dashboard/memory",
     label: "Memory",
+    advancedOnly: true,
     icon: (
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
         <circle cx="8" cy="8" r="2.2" fill="currentColor" opacity="0.9"/>
@@ -142,8 +146,6 @@ const MARKETPLACE: NavItem[] = [
   },
 ];
 
-const SURFACES: NavItem[] = [];
-
 const ACCOUNT: NavItem[] = [
   {
     href: "/dashboard/profile",
@@ -169,6 +171,7 @@ const ACCOUNT: NavItem[] = [
   {
     href: "/dashboard/credits",
     label: "Credits",
+    advancedOnly: true,
     icon: (
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
         <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.4" opacity="0.6"/>
@@ -179,6 +182,7 @@ const ACCOUNT: NavItem[] = [
   {
     href: "/dashboard/api",
     label: "Developer",
+    advancedOnly: true,
     icon: (
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
         <rect x="1.5" y="2.5" width="13" height="11" rx="2" stroke="currentColor" strokeWidth="1.4" opacity="0.6"/>
@@ -223,20 +227,27 @@ const ORG: NavItem[] = [
   },
 ];
 
-const GROUPS: { label: string; items: NavItem[]; color: string; disabled?: boolean }[] = [
+const GROUPS: { label: string; items: NavItem[]; color: string; disabled?: boolean; advancedOnly?: boolean }[] = [
   { label: "Clone",        items: CLONE,       color: "#1A73E8" },
   { label: "Organisation", items: ORG,         color: "#6BAEFF" },
-  { label: "Marketplace",  items: MARKETPLACE, color: "#34A853", disabled: true },
+  { label: "Marketplace",  items: MARKETPLACE, color: "#34A853", disabled: true, advancedOnly: true },
   { label: "Account",      items: ACCOUNT,     color: "#F59E0B" },
 ];
 
-function NavGroup({ label, items, color, disabled }: { label: string; items: NavItem[]; color: string; disabled?: boolean }) {
+function NavGroup({
+  label, items, color, disabled, advanced,
+}: {
+  label: string; items: NavItem[]; color: string; disabled?: boolean; advanced: boolean;
+}) {
   const pathname = usePathname();
+  const visibleItems = advanced ? items : items.filter((i) => !i.advancedOnly);
+  if (visibleItems.length === 0) return null;
+
   return (
     <div className="sb__group">
       <div className="sb__group-label" style={{ color: disabled ? "rgba(255,255,255,0.18)" : color }}>{label}</div>
       <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-        {items.map(({ href, label: itemLabel, icon }) => {
+        {visibleItems.map(({ href, label: itemLabel, icon }) => {
           if (disabled) {
             return (
               <div
@@ -270,6 +281,8 @@ function NavGroup({ label, items, color, disabled }: { label: string; items: Nav
 }
 
 export function Sidebar() {
+  const { advanced } = useAdvancedMode();
+
   return (
     <aside className="sb">
       {/* Brand */}
@@ -283,9 +296,19 @@ export function Sidebar() {
 
       {/* Nav */}
       <nav style={{ flex: 1, overflowY: "auto" }}>
-        {GROUPS.map((g) => (
-          <NavGroup key={g.label} label={g.label} items={g.items} color={g.color} disabled={g.disabled} />
-        ))}
+        {GROUPS.map((g) => {
+          if (g.advancedOnly && !advanced) return null;
+          return (
+            <NavGroup
+              key={g.label}
+              label={g.label}
+              items={g.items}
+              color={g.color}
+              disabled={g.disabled}
+              advanced={advanced}
+            />
+          );
+        })}
       </nav>
 
       {/* Utilities */}
@@ -327,6 +350,7 @@ function UserFooter() {
   const { user } = useUser();
   const { signOut } = useClerk();
   const { clone } = useClone();
+  const { advanced, toggle } = useAdvancedMode();
   const tier = clone?.subscription_tier ?? "free";
   const name = user?.firstName ?? user?.username ?? "Account";
   const [credits, setCredits] = useState<{ plan: number; bought: number } | null>(null);
@@ -358,8 +382,8 @@ function UserFooter() {
               {TIER_LABEL[tier] ?? tier}
             </span>
           </div>
-          {/* Credits breakdown — plan · bought */}
-          {credits !== null && (
+          {/* Credits breakdown — plan · bought (advanced only) */}
+          {advanced && credits !== null && (
             <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 4, flexWrap: "wrap" }}>
               <span style={{
                 fontSize: 10, padding: "2px 6px", borderRadius: 999,
@@ -382,6 +406,50 @@ function UserFooter() {
           )}
         </div>
       </div>
+
+      {/* Advanced mode toggle */}
+      <button
+        onClick={toggle}
+        style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          padding: "6px 8px", borderRadius: 9,
+          background: advanced ? "rgba(255,255,255,0.04)" : "transparent",
+          border: `1px solid ${advanced ? "rgba(255,255,255,0.09)" : "rgba(255,255,255,0.05)"}`,
+          cursor: "pointer", fontFamily: "inherit",
+          transition: "all 180ms ease",
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.background = "rgba(255,255,255,0.05)";
+          e.currentTarget.style.borderColor = "rgba(255,255,255,0.10)";
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.background = advanced ? "rgba(255,255,255,0.04)" : "transparent";
+          e.currentTarget.style.borderColor = advanced ? "rgba(255,255,255,0.09)" : "rgba(255,255,255,0.05)";
+        }}
+      >
+        <span style={{
+          fontSize: 11, color: advanced ? "rgba(255,255,255,0.50)" : "rgba(255,255,255,0.28)",
+          letterSpacing: "0.01em", transition: "color 180ms",
+        }}>
+          Advanced mode
+        </span>
+        {/* pill toggle */}
+        <span style={{
+          display: "inline-flex", width: 24, height: 14, borderRadius: 999, flexShrink: 0,
+          background: advanced ? "rgba(255,255,255,0.20)" : "rgba(255,255,255,0.07)",
+          border: "1px solid rgba(255,255,255,0.08)",
+          alignItems: "center", padding: "0 2px",
+          transition: "background 180ms",
+        }}>
+          <span style={{
+            width: 10, height: 10, borderRadius: 999,
+            background: advanced ? "rgba(255,255,255,0.90)" : "rgba(255,255,255,0.35)",
+            transform: advanced ? "translateX(10px)" : "translateX(0)",
+            transition: "transform 180ms ease, background 180ms",
+          }} />
+        </span>
+      </button>
+
       <button onClick={() => signOut({ redirectUrl: "/" })} className="sb__util">
         <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
           <path d="M4.5 2H2a.5.5 0 00-.5.5v7A.5.5 0 002 10h2.5M8 3.5L10 6l-2 2.5M10 6H4.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
@@ -423,7 +491,7 @@ function TourButton() {
 
   return (
     <div style={{ position: "relative" }}>
-      <button onClick={() => startTour("getting_started")} className="sb__util">
+      <button onClick={() => startTour("getting_started", { force: true })} className="sb__util">
         <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
           <circle cx="6.5" cy="6.5" r="5.5" stroke="currentColor" strokeWidth="1.2"/>
           <path d="M5 5c0-1.1.9-1.5 1.5-1.5S8 4 8 5c0 .8-.5 1.2-1 1.5-.5.3-.5.7-.5 1" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>

@@ -444,7 +444,8 @@ interface QASlot { cloneId: string; cloneName: string; cloneHandle: string; }
 function SettingsPage() {
   const { user: clerkUser, loaded: clerkLoaded } = useClerkAuth();
   const [fastapiUrl,   setFastapiUrl]   = useState("https://doppel.up.railway.app");
-  const [openaiKey,    setOpenaiKey]    = useState("");
+  const [openaiKey,      setOpenaiKey]      = useState("");
+  const [anthropicApiKey, setAnthropicApiKey] = useState("");
   const [saved,        setSaved]        = useState(false);
   const [qaClones,     setQaClones]     = useState<Clone[]>([]);
   const [qaSlots,      setQaSlots]      = useState<(QASlot | null)[]>([null, null, null]);
@@ -465,7 +466,8 @@ function SettingsPage() {
   useEffect(() => {
     window.electronAPI?.getSettings().then(async (s: any) => {
       if (s?.fastapiUrl) setFastapiUrl(s.fastapiUrl); else setFastapiUrl("https://doppel.up.railway.app");
-      if (s?.openaiKey)  setOpenaiKey(s.openaiKey);
+      if (s?.openaiKey)       setOpenaiKey(s.openaiKey);
+      if (s?.anthropicApiKey) setAnthropicApiKey(s.anthropicApiKey);
       if (s?.quickAccess) {
         const slots = [...(s.quickAccess as (QASlot | null)[])];
         while (slots.length < 3) slots.push(null);
@@ -515,6 +517,7 @@ function SettingsPage() {
     window.electronAPI?.saveSettings({
       fastapiUrl,
       openaiKey,
+      anthropicApiKey,
       quickAccess: qaSlots,
       proactiveEnabled:         nudgeEnabled,
       proactiveCloneId:         nudgeClone?.id        ?? "",
@@ -674,6 +677,7 @@ function SettingsPage() {
 
       {/* API Keys */}
       <Section label="API Keys">
+        <Field label="Anthropic API Key (for computer agent)" value={anthropicApiKey} onChange={setAnthropicApiKey} placeholder="sk-ant-api03-…" password />
         <Field label="OpenAI API Key (for voice transcription)" value={openaiKey} onChange={setOpenaiKey} placeholder="sk-proj-…" password />
       </Section>
 
