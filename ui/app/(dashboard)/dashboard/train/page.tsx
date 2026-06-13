@@ -425,7 +425,7 @@ function VoiceTrainPanelHero({ cloneId }: { cloneId: string }) {
 // Voice training panel (legacy grid-slot version — unused, kept for compilation)
 // ---------------------------------------------------------------------------
 
-function VoiceTrainPanel({ cloneId: _cloneId }: { cloneId: string }) {
+function VoiceTrainPanel({ cloneId }: { cloneId: string }) {
   const [open, setOpen] = useState(false);
   const [recording, setRecording] = useState(false);
   const [interim, setInterim] = useState("");
