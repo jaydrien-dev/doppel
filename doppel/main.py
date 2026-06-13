@@ -10446,3 +10446,186 @@ async def get_chat_consent(
     )
     result = consent_row.mappings().first()
     return {"consent": result["consent_given"] if result else None}
+
+
+# ---------------------------------------------------------------------------
+# MCP TOOL SERVERS — per-clone connected external tools
+# ---------------------------------------------------------------------------
+
+class MCPServerCreate(BaseModel):
+    name: str
+    server_url: str
+    transport: str = "streamablehttp"
+    api_key: str | None = None
+    extra_headers: dict | None = None   # additional HTTP headers (e.g. OAuth tokens)
+
+
+async def _assert_clone_owner(clone_id: UUID, caller_user_id: str | None, session: AsyncSession) -> None:
+    """Raise 403 unless the caller owns the clone."""
+    if not caller_user_id:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+    row = await session.execute(
+        sql_text("SELECT user_id FROM clone_identity WHERE clone_id = :cid"),
+        {"cid": str(clone_id)},
+    )
+    rec = row.mappings().first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Clone not found.")
+    if rec["user_id"] != caller_user_id:
+        raise HTTPException(status_code=403, detail="Only the clone owner can manage tools.")
+
+
+@app.get("/clones/{clone_id}/tools")
+async def list_mcp_servers(
+    clone_id: UUID,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+):
+    """List all MCP servers connected to this clone."""
+    caller = request.headers.get("X-User-Id")
+    await _assert_clone_owner(clone_id, caller, session)
+
+    rows = await session.execute(
+        sql_text(
+            "SELECT id, name, server_url, transport, tool_names, enabled, created_at "
+            "FROM clone_mcp_servers WHERE clone_id = :cid ORDER BY created_at"
+        ),
+        {"cid": str(clone_id)},
+    )
+    return [
+        {
+            "id": str(r["id"]),
+            "name": r["name"],
+            "server_url": r["server_url"],
+            "transport": r["transport"],
+            "tool_names": r["tool_names"] or [],
+            "enabled": r["enabled"],
+            "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+        }
+        for r in rows.mappings().all()
+    ]
+
+
+@app.post("/clones/{clone_id}/tools")
+async def add_mcp_server(
+    clone_id: UUID,
+    body: MCPServerCreate,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+):
+    """Connect a new MCP server to this clone."""
+    from doppel.brain.security.encryption import encrypt_field
+    import json as _json
+
+    caller = request.headers.get("X-User-Id")
+    await _assert_clone_owner(clone_id, caller, session)
+
+    api_key_enc = encrypt_field(body.api_key) if body.api_key else None
+    headers_enc = encrypt_field(_json.dumps(body.extra_headers)) if body.extra_headers else None
+
+    row = await session.execute(
+        sql_text(
+            "INSERT INTO clone_mcp_servers (clone_id, name, server_url, transport, api_key_enc, headers_enc) "
+            "VALUES (:cid, :name, :url, :transport, :api_key_enc, :headers_enc) "
+            "RETURNING id"
+        ),
+        {
+            "cid": str(clone_id),
+            "name": body.name,
+            "url": body.server_url,
+            "transport": body.transport,
+            "api_key_enc": api_key_enc,
+            "headers_enc": headers_enc,
+        },
+    )
+    new_id = row.scalar()
+    await session.commit()
+    return {"id": str(new_id), "ok": True}
+
+
+@app.delete("/clones/{clone_id}/tools/{tool_id}")
+async def delete_mcp_server(
+    clone_id: UUID,
+    tool_id: UUID,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+):
+    """Remove an MCP server from this clone."""
+    caller = request.headers.get("X-User-Id")
+    await _assert_clone_owner(clone_id, caller, session)
+
+    await session.execute(
+        sql_text(
+            "DELETE FROM clone_mcp_servers WHERE id = :tid AND clone_id = :cid"
+        ),
+        {"tid": str(tool_id), "cid": str(clone_id)},
+    )
+    await session.commit()
+    return {"ok": True}
+
+
+@app.post("/clones/{clone_id}/tools/{tool_id}/test")
+async def test_mcp_server(
+    clone_id: UUID,
+    tool_id: UUID,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+):
+    """
+    Test connectivity to an MCP server: call /tools/list, cache the tool names,
+    and return the list of discovered tools.
+    """
+    import json as _json
+    from doppel.brain.security.encryption import decrypt_field
+    from doppel.brain.tools.mcp_client import MCPServer, list_tools
+
+    caller = request.headers.get("X-User-Id")
+    await _assert_clone_owner(clone_id, caller, session)
+
+    row = await session.execute(
+        sql_text(
+            "SELECT id, name, server_url, transport, api_key_enc, headers_enc "
+            "FROM clone_mcp_servers WHERE id = :tid AND clone_id = :cid"
+        ),
+        {"tid": str(tool_id), "cid": str(clone_id)},
+    )
+    rec = row.mappings().first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Tool server not found.")
+
+    api_key = decrypt_field(rec["api_key_enc"])
+    extra_headers: dict = {}
+    if rec["headers_enc"]:
+        try:
+            raw = decrypt_field(rec["headers_enc"])
+            if raw:
+                extra_headers = _json.loads(raw)
+        except Exception:
+            pass
+
+    server = MCPServer(
+        id=rec["id"],
+        name=rec["name"],
+        server_url=rec["server_url"],
+        transport=rec["transport"],
+        api_key=api_key,
+        extra_headers=extra_headers,
+    )
+
+    tools = await list_tools(server)
+    tool_names = [t["name"] for t in tools]
+
+    # Cache discovered tool names
+    await session.execute(
+        sql_text(
+            "UPDATE clone_mcp_servers SET tool_names = :names WHERE id = :tid"
+        ),
+        {"names": tool_names, "tid": str(tool_id)},
+    )
+    await session.commit()
+
+    return {
+        "ok": True,
+        "tool_count": len(tools),
+        "tools": [{"name": t["name"], "description": t.get("description", "")} for t in tools],
+    }

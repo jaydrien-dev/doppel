@@ -136,15 +136,30 @@ class DoppelBrain:
                 "metadata": {**brain_input.metadata, "_knowledge_gap": True}
             })
 
-        # ── 5. Reasoning (fast or slow path) ─────────────────────────────
-        response_text, trace = await self._reasoning.think(
-            brain_input=brain_input,
-            perceived=perceived,
-            memory=memory,
-            working=working,
-            identity=identity,
-            mem_system=self._mem_system,
-        )
+        # ── 4c. Load MCP tools for this clone (if any enabled) ───────────
+        from doppel.brain.tools.mcp_client import load_clone_tools
+        from doppel.brain.reasoning import tool_path as _tool_path
+        mcp_tools, servers_by_name = await load_clone_tools(self._session, self._clone_id)
+
+        # ── 5. Reasoning (tool path, fast, or slow) ───────────────────────
+        if mcp_tools and _message_needs_tools(brain_input.message):
+            response_text, trace = await _tool_path.run(
+                brain_input=brain_input,
+                identity=identity,
+                memory=memory,
+                working=working,
+                mcp_tools=mcp_tools,
+                servers_by_name=servers_by_name,
+            )
+        else:
+            response_text, trace = await self._reasoning.think(
+                brain_input=brain_input,
+                perceived=perceived,
+                memory=memory,
+                working=working,
+                identity=identity,
+                mem_system=self._mem_system,
+            )
 
         # ── 6. Metacognition check ────────────────────────────────────────
         prior_responses = [t.content for t in working if t.role == "clone"]
@@ -302,6 +317,11 @@ class DoppelBrain:
                 "metadata": {**brain_input.metadata, "_knowledge_gap": True}
             })
 
+        # ── 4c. Load MCP tools for this clone (if any enabled) ───────────
+        from doppel.brain.tools.mcp_client import load_clone_tools
+        from doppel.brain.reasoning import tool_path as _tool_path
+        mcp_tools, servers_by_name = await load_clone_tools(self._session, self._clone_id)
+
         path = route(perceived)
         mode = brain_input.response_mode
         if mode == "fast":
@@ -312,18 +332,28 @@ class DoppelBrain:
         _log.info("[TIMING] brain: gather=%.0fms path=%s heuristic=%s", (time.monotonic() - t_start) * 1000, path, quick is not None)
         yield f"data: {json.dumps({'event': 'start', 'path': path})}\n\n"
 
-        kwargs = dict(
-            brain_input=brain_input,
-            perceived=perceived,
-            memory=memory,
-            working=working,
-            identity=identity,
-            mem_system=self._mem_system,
-        )
-        if path == "fast":
-            gen = fast_path.run_stream(**kwargs)
+        if mcp_tools and _message_needs_tools(brain_input.message):
+            gen = _tool_path.run_stream(
+                brain_input=brain_input,
+                identity=identity,
+                memory=memory,
+                working=working,
+                mcp_tools=mcp_tools,
+                servers_by_name=servers_by_name,
+            )
         else:
-            gen = slow_path.run_stream(**kwargs, extended_thinking=(mode == "extended"))
+            kwargs = dict(
+                brain_input=brain_input,
+                perceived=perceived,
+                memory=memory,
+                working=working,
+                identity=identity,
+                mem_system=self._mem_system,
+            )
+            if path == "fast":
+                gen = fast_path.run_stream(**kwargs)
+            else:
+                gen = slow_path.run_stream(**kwargs, extended_thinking=(mode == "extended"))
 
         full_text = ""
         trace = None
@@ -331,6 +361,10 @@ class DoppelBrain:
         async for event_type, data in gen:
             if event_type == "thinking":
                 yield f"data: {json.dumps({'event': 'thinking'})}\n\n"
+            elif event_type == "tool_call":
+                yield f"data: {json.dumps({'event': 'tool_call', 'tool': data['tool'], 'detail': data['detail']})}\n\n"
+            elif event_type == "tool_result":
+                yield f"data: {json.dumps({'event': 'tool_result', 'tool': data['tool'], 'status': data['status']})}\n\n"
             elif event_type == "token":
                 if first_token:
                     _log.info("[TIMING] brain: first_token=%.0fms", (time.monotonic() - t_start) * 1000)
@@ -382,6 +416,36 @@ class DoppelBrain:
                 latency_ms=latency_ms,
             )
         )
+
+
+def _message_needs_tools(message: str) -> bool:
+    """
+    Cheap heuristic to decide if a message likely requires a tool call.
+    False positives are fine — tool_path.run() gracefully falls back to
+    a text answer if no tool is actually invoked.
+    """
+    import re
+    lower = message.lower()
+    # Action verbs that suggest an external operation
+    action_keywords = (
+        "post", "send", "share", "publish",        # write actions
+        "search", "find", "look up", "query",       # read actions
+        "create", "make", "add", "insert",          # create actions
+        "delete", "remove", "clear", "archive",     # delete actions
+        "list", "show me", "get me", "fetch",       # list actions
+        "update", "edit", "rename", "move",         # update actions
+    )
+    # Service keywords that suggest an external platform
+    service_keywords = (
+        "slack", "google drive", "drive", "notion",
+        "github", "linear", "jira", "confluence",
+        "gmail", "email", "calendar", "sheet",
+        "spreadsheet", "doc", "pdf", "file", "folder",
+        "channel", "message", "ticket", "issue", "pr",
+    )
+    has_action = any(kw in lower for kw in action_keywords)
+    has_service = any(kw in lower for kw in service_keywords)
+    return has_action and has_service
 
 
 def _is_knowledge_weak(memory: MemoryContext) -> bool:

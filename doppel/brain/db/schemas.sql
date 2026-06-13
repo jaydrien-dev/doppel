@@ -876,3 +876,24 @@ CREATE INDEX IF NOT EXISTS clone_templates_active_idx ON clone_templates (is_act
 -- Add decision DNA columns to clone_identity
 ALTER TABLE clone_identity ADD COLUMN IF NOT EXISTS template_id UUID REFERENCES clone_templates(id) ON DELETE SET NULL;
 ALTER TABLE clone_identity ADD COLUMN IF NOT EXISTS decision_profile JSONB NOT NULL DEFAULT '{}';
+
+-- ---------------------------------------------------------------------------
+-- CLONE MCP SERVERS
+-- Per-clone connected tool servers (Model Context Protocol).
+-- The clone's brain calls these during the agentic reasoning path to execute
+-- real actions: post to Slack, search Google Drive, query Notion, etc.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS clone_mcp_servers (
+    id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    clone_id     UUID NOT NULL REFERENCES clone_identity(clone_id) ON DELETE CASCADE,
+    name         TEXT NOT NULL,                        -- e.g. "Google Drive", "Slack"
+    server_url   TEXT NOT NULL,                        -- MCP server base URL
+    transport    TEXT NOT NULL DEFAULT 'streamablehttp', -- 'sse' | 'streamablehttp'
+    api_key_enc  TEXT,                                 -- encrypted bearer token / API key
+    headers_enc  TEXT,                                 -- encrypted JSON of extra headers
+    tool_names   TEXT[] DEFAULT '{}',                  -- cached from /tools/list at connect time
+    enabled      BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS mcp_servers_clone_idx ON clone_mcp_servers (clone_id, enabled);

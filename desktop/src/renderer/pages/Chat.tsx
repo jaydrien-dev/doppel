@@ -140,9 +140,10 @@ interface UseChatOptions {
   userId: string;
   responseMode: ResponseMode;
   memoryEnabled: boolean;
+  onToolEvent?: (event: AgentEvent) => void;
 }
 
-function useDesktopChat({ clone, sessionId, apiUrl, userId, responseMode, memoryEnabled }: UseChatOptions) {
+function useDesktopChat({ clone, sessionId, apiUrl, userId, responseMode, memoryEnabled, onToolEvent }: UseChatOptions) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
@@ -250,6 +251,10 @@ function useDesktopChat({ clone, sessionId, apiUrl, userId, responseMode, memory
             setIsThinking(false);
             accText += evt.text as string;
             setMessages(prev => prev.map(m => m.id === cloneMsgId ? { ...m, content: accText } : m));
+          } else if (evt.event === "tool_call") {
+            onToolEvent?.({ type: "action", action: evt.tool as string, detail: (evt.detail as string) ?? "" });
+          } else if (evt.event === "tool_result") {
+            onToolEvent?.({ type: "status", message: `${evt.tool as string}: ${evt.status as string}` });
           } else if (evt.event === "done") {
             setIsThinking(false);
             const final = (evt.corrected_response as string | null) ?? accText;
@@ -391,6 +396,10 @@ export function ChatPage({ clone, onBack, hideBack }: { clone: Clone; onBack: ()
     userId,
     responseMode,
     memoryEnabled: consent === true,
+    onToolEvent: (event) => {
+      setAgentEvents(prev => [...prev, event]);
+      setAgentPanelOpen(true);
+    },
   });
 
   // Auto-scroll agent panel as events arrive

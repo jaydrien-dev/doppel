@@ -440,6 +440,7 @@ function SidebarUserFooter() {
 // ─── Settings Page ────────────────────────────────────────────────────────────
 
 interface QASlot { cloneId: string; cloneName: string; cloneHandle: string; }
+interface MCPServerRow { id: string; name: string; server_url: string; tool_names: string[]; enabled: boolean; }
 
 function SettingsPage() {
   const { user: clerkUser, loaded: clerkLoaded } = useClerkAuth();
@@ -463,9 +464,25 @@ function SettingsPage() {
   const [vcTime,    setVcTime]    = useState("09:00");
   const [vcOpen,    setVcOpen]    = useState(false);
 
+  // Connected Tools
+  const [userId,        setUserId]        = useState("");
+  const [toolClone,     setToolClone]     = useState<Clone | null>(null);
+  const [toolOpen,      setToolOpen]      = useState(false);
+  const [mcpServers,    setMcpServers]    = useState<MCPServerRow[]>([]);
+  const [mcpLoading,    setMcpLoading]    = useState(false);
+  const [addingMcp,     setAddingMcp]     = useState(false);
+  const [mcpName,       setMcpName]       = useState("");
+  const [mcpUrl,        setMcpUrl]        = useState("");
+  const [mcpKey,        setMcpKey]        = useState("");
+  const [mcpSaving,     setMcpSaving]     = useState(false);
+  const [mcpTestingId,  setMcpTestingId]  = useState<string | null>(null);
+  const [mcpTestResult, setMcpTestResult] = useState<Record<string, string>>({});
+  const [mcpDeletingId, setMcpDeletingId] = useState<string | null>(null);
+
   useEffect(() => {
     window.electronAPI?.getSettings().then(async (s: any) => {
       if (s?.fastapiUrl) setFastapiUrl(s.fastapiUrl); else setFastapiUrl("https://doppel.up.railway.app");
+      if (s?.userId) setUserId(s.userId);
       if (s?.openaiKey)       setOpenaiKey(s.openaiKey);
       if (s?.anthropicApiKey) setAnthropicApiKey(s.anthropicApiKey);
       if (s?.quickAccess) {
@@ -502,6 +519,65 @@ function SettingsPage() {
       } catch { /* non-fatal */ }
     });
   }, []);
+
+  useEffect(() => {
+    if (!toolClone || !userId) return;
+    setMcpLoading(true);
+    fetch(`${fastapiUrl}/clones/${toolClone.id}/tools`, { headers: { "X-User-Id": userId } })
+      .then(r => r.json())
+      .then(d => setMcpServers(Array.isArray(d) ? d : []))
+      .catch(() => {})
+      .finally(() => setMcpLoading(false));
+  }, [toolClone?.id, userId]);
+
+  async function handleAddMcp() {
+    if (!toolClone || !mcpName.trim() || !mcpUrl.trim() || !userId) return;
+    setMcpSaving(true);
+    try {
+      const res = await fetch(`${fastapiUrl}/clones/${toolClone.id}/tools`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-User-Id": userId },
+        body: JSON.stringify({ name: mcpName.trim(), server_url: mcpUrl.trim(), api_key: mcpKey.trim() || undefined }),
+      });
+      const d = await res.json();
+      if (d.ok) {
+        setMcpServers(prev => [...prev, { id: d.id, name: mcpName.trim(), server_url: mcpUrl.trim(), tool_names: [], enabled: true }]);
+        setMcpName(""); setMcpUrl(""); setMcpKey(""); setAddingMcp(false);
+      }
+    } finally { setMcpSaving(false); }
+  }
+
+  async function handleTestMcp(id: string) {
+    if (!toolClone || !userId) return;
+    setMcpTestingId(id);
+    setMcpTestResult(prev => ({ ...prev, [id]: "Testing…" }));
+    try {
+      const res = await fetch(`${fastapiUrl}/clones/${toolClone.id}/tools/${id}/test`, {
+        method: "POST", headers: { "X-User-Id": userId },
+      });
+      const d = await res.json();
+      if (d.ok) {
+        setMcpTestResult(prev => ({ ...prev, [id]: `${d.tool_count} tool${d.tool_count !== 1 ? "s" : ""} found` }));
+        setMcpServers(prev => prev.map(s => s.id === id ? { ...s, tool_names: d.tools.map((t: { name: string }) => t.name) } : s));
+      } else {
+        setMcpTestResult(prev => ({ ...prev, [id]: d.detail || "Connection failed" }));
+      }
+    } catch {
+      setMcpTestResult(prev => ({ ...prev, [id]: "Connection failed" }));
+    } finally { setMcpTestingId(null); }
+  }
+
+  async function handleDeleteMcp(id: string) {
+    if (!toolClone || !userId) return;
+    setMcpDeletingId(id);
+    try {
+      await fetch(`${fastapiUrl}/clones/${toolClone.id}/tools/${id}`, {
+        method: "DELETE", headers: { "X-User-Id": userId },
+      });
+      setMcpServers(prev => prev.filter(s => s.id !== id));
+      setMcpTestResult(prev => { const n = { ...prev }; delete n[id]; return n; });
+    } finally { setMcpDeletingId(null); }
+  }
 
   async function handleSignIn() {
     const clerk = await getClerk();
@@ -679,6 +755,89 @@ function SettingsPage() {
       <Section label="API Keys">
         <Field label="Anthropic API Key (for computer agent)" value={anthropicApiKey} onChange={setAnthropicApiKey} placeholder="sk-ant-api03-…" password />
         <Field label="OpenAI API Key (for voice transcription)" value={openaiKey} onChange={setOpenaiKey} placeholder="sk-proj-…" password />
+      </Section>
+
+      {/* Connected Tools */}
+      <Section label="Connected Tools">
+        <p style={{ fontSize: 11, color: "rgba(255,255,255,0.28)", marginBottom: 10, lineHeight: 1.5 }}>
+          Connect MCP servers so your clone can take actions — post to Slack, search Drive, query Notion.
+        </p>
+        <CloneDropdownSmall
+          clones={qaClones}
+          selected={toolClone}
+          onSelect={c => { setToolClone(c); setMcpServers([]); }}
+          open={toolOpen}
+          setOpen={setToolOpen}
+          placeholder="Select a clone…"
+        />
+        {toolClone && (
+          <div style={{ marginTop: 10 }}>
+            {mcpLoading && <p style={{ fontSize: 11, color: "rgba(255,255,255,0.28)", margin: "6px 0" }}>Loading…</p>}
+            {!mcpLoading && mcpServers.length === 0 && !addingMcp && (
+              <p style={{ fontSize: 11, color: "rgba(255,255,255,0.28)", margin: "6px 0" }}>No tools connected.</p>
+            )}
+            {mcpServers.map(server => (
+              <div key={server.id} style={{ marginBottom: 8, padding: "10px 12px", borderRadius: 9, border: "1px solid rgba(255,255,255,0.07)", background: "rgba(255,255,255,0.03)" }}>
+                <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
+                  <div style={{ minWidth: 0 }}>
+                    <p style={{ fontSize: 12, fontWeight: 500, color: "rgba(255,255,255,0.72)", margin: 0 }}>{server.name}</p>
+                    <p style={{ fontSize: 10, color: "rgba(255,255,255,0.28)", margin: "2px 0 0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{server.server_url}</p>
+                  </div>
+                  <div style={{ display: "flex", gap: 5, flexShrink: 0 }}>
+                    <button onClick={() => handleTestMcp(server.id)} disabled={mcpTestingId === server.id}
+                      style={{ fontSize: 10, padding: "3px 8px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.09)", background: "transparent", color: "rgba(255,255,255,0.45)", cursor: "pointer", fontFamily: "inherit" }}>
+                      {mcpTestingId === server.id ? "…" : "Test"}
+                    </button>
+                    <button onClick={() => handleDeleteMcp(server.id)} disabled={mcpDeletingId === server.id}
+                      style={{ fontSize: 10, padding: "3px 8px", borderRadius: 6, border: "1px solid rgba(248,113,113,0.12)", background: "transparent", color: "rgba(248,113,113,0.55)", cursor: "pointer", fontFamily: "inherit" }}>
+                      {mcpDeletingId === server.id ? "…" : "Remove"}
+                    </button>
+                  </div>
+                </div>
+                {server.tool_names.length > 0 && (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 3, marginTop: 7 }}>
+                    {server.tool_names.slice(0, 4).map(n => (
+                      <span key={n} style={{ fontSize: 9, padding: "2px 6px", borderRadius: 999, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)", color: "rgba(255,255,255,0.32)" }}>
+                        {n.split("__")[1] ?? n}
+                      </span>
+                    ))}
+                    {server.tool_names.length > 4 && <span style={{ fontSize: 9, color: "rgba(255,255,255,0.20)" }}>+{server.tool_names.length - 4}</span>}
+                  </div>
+                )}
+                {mcpTestResult[server.id] && (
+                  <p style={{ fontSize: 10, color: mcpTestResult[server.id].includes("failed") ? "rgba(248,113,113,0.60)" : "rgba(52,211,153,0.60)", margin: "5px 0 0" }}>
+                    {mcpTestResult[server.id]}
+                  </p>
+                )}
+              </div>
+            ))}
+            {addingMcp ? (
+              <div style={{ padding: "10px 12px", borderRadius: 9, border: "1px solid rgba(255,255,255,0.09)", background: "rgba(255,255,255,0.03)", display: "flex", flexDirection: "column", gap: 7 }}>
+                <input value={mcpName} onChange={e => setMcpName(e.target.value)} placeholder="Name (e.g. Google Drive)"
+                  style={{ width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.09)", borderRadius: 7, padding: "6px 9px", color: "rgba(255,255,255,0.72)", outline: "none", fontSize: 11, fontFamily: "inherit", boxSizing: "border-box" as const }} />
+                <input value={mcpUrl} onChange={e => setMcpUrl(e.target.value)} placeholder="MCP server URL"
+                  style={{ width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.09)", borderRadius: 7, padding: "6px 9px", color: "rgba(255,255,255,0.72)", outline: "none", fontSize: 11, fontFamily: "inherit", boxSizing: "border-box" as const }} />
+                <input type="password" value={mcpKey} onChange={e => setMcpKey(e.target.value)} placeholder="API key (optional)"
+                  style={{ width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.09)", borderRadius: 7, padding: "6px 9px", color: "rgba(255,255,255,0.72)", outline: "none", fontSize: 11, fontFamily: "inherit", boxSizing: "border-box" as const }} />
+                <div style={{ display: "flex", gap: 7 }}>
+                  <button onClick={handleAddMcp} disabled={mcpSaving || !mcpName.trim() || !mcpUrl.trim()}
+                    style={{ flex: 1, padding: "6px 0", borderRadius: 7, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.72)", fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>
+                    {mcpSaving ? "Adding…" : "Add"}
+                  </button>
+                  <button onClick={() => { setAddingMcp(false); setMcpName(""); setMcpUrl(""); setMcpKey(""); }}
+                    style={{ padding: "6px 12px", borderRadius: 7, border: "1px solid rgba(255,255,255,0.07)", background: "transparent", color: "rgba(255,255,255,0.35)", fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button onClick={() => setAddingMcp(true)}
+                style={{ width: "100%", marginTop: 4, padding: "7px 0", borderRadius: 8, border: "1px solid rgba(255,255,255,0.08)", background: "transparent", color: "rgba(255,255,255,0.35)", fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>
+                + Connect a tool
+              </button>
+            )}
+          </div>
+        )}
       </Section>
 
       <button onClick={saveConfig} style={{

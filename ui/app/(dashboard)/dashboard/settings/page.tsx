@@ -4,140 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useClones } from "@/lib/hooks/useClones";
 import { ClonePicker } from "@/components/dashboard/ClonePicker";
-import { useOrg } from "@/lib/hooks/useOrg";
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-type Provider =
-  | "anthropic" | "openai"
-  | "google_client_id" | "google_client_secret"
-  | "gmail_pubsub_topic" | "pubsub_verification_token"
-  | "github_client_id" | "github_client_secret"
-  | "notion_client_id" | "notion_client_secret"
-  | "slack_client_id" | "slack_client_secret" | "slack_signing_secret"
-  | "stripe_secret_key" | "stripe_webhook_secret"
-  | "recall" | "elevenlabs";
-
-interface KeyState {
-  saved: string;
-  draft: string;
-  saving: boolean;
-  clearing: boolean;
-  revealed: boolean;
-}
-
-const PROVIDERS: {
-  id: Provider;
-  label: string;
-  description: string;
-  placeholder: string;
-  group: string;
-}[] = [
-  { id: "anthropic", label: "Anthropic", description: "Brain reasoning — fast path, slow path, and style extraction.", placeholder: "sk-ant-api03-…", group: "llm" },
-  { id: "openai", label: "OpenAI", description: "Text embeddings for memory ingestion.", placeholder: "sk-proj-…", group: "llm" },
-  { id: "google_client_id", label: "Google Client ID", description: "Google OAuth app Client ID — enables Gmail connect.", placeholder: "123456789-abc….apps.googleusercontent.com", group: "google" },
-  { id: "google_client_secret", label: "Google Client Secret", description: "Google OAuth app Client Secret.", placeholder: "GOCSPX-…", group: "google" },
-  { id: "gmail_pubsub_topic", label: "Gmail Pub/Sub Topic", description: "GCP Pub/Sub topic for Gmail push notifications. Format: projects/{project}/topics/{topic}", placeholder: "projects/your-project/topics/gmail-push", group: "gmail_push" },
-  { id: "pubsub_verification_token", label: "Pub/Sub Verification Token", description: "Random token appended to the push endpoint URL to verify Pub/Sub messages.", placeholder: "random-secret-token", group: "gmail_push" },
-  { id: "github_client_id", label: "GitHub Client ID", description: "GitHub OAuth app Client ID — enables GitHub commit/PR ingestion.", placeholder: "Ov23li…", group: "github" },
-  { id: "github_client_secret", label: "GitHub Client Secret", description: "GitHub OAuth app Client Secret.", placeholder: "a1b2c3d4…", group: "github" },
-  { id: "notion_client_id", label: "Notion Client ID", description: "Notion integration Client ID — enables page ingestion.", placeholder: "a1b2c3d4-…", group: "notion" },
-  { id: "notion_client_secret", label: "Notion Client Secret", description: "Notion integration Client Secret.", placeholder: "secret_…", group: "notion" },
-  { id: "slack_client_id", label: "Slack Client ID", description: "Slack app Client ID — enables Slack bot installation.", placeholder: "1234567890.123…", group: "slack" },
-  { id: "slack_client_secret", label: "Slack Client Secret", description: "Slack app Client Secret.", placeholder: "a1b2c3…", group: "slack" },
-  { id: "slack_signing_secret", label: "Slack Signing Secret", description: "Used to verify that events come from Slack. Found under Basic Information in your Slack app.", placeholder: "a1b2c3d4e5f6…", group: "slack" },
-  { id: "stripe_secret_key", label: "Stripe Secret Key", description: "Enables billing — subscription creation, customer portal, and invoice management.", placeholder: "sk_live_…", group: "stripe" },
-  { id: "stripe_webhook_secret", label: "Stripe Webhook Secret", description: "Verifies webhook payloads from Stripe. Found in the Webhooks dashboard after adding an endpoint.", placeholder: "whsec_…", group: "stripe" },
-  { id: "recall", label: "Recall.ai API Key", description: "Enables meeting bot — joins Zoom, Meet, and Teams calls.", placeholder: "Token …", group: "recall" },
-  { id: "elevenlabs", label: "ElevenLabs API Key", description: "Voice cloning and synthesis — speak in your own voice.", placeholder: "sk_…", group: "elevenlabs" },
-];
-
-// ---------------------------------------------------------------------------
-// Key card component
-// ---------------------------------------------------------------------------
-
-function KeyCard({
-  provider,
-  label,
-  description,
-  placeholder,
-  keyState,
-  onChange,
-  onSave,
-  onClear,
-  onReveal,
-}: {
-  provider: Provider;
-  label: string;
-  description: string;
-  placeholder: string;
-  keyState: KeyState;
-  onChange: (val: string) => void;
-  onSave: () => void;
-  onClear: () => void;
-  onReveal: () => void;
-}) {
-  const isSaved = !!keyState.saved;
-  const isDirty = keyState.draft !== "";
-
-  return (
-    <div className="card" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <div>
-        <p style={{ fontSize: 13, fontWeight: 500, color: "rgba(255,255,255,0.80)", margin: 0 }}>{label}</p>
-        <p style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", marginTop: 3, marginBottom: 0 }}>{description}</p>
-      </div>
-
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <div style={{ position: "relative", flex: 1 }}>
-          <input
-            type={keyState.revealed ? "text" : "password"}
-            value={keyState.draft || (isSaved ? keyState.saved : "")}
-            onChange={(e) => onChange(e.target.value)}
-            placeholder={isSaved ? keyState.saved : `Using platform key · ${placeholder}`}
-            className="input"
-            style={{ fontFamily: "ui-monospace, Menlo, monospace", paddingRight: 36 }}
-          />
-          <button
-            onClick={onReveal}
-            title={keyState.revealed ? "Hide" : "Reveal"}
-            style={{
-              position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)",
-              background: "none", border: "none", cursor: "pointer",
-              color: "rgba(255,255,255,0.25)", padding: 0, display: "flex", alignItems: "center",
-            }}
-          >
-            <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
-              {keyState.revealed ? (
-                <path d="M1 6.5C1 6.5 3 2.5 6.5 2.5S12 6.5 12 6.5 10 10.5 6.5 10.5 1 6.5 1 6.5z M6.5 8a1.5 1.5 0 100-3 1.5 1.5 0 000 3z M1 1l11 11" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round"/>
-              ) : (
-                <path d="M1 6.5C1 6.5 3 2.5 6.5 2.5S12 6.5 12 6.5 10 10.5 6.5 10.5 1 6.5 1 6.5z M6.5 8a1.5 1.5 0 100-3 1.5 1.5 0 000 3z" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round"/>
-              )}
-            </svg>
-          </button>
-        </div>
-
-        <button onClick={onSave} disabled={!isDirty || keyState.saving} className="btn btn--sm">
-          {keyState.saving ? "Saving…" : "Save"}
-        </button>
-
-        {isSaved && (
-          <button onClick={onClear} disabled={keyState.clearing} className="btn btn--sm btn--ghost">
-            {keyState.clearing ? "…" : "Clear"}
-          </button>
-        )}
-      </div>
-
-      {isSaved && !isDirty && (
-        <p style={{ fontSize: 11, color: "rgba(255,255,255,0.30)", margin: 0 }}>Key saved · using your key</p>
-      )}
-      {!isSaved && !isDirty && (
-        <p style={{ fontSize: 11, color: "rgba(255,255,255,0.25)", margin: 0 }}>Not set · falling back to platform key</p>
-      )}
-    </div>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // Admin policies panel
@@ -574,129 +441,195 @@ function GdprPanel({ cloneHandle }: { cloneHandle: string | null }) {
 
 
 // ---------------------------------------------------------------------------
+// Connected Tools (MCP servers) panel
+// ---------------------------------------------------------------------------
+
+interface MCPServerRow {
+  id: string;
+  name: string;
+  server_url: string;
+  transport: string;
+  tool_names: string[];
+  enabled: boolean;
+}
+
+function ConnectedToolsPanel({ cloneId }: { cloneId: string | null }) {
+  const [servers, setServers] = useState<MCPServerRow[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [nameDraft, setNameDraft] = useState("");
+  const [urlDraft, setUrlDraft] = useState("");
+  const [keyDraft, setKeyDraft] = useState("");
+  const [testingId, setTestingId] = useState<string | null>(null);
+  const [testResult, setTestResult] = useState<Record<string, string>>({});
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!cloneId) return;
+    setLoading(true);
+    fetch(`/api/tools?clone_id=${cloneId}`)
+      .then(r => r.json())
+      .then(d => setServers(Array.isArray(d) ? d : []))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [cloneId]);
+
+  async function handleAdd() {
+    if (!cloneId || !nameDraft.trim() || !urlDraft.trim()) return;
+    setSaving(true);
+    try {
+      const res = await fetch("/api/tools", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          clone_id: cloneId,
+          name: nameDraft.trim(),
+          server_url: urlDraft.trim(),
+          api_key: keyDraft.trim() || undefined,
+        }),
+      });
+      const d = await res.json();
+      if (d.ok) {
+        const newRow: MCPServerRow = { id: d.id, name: nameDraft.trim(), server_url: urlDraft.trim(), transport: "streamablehttp", tool_names: [], enabled: true };
+        setServers(prev => [...prev, newRow]);
+        setNameDraft(""); setUrlDraft(""); setKeyDraft(""); setAdding(false);
+      }
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleTest(id: string) {
+    if (!cloneId) return;
+    setTestingId(id);
+    setTestResult(prev => ({ ...prev, [id]: "Testing…" }));
+    try {
+      const res = await fetch(`/api/tools/${id}/test?clone_id=${cloneId}`, { method: "POST" });
+      const d = await res.json();
+      if (d.ok) {
+        setTestResult(prev => ({ ...prev, [id]: `${d.tool_count} tool${d.tool_count !== 1 ? "s" : ""} found` }));
+        setServers(prev => prev.map(s => s.id === id ? { ...s, tool_names: d.tools.map((t: { name: string }) => t.name) } : s));
+      } else {
+        setTestResult(prev => ({ ...prev, [id]: d.detail || "Connection failed" }));
+      }
+    } catch {
+      setTestResult(prev => ({ ...prev, [id]: "Connection failed" }));
+    } finally {
+      setTestingId(null);
+    }
+  }
+
+  async function handleDelete(id: string) {
+    if (!cloneId) return;
+    setDeletingId(id);
+    try {
+      await fetch(`/api/tools/${id}?clone_id=${cloneId}`, { method: "DELETE" });
+      setServers(prev => prev.filter(s => s.id !== id));
+      setTestResult(prev => { const n = { ...prev }; delete n[id]; return n; });
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
+  if (!cloneId) return null;
+
+  return (
+    <div className="card" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div>
+        <p style={{ fontSize: 13, fontWeight: 500, color: "rgba(255,255,255,0.80)", marginBottom: 4 }}>Connected tools</p>
+        <p style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", margin: 0 }}>
+          Connect MCP servers so your clone can take actions — post to Slack, search Drive, query Notion.
+        </p>
+      </div>
+
+      {loading && (
+        <p style={{ fontSize: 12, color: "rgba(255,255,255,0.25)", margin: 0 }}>Loading…</p>
+      )}
+
+      {!loading && servers.length === 0 && !adding && (
+        <p style={{ fontSize: 12, color: "rgba(255,255,255,0.25)", margin: 0 }}>No tools connected yet.</p>
+      )}
+
+      {servers.map(server => (
+        <div key={server.id} style={{ display: "flex", flexDirection: "column", gap: 8, padding: "12px 14px", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 12 }}>
+          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
+            <div style={{ minWidth: 0 }}>
+              <p style={{ fontSize: 13, fontWeight: 500, color: "rgba(255,255,255,0.75)", margin: 0 }}>{server.name}</p>
+              <p style={{ fontSize: 11, color: "rgba(255,255,255,0.28)", marginTop: 2, marginBottom: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{server.server_url}</p>
+            </div>
+            <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+              <button
+                onClick={() => handleTest(server.id)}
+                disabled={testingId === server.id}
+                className="btn btn--sm btn--ghost"
+                style={{ fontSize: 11 }}
+              >
+                {testingId === server.id ? "…" : "Test"}
+              </button>
+              <button
+                onClick={() => handleDelete(server.id)}
+                disabled={deletingId === server.id}
+                className="btn btn--sm btn--ghost"
+                style={{ fontSize: 11, color: "rgba(248,113,113,0.60)", borderColor: "rgba(248,113,113,0.12)" }}
+              >
+                {deletingId === server.id ? "…" : "Remove"}
+              </button>
+            </div>
+          </div>
+
+          {server.tool_names.length > 0 && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+              {server.tool_names.slice(0, 6).map(name => (
+                <span key={name} style={{ fontSize: 10, padding: "2px 7px", borderRadius: 999, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)", color: "rgba(255,255,255,0.35)" }}>
+                  {name.split("__")[1] ?? name}
+                </span>
+              ))}
+              {server.tool_names.length > 6 && (
+                <span style={{ fontSize: 10, color: "rgba(255,255,255,0.22)" }}>+{server.tool_names.length - 6} more</span>
+              )}
+            </div>
+          )}
+
+          {testResult[server.id] && (
+            <p style={{ fontSize: 11, color: testResult[server.id].includes("failed") ? "rgba(248,113,113,0.60)" : "rgba(52,211,153,0.60)", margin: 0 }}>
+              {testResult[server.id]}
+            </p>
+          )}
+        </div>
+      ))}
+
+      {adding ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, padding: "12px 14px", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 12 }}>
+          <input value={nameDraft} onChange={e => setNameDraft(e.target.value)} placeholder="Name (e.g. Google Drive)" className="input" />
+          <input value={urlDraft} onChange={e => setUrlDraft(e.target.value)} placeholder="MCP server URL" className="input" />
+          <input value={keyDraft} onChange={e => setKeyDraft(e.target.value)} placeholder="API key (optional)" className="input" type="password" />
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={handleAdd} disabled={saving || !nameDraft.trim() || !urlDraft.trim()} className="btn btn--sm" style={{ flex: 1, justifyContent: "center" }}>
+              {saving ? "Adding…" : "Add tool"}
+            </button>
+            <button onClick={() => { setAdding(false); setNameDraft(""); setUrlDraft(""); setKeyDraft(""); }} className="btn btn--sm btn--ghost">
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button onClick={() => setAdding(true)} className="btn btn--ghost" style={{ width: "100%", justifyContent: "center", fontSize: 12 }}>
+          + Connect a tool
+        </button>
+      )}
+    </div>
+  );
+}
+
+
+// ---------------------------------------------------------------------------
 // Main settings page
 // ---------------------------------------------------------------------------
 export default function SettingsPage() {
   const { clones } = useClones();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const clone = clones.find(c => c.clone_id === selectedId) ?? clones[0] ?? null;
-  const { org } = useOrg();
-
-  const [keys, setKeys] = useState<Record<Provider, KeyState>>(
-    () =>
-      Object.fromEntries(
-        PROVIDERS.map(({ id }) => [
-          id,
-          { saved: "", draft: "", saving: false, clearing: false, revealed: false },
-        ])
-      ) as Record<Provider, KeyState>
-  );
-
-  useEffect(() => {
-    fetch("/api/keys")
-      .then((r) => r.json())
-      .then((data: Record<Provider, string>) => {
-        setKeys((prev) => {
-          const next = { ...prev };
-          for (const id of PROVIDERS.map((p) => p.id)) {
-            next[id] = { ...next[id], saved: data[id] ?? "" };
-          }
-          return next;
-        });
-      })
-      .catch(() => {});
-  }, []);
-
-  function updateKey(id: Provider, partial: Partial<KeyState>) {
-    setKeys((prev) => ({ ...prev, [id]: { ...prev[id], ...partial } }));
-  }
-
-  async function handleSave(id: Provider) {
-    const draft = keys[id].draft.trim();
-    if (!draft) return;
-    updateKey(id, { saving: true });
-    try {
-      await fetch("/api/keys", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ provider: id, key: draft }),
-      });
-      updateKey(id, { saved: draft.slice(0, 8) + "****", draft: "", saving: false });
-    } catch {
-      updateKey(id, { saving: false });
-    }
-  }
-
-  async function handleClear(id: Provider) {
-    updateKey(id, { clearing: true });
-    try {
-      await fetch(`/api/keys/${id}`, { method: "DELETE" });
-      updateKey(id, { saved: "", draft: "", clearing: false });
-    } catch {
-      updateKey(id, { clearing: false });
-    }
-  }
-
-  const FASTAPI = process.env.NEXT_PUBLIC_FASTAPI_URL ?? "https://doppel.up.railway.app";
-
-  const KEY_GROUPS: { label: string; group: string; hint?: React.ReactNode }[] = [
-    { label: "LLM", group: "llm" },
-    {
-      label: "Google OAuth", group: "google",
-      hint: <p style={{ fontSize: 12, color: "rgba(255,255,255,0.30)", lineHeight: 1.6, margin: 0 }}>
-        Create a Google Cloud project, enable the Gmail API, and add{" "}
-        <code style={{ color: "rgba(255,255,255,0.45)", background: "rgba(255,255,255,0.06)", padding: "1px 4px", borderRadius: 4 }}>{FASTAPI}/ingestion/gmail/callback</code>{" "}
-        as an authorized redirect URI.
-      </p>,
-    },
-    {
-      label: "Gmail Push (Pub/Sub)", group: "gmail_push",
-      hint: <p style={{ fontSize: 12, color: "rgba(255,255,255,0.30)", lineHeight: 1.6, margin: 0 }}>
-        Required for auto-receive — new emails generate drafts automatically. Create a Pub/Sub topic in GCP, grant{" "}
-        <code style={{ color: "rgba(255,255,255,0.45)", background: "rgba(255,255,255,0.06)", padding: "1px 4px", borderRadius: 4 }}>gmail-api-push@system.gserviceaccount.com</code>{" "}
-        Pub/Sub Publisher role, then add a push subscription pointing to{" "}
-        <code style={{ color: "rgba(255,255,255,0.45)", background: "rgba(255,255,255,0.06)", padding: "1px 4px", borderRadius: 4 }}>{FASTAPI}/ingestion/gmail/push-event?token=&lt;your-token&gt;</code>.
-      </p>,
-    },
-    {
-      label: "GitHub OAuth", group: "github",
-      hint: <p style={{ fontSize: 12, color: "rgba(255,255,255,0.30)", lineHeight: 1.6, margin: 0 }}>
-        Create a GitHub OAuth app. Set the callback to{" "}
-        <code style={{ color: "rgba(255,255,255,0.45)", background: "rgba(255,255,255,0.06)", padding: "1px 4px", borderRadius: 4 }}>{FASTAPI}/ingestion/github/callback</code>.
-      </p>,
-    },
-    {
-      label: "Notion Integration", group: "notion",
-      hint: <p style={{ fontSize: 12, color: "rgba(255,255,255,0.30)", lineHeight: 1.6, margin: 0 }}>
-        Create a Notion integration at{" "}
-        <code style={{ color: "rgba(255,255,255,0.45)", background: "rgba(255,255,255,0.06)", padding: "1px 4px", borderRadius: 4 }}>notion.so/my-integrations</code>.
-        Set redirect URI to{" "}
-        <code style={{ color: "rgba(255,255,255,0.45)", background: "rgba(255,255,255,0.06)", padding: "1px 4px", borderRadius: 4 }}>{FASTAPI}/ingestion/notion/callback</code>.
-      </p>,
-    },
-    {
-      label: "Slack Bot", group: "slack",
-      hint: <p style={{ fontSize: 12, color: "rgba(255,255,255,0.30)", lineHeight: 1.6, margin: 0 }}>
-        Create a Slack app at{" "}
-        <code style={{ color: "rgba(255,255,255,0.45)", background: "rgba(255,255,255,0.06)", padding: "1px 4px", borderRadius: 4 }}>api.slack.com/apps</code>.
-        Enable OAuth and add{" "}
-        <code style={{ color: "rgba(255,255,255,0.45)", background: "rgba(255,255,255,0.06)", padding: "1px 4px", borderRadius: 4 }}>{FASTAPI}/slack/oauth/callback</code>{" "}
-        as a redirect URI. The signing secret is under Basic Information.
-      </p>,
-    },
-    {
-      label: "Stripe", group: "stripe",
-      hint: <p style={{ fontSize: 12, color: "rgba(255,255,255,0.30)", lineHeight: 1.6, margin: 0 }}>
-        Get your keys from the{" "}
-        <code style={{ color: "rgba(255,255,255,0.45)", background: "rgba(255,255,255,0.06)", padding: "1px 4px", borderRadius: 4 }}>Developers → API keys</code> page in the Stripe dashboard.
-        Add a webhook endpoint pointing to{" "}
-        <code style={{ color: "rgba(255,255,255,0.45)", background: "rgba(255,255,255,0.06)", padding: "1px 4px", borderRadius: 4 }}>{FASTAPI}/stripe/webhook</code>{" "}
-        and copy the webhook signing secret.
-      </p>,
-    },
-    { label: "Recall.ai", group: "recall" },
-    { label: "ElevenLabs Voice", group: "elevenlabs" },
-  ];
 
   return (
     <div className="db-page">
@@ -727,11 +660,6 @@ export default function SettingsPage() {
           </Link>
         </div>
 
-        <p className="db-eyebrow" style={{ marginBottom: 8 }}>API keys</p>
-        <p style={{ fontSize: 12, color: "rgba(255,255,255,0.30)", marginBottom: 24 }}>
-          Add your own API keys. Leave empty to use the platform&apos;s keys.
-        </p>
-
         <div style={{ display: "flex", gap: 8, marginBottom: 32 }}>
           {[
             { label: "Activity", href: "/dashboard/activity" },
@@ -743,43 +671,7 @@ export default function SettingsPage() {
           ))}
         </div>
 
-        {!clone && (
-          <div className="card" style={{ marginBottom: 24 }}>
-            <p style={{ fontSize: 13, color: "rgba(255,255,255,0.35)", margin: 0 }}>Create your clone first to save API keys.</p>
-          </div>
-        )}
-
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {KEY_GROUPS.map(({ label, group, hint }) => {
-            const groupProviders = PROVIDERS.filter((p) => p.group === group);
-            return (
-              <div key={group}>
-                <p className="db-eyebrow" style={{ padding: "16px 4px 8px", marginBottom: 0 }}>{label}</p>
-                {hint && (
-                  <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, padding: 16, marginBottom: 12 }}>
-                    {hint}
-                  </div>
-                )}
-                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                  {groupProviders.map((p) => (
-                    <KeyCard
-                      key={p.id}
-                      provider={p.id}
-                      label={p.label}
-                      description={p.description}
-                      placeholder={p.placeholder}
-                      keyState={keys[p.id]}
-                      onChange={(val) => updateKey(p.id, { draft: val })}
-                      onSave={() => handleSave(p.id)}
-                      onClear={() => handleClear(p.id)}
-                      onReveal={() => updateKey(p.id, { revealed: !keys[p.id].revealed })}
-                    />
-                  ))}
-                </div>
-              </div>
-            );
-          })}
-
           {/* Clone selector for per-clone settings */}
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "20px 0 4px" }}>
             <p className="db-eyebrow" style={{ margin: 0 }}>Clone settings</p>
@@ -794,6 +686,9 @@ export default function SettingsPage() {
 
           <p className="db-eyebrow" style={{ padding: "24px 4px 8px", marginBottom: 0 }}>Preservation</p>
           <PreservationPanel cloneHandle={clone?.handle ?? null} />
+
+          <p className="db-eyebrow" style={{ padding: "24px 4px 8px", marginBottom: 0 }}>Connected tools</p>
+          <ConnectedToolsPanel cloneId={clone?.clone_id ?? null} />
 
           <p className="db-eyebrow" style={{ padding: "24px 4px 8px", marginBottom: 0 }}>Your data rights</p>
           <GdprPanel cloneHandle={clone?.handle ?? null} />
