@@ -504,7 +504,6 @@ class CreateCloneRequest(BaseModel):
     user_id: str
     handle: str
     display_name: str
-    template_slug: str | None = None  # 'aristotle' | 'marcus' | 'sun' | 'benjamin'
 
 
 @app.post("/clones", status_code=201)
@@ -558,29 +557,15 @@ async def create_clone(
     org_rec = org_row.mappings().first()
     initial_access_mode = (org_rec["default_clone_access_mode"] if org_rec else None) or "private"
 
-    # Resolve template — copy decision_profile if a slug is provided
-    template_id = None
-    decision_profile = "{}"
-    if body.template_slug:
-        tmpl_row = await session.execute(
-            sql_text("SELECT id, decision_profile FROM clone_templates WHERE slug = :slug AND is_active = TRUE"),
-            {"slug": body.template_slug},
-        )
-        tmpl = tmpl_row.mappings().first()
-        if tmpl:
-            import json
-            template_id = str(tmpl["id"])
-            decision_profile = json.dumps(tmpl["decision_profile"])
-
     try:
         await session.execute(
             sql_text("""
                 INSERT INTO clone_identity
                   (clone_id, display_name, handle, user_id, access_mode,
-                   style_fingerprint, value_system, template_id, decision_profile)
+                   style_fingerprint, value_system)
                 VALUES
                   (:clone_id, :display_name, :handle, :user_id, :access_mode,
-                   '{}', '{}', :template_id, :decision_profile)
+                   '{}', '{}')
             """),
             {
                 "clone_id": str(clone_id),
@@ -588,8 +573,6 @@ async def create_clone(
                 "handle": body.handle,
                 "user_id": body.user_id,
                 "access_mode": initial_access_mode,
-                "template_id": template_id,
-                "decision_profile": decision_profile,
             },
         )
         await session.commit()
@@ -601,15 +584,6 @@ async def create_clone(
 
     return {"clone_id": str(clone_id), "handle": body.handle}
 
-
-@app.get("/clone-templates")
-async def list_clone_templates(session: AsyncSession = Depends(get_session)) -> dict:
-    """Return all active clone templates for the create-clone UI."""
-    rows = await session.execute(
-        sql_text("SELECT id, slug, name, tagline, domain, decision_profile FROM clone_templates WHERE is_active = TRUE ORDER BY domain")
-    )
-    templates = [dict(r) for r in rows.mappings()]
-    return {"templates": templates}
 
 
 @app.get("/clones/me")

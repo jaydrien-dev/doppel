@@ -39,7 +39,6 @@ async function apiFetch<T>(
 export async function createClone(params: {
   handle: string;
   display_name: string;
-  template_slug?: string;
 }): Promise<{ clone_id: string; handle: string }> {
   return apiFetch("/api/clones", {
     method: "POST",

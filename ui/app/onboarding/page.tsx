@@ -15,11 +15,6 @@ const I = {
       <path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
     </svg>
   ),
-  back: (
-    <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-      <path d="M13 8H3M7 4l-4 4 4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-    </svg>
-  ),
   check: (
     <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
       <path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
@@ -62,84 +57,6 @@ const I = {
       <rect x="7" y="2" width="6" height="3" rx="0.8" stroke="currentColor" strokeWidth="1.4" fill="currentColor"/>
     </svg>
   ),
-};
-
-// ─── Decision model metadata ──────────────────────────────────────────────────
-
-const MODEL_META: Record<string, {
-  icon: React.ReactNode;
-  description: string;
-  traits: string[];
-  domain_label: string;
-}> = {
-  aristotle: {
-    domain_label: "General purpose",
-    description: "Weighs evidence from all angles, seeks the middle path, and recommends action when expected value is clear. Best all-around starting point.",
-    traits: ["Balanced risk", "Long-term focus", "Analytical"],
-    icon: (
-      <svg width="28" height="28" viewBox="0 0 32 32" fill="none">
-        {/* Balance scales */}
-        <line x1="16" y1="5" x2="16" y2="27" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
-        <line x1="10" y1="27" x2="22" y2="27" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
-        <line x1="6" y1="11" x2="26" y2="11" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
-        <line x1="6" y1="11" x2="6" y2="18" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round"/>
-        <line x1="26" y1="11" x2="26" y2="18" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round"/>
-        <path d="M3 18 Q6 23 9 18" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round"/>
-        <path d="M23 18 Q26 23 29 18" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round"/>
-        <circle cx="16" cy="5" r="1.2" fill="currentColor"/>
-      </svg>
-    ),
-  },
-  marcus: {
-    domain_label: "Leadership",
-    description: "Duty-first reasoning hardened against loss aversion. Thinks in decades, not quarters. Unmoved by short-term noise or sunk costs.",
-    traits: ["10-year horizon", "Loss-immune", "Contrarian"],
-    icon: (
-      <svg width="28" height="28" viewBox="0 0 32 32" fill="none">
-        {/* Roman arch — enduring structure */}
-        <line x1="7" y1="27" x2="7" y2="13" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
-        <line x1="25" y1="27" x2="25" y2="13" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
-        <path d="M7 13 Q16 4 25 13" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round"/>
-        <line x1="4" y1="27" x2="28" y2="27" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
-        <line x1="11" y1="27" x2="11" y2="19" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
-        <line x1="21" y1="27" x2="21" y2="19" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
-      </svg>
-    ),
-  },
-  sun: {
-    domain_label: "Strategy",
-    description: "Finds asymmetric angles others miss. Decides fast on incomplete information, avoids consensus traps, and adapts as facts emerge.",
-    traits: ["High-variance bets", "Acts in fog", "Strongly contrarian"],
-    icon: (
-      <svg width="28" height="28" viewBox="0 0 32 32" fill="none">
-        {/* Abstract eye — strategic sight */}
-        <path d="M3 16 Q16 5 29 16 Q16 27 3 16Z" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinejoin="round"/>
-        <circle cx="16" cy="16" r="4" stroke="currentColor" strokeWidth="1.4" fill="none"/>
-        <circle cx="16" cy="16" r="1.4" fill="currentColor"/>
-        <line x1="16" y1="2" x2="16" y2="5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
-        <line x1="16" y1="27" x2="16" y2="30" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
-      </svg>
-    ),
-  },
-  benjamin: {
-    domain_label: "Finance",
-    description: "Patient, evidence-driven, compounding-focused. Requires strong data before committing. Purely forward-looking — past spend is irrelevant.",
-    traits: ["Conservative risk", "Exhaustive research", "Forward-looking"],
-    icon: (
-      <svg width="28" height="28" viewBox="0 0 32 32" fill="none">
-        {/* Compound growth curve */}
-        <path d="M5 26 C8 26 10 25 13 22 C16 19 18 14 22 9 L27 5" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
-        <circle cx="27" cy="5" r="1.8" fill="currentColor"/>
-        <line x1="5" y1="28" x2="28" y2="28" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round"/>
-        <line x1="5" y1="28" x2="5" y2="4" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round"/>
-        {/* tick marks */}
-        <line x1="12" y1="28" x2="12" y2="26" stroke="currentColor" strokeWidth="1" strokeLinecap="round"/>
-        <line x1="19" y1="28" x2="19" y2="26" stroke="currentColor" strokeWidth="1" strokeLinecap="round"/>
-        <line x1="5" y1="20" x2="7" y2="20" stroke="currentColor" strokeWidth="1" strokeLinecap="round"/>
-        <line x1="5" y1="13" x2="7" y2="13" stroke="currentColor" strokeWidth="1" strokeLinecap="round"/>
-      </svg>
-    ),
-  },
 };
 
 // ─── Sources data ────────────────────────────────────────────────────────────
@@ -268,16 +185,18 @@ function toHandle(name: string): string {
 
 // ─── Pre-step 1: Name + handle ───────────────────────────────────────────────
 
-function NameStep({
+function CreateStep({
   defaultName,
-  onNext,
+  onCreated,
 }: {
   defaultName: string;
-  onNext: (name: string, handle: string) => void;
+  onCreated: (clone: { clone_id: string; handle: string; display_name: string }) => void;
 }) {
-  const [name, setName]             = useState(defaultName);
-  const [handle, setHandle]         = useState(() => toHandle(defaultName));
+  const [name, setName]                 = useState(defaultName);
+  const [handle, setHandle]             = useState(() => toHandle(defaultName));
   const [handleEdited, setHandleEdited] = useState(false);
+  const [creating, setCreating]         = useState(false);
+  const [error, setError]               = useState<string | null>(null);
 
   function onNameChange(v: string) {
     setName(v);
@@ -291,9 +210,27 @@ function NameStep({
 
   const validHandle = /^[a-z0-9][a-z0-9-]{1,30}[a-z0-9]$/.test(handle);
 
-  function handleContinue() {
-    if (!name.trim() || !validHandle) return;
-    onNext(name.trim(), handle.trim());
+  async function handleCreate() {
+    const trimName   = name.trim();
+    const trimHandle = handle.trim();
+    if (!trimName || !validHandle) return;
+    setError(null);
+    setCreating(true);
+    try {
+      const result = await createClone({ handle: trimHandle, display_name: trimName });
+      onCreated({ ...result, display_name: trimName });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg.includes("409") || msg.toLowerCase().includes("unique") || msg.toLowerCase().includes("already")) {
+        setError("That handle is already taken. Try a different one.");
+        setHandle(trimHandle + "-" + Math.random().toString(36).slice(2, 6));
+        setHandleEdited(true);
+      } else {
+        setError("Failed to create clone. Please try again.");
+      }
+    } finally {
+      setCreating(false);
+    }
   }
 
   return (
@@ -313,7 +250,7 @@ function NameStep({
             onChange={(e) => onNameChange(e.target.value)}
             placeholder="e.g. Elan Brightwater"
             autoFocus
-            onKeyDown={(e) => e.key === "Enter" && handleContinue()}
+            onKeyDown={(e) => e.key === "Enter" && handleCreate()}
             style={{
               width: "100%", boxSizing: "border-box",
               background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)",
@@ -336,7 +273,7 @@ function NameStep({
               type="text"
               value={handle}
               onChange={(e) => onHandleChange(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleContinue()}
+              onKeyDown={(e) => e.key === "Enter" && handleCreate()}
               style={{
                 flex: 1, background: "transparent", border: "none",
                 padding: "12px 14px 12px 0",
@@ -349,262 +286,19 @@ function NameStep({
           </p>
         </div>
 
-        <button
-          className="ob-btn ob-btn--primary ob-btn--lg"
-          onClick={handleContinue}
-          disabled={!name.trim() || !validHandle}
-          style={{ marginTop: 8 }}
-        >
-          Continue {I.arrow}
-        </button>
-      </div>
-    </>
-  );
-}
+        {error && (
+          <p style={{ fontSize: 12, color: "rgba(248,113,113,0.80)", padding: "10px 14px", borderRadius: 10, background: "rgba(248,113,113,0.07)", border: "1px solid rgba(248,113,113,0.15)" }}>
+            {error}
+          </p>
+        )}
 
-// ─── Pre-step 2: Decision model ───────────────────────────────────────────────
-
-function DecisionModelStep({
-  name,
-  handle,
-  onCreated,
-  onBack,
-}: {
-  name: string;
-  handle: string;
-  onCreated: (clone: { clone_id: string; handle: string; display_name: string }) => void;
-  onBack: () => void;
-}) {
-  const [selected, setSelected]   = useState<string>("aristotle");
-  const [templates, setTemplates] = useState<{ slug: string; name: string; tagline: string; domain: string }[]>([]);
-  const [creating, setCreating]   = useState(false);
-  const [error, setError]         = useState<string | null>(null);
-  const [hoveredSlug, setHoveredSlug] = useState<string | null>(null);
-
-  useEffect(() => {
-    fetch("/fastapi/clone-templates")
-      .then(r => r.ok ? r.json() : null)
-      .then(d => {
-        if (d?.templates?.length) setTemplates(d.templates);
-        else {
-          // fallback: show all known models
-          setTemplates([
-            { slug: "aristotle", name: "Aristotle", tagline: "", domain: "general" },
-            { slug: "marcus",    name: "Marcus",    tagline: "", domain: "leadership" },
-            { slug: "sun",       name: "Sun",       tagline: "", domain: "strategy" },
-            { slug: "benjamin",  name: "Benjamin",  tagline: "", domain: "finance" },
-          ]);
-        }
-      })
-      .catch(() => {
-        setTemplates([
-          { slug: "aristotle", name: "Aristotle", tagline: "", domain: "general" },
-          { slug: "marcus",    name: "Marcus",    tagline: "", domain: "leadership" },
-          { slug: "sun",       name: "Sun",       tagline: "", domain: "strategy" },
-          { slug: "benjamin",  name: "Benjamin",  tagline: "", domain: "finance" },
-        ]);
-      });
-  }, []);
-
-  async function handleCreate() {
-    setError(null);
-    setCreating(true);
-    try {
-      const result = await createClone({ handle, display_name: name, template_slug: selected || undefined });
-      onCreated({ ...result, display_name: name });
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
-      if (msg.includes("409") || msg.toLowerCase().includes("unique") || msg.toLowerCase().includes("already")) {
-        setError("That handle is already taken. Go back and choose a different one.");
-      } else {
-        setError("Failed to create clone. Please try again.");
-      }
-    } finally {
-      setCreating(false);
-    }
-  }
-
-  return (
-    <>
-      <div className="ob-eyebrow"><span className="ob-eyebrow__dot" /> New clone · decision model</div>
-      <h1 className="ob-h-title">Pick a <em>decision model.</em></h1>
-      <p className="ob-h-sub">
-        Shapes how your clone reasons through trade-offs and recommends action.
-        Doesn&apos;t affect voice, style, or knowledge.
-      </p>
-
-      {/* Model cards — 2×2 grid */}
-      <div style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(2, 1fr)",
-        gap: 10,
-        maxWidth: 580,
-        marginTop: 32,
-      }}>
-        <style>{`
-          @media (max-width: 500px) {
-            .dm-grid { grid-template-columns: 1fr !important; }
-          }
-        `}</style>
-        {templates.map(t => {
-          const meta = MODEL_META[t.slug];
-          const isSelected = selected === t.slug;
-          const isHovered  = hoveredSlug === t.slug && !isSelected;
-
-          return (
-            <button
-              key={t.slug}
-              type="button"
-              onClick={() => setSelected(t.slug)}
-              onMouseEnter={() => setHoveredSlug(t.slug)}
-              onMouseLeave={() => setHoveredSlug(null)}
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: 14,
-                padding: "20px 18px",
-                borderRadius: 16,
-                cursor: "pointer",
-                fontFamily: "inherit",
-                textAlign: "left",
-                background: isSelected
-                  ? "rgba(255,255,255,0.08)"
-                  : isHovered
-                    ? "rgba(255,255,255,0.05)"
-                    : "rgba(255,255,255,0.03)",
-                border: `1px solid ${
-                  isSelected
-                    ? "rgba(255,255,255,0.22)"
-                    : isHovered
-                      ? "rgba(255,255,255,0.12)"
-                      : "rgba(255,255,255,0.07)"
-                }`,
-                boxShadow: isSelected ? "0 0 0 1px rgba(255,255,255,0.06) inset" : "none",
-                transition: "background 160ms, border-color 160ms, box-shadow 160ms",
-                position: "relative",
-              }}
-            >
-              {/* Selection indicator dot */}
-              <div style={{
-                position: "absolute",
-                top: 14,
-                right: 14,
-                width: 16,
-                height: 16,
-                borderRadius: "50%",
-                border: `1.5px solid ${isSelected ? "rgba(255,255,255,0.60)" : "rgba(255,255,255,0.14)"}`,
-                background: isSelected ? "rgba(255,255,255,0.85)" : "transparent",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                transition: "all 160ms",
-                flexShrink: 0,
-              }}>
-                {isSelected && (
-                  <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
-                    <path d="M1.5 4l1.8 1.8L6.5 2.2" stroke="#080808" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
-                  </svg>
-                )}
-              </div>
-
-              {/* Icon container */}
-              <div style={{
-                width: 46,
-                height: 46,
-                borderRadius: 12,
-                background: isSelected ? "rgba(255,255,255,0.09)" : "rgba(255,255,255,0.04)",
-                border: `1px solid ${isSelected ? "rgba(255,255,255,0.14)" : "rgba(255,255,255,0.07)"}`,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                color: isSelected ? "rgba(255,255,255,0.85)" : "rgba(255,255,255,0.38)",
-                transition: "all 160ms",
-                flexShrink: 0,
-              }}>
-                {meta?.icon}
-              </div>
-
-              {/* Name + domain */}
-              <div>
-                <p style={{
-                  fontSize: 15,
-                  fontWeight: 500,
-                  color: isSelected ? "rgba(255,255,255,0.90)" : "rgba(255,255,255,0.60)",
-                  margin: "0 0 4px",
-                  transition: "color 160ms",
-                }}>
-                  {t.name}
-                </p>
-                <p style={{
-                  fontSize: 10,
-                  textTransform: "uppercase",
-                  letterSpacing: "0.09em",
-                  color: isSelected ? "rgba(255,255,255,0.35)" : "rgba(255,255,255,0.22)",
-                  margin: 0,
-                  transition: "color 160ms",
-                }}>
-                  {meta?.domain_label || t.domain}
-                </p>
-              </div>
-
-              {/* Description */}
-              <p style={{
-                fontSize: 12,
-                color: isSelected ? "rgba(255,255,255,0.45)" : "rgba(255,255,255,0.28)",
-                margin: 0,
-                lineHeight: 1.65,
-                flexGrow: 1,
-                transition: "color 160ms",
-              }}>
-                {meta?.description || t.tagline}
-              </p>
-
-              {/* Trait pills */}
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
-                {(meta?.traits || []).map(trait => (
-                  <span
-                    key={trait}
-                    style={{
-                      fontSize: 10,
-                      padding: "3px 8px",
-                      borderRadius: 99,
-                      background: isSelected ? "rgba(255,255,255,0.07)" : "rgba(255,255,255,0.04)",
-                      border: `1px solid ${isSelected ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.07)"}`,
-                      color: isSelected ? "rgba(255,255,255,0.50)" : "rgba(255,255,255,0.28)",
-                      transition: "all 160ms",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {trait}
-                  </span>
-                ))}
-              </div>
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Description callout */}
-      <p style={{ fontSize: 11, color: "rgba(255,255,255,0.22)", marginTop: 12, maxWidth: 580 }}>
-        You can switch models later from your clone&apos;s settings.
-      </p>
-
-      {error && (
-        <p style={{ fontSize: 12, color: "rgba(248,113,113,0.80)", padding: "10px 14px", borderRadius: 10, background: "rgba(248,113,113,0.07)", border: "1px solid rgba(248,113,113,0.15)", maxWidth: 580, marginTop: 8 }}>
-          {error}
-        </p>
-      )}
-
-      <div className="ob-foot-row" style={{ marginTop: 20 }}>
         <button
           className="ob-btn ob-btn--primary ob-btn--lg"
           onClick={handleCreate}
-          disabled={creating}
+          disabled={creating || !name.trim() || !validHandle}
+          style={{ marginTop: 8 }}
         >
           {creating ? "Creating…" : <>Create clone {I.arrow}</>}
-        </button>
-        <button className="ob-btn ob-btn--ghost" onClick={onBack}>
-          {I.back} Back
         </button>
       </div>
     </>
@@ -1046,7 +740,6 @@ function ShareStep({
 // ─── Main wizard ─────────────────────────────────────────────────────────────
 
 type ActiveClone = { clone_id: string; handle: string; display_name: string };
-type PreStage = "name" | "model";
 
 function OnboardingWizard() {
   const router       = useRouter();
@@ -1058,8 +751,6 @@ function OnboardingWizard() {
   const gmailConnected = searchParams.get("gmail_connected") === "1";
 
   const [activeClone, setActiveClone] = useState<ActiveClone | null | false>(null);
-  const [preStage, setPreStage]       = useState<PreStage>("name");
-  const [draft, setDraft]             = useState<{ name: string; handle: string } | null>(null);
 
   useEffect(() => {
     if (isLoading) return;
@@ -1117,27 +808,14 @@ function OnboardingWizard() {
       <main style={{ flex: 1, position: "relative", zIndex: 1 }}>
         <div className="ob-stage">
 
-          {/* Pre-clone: name */}
-          {activeClone === false && preStage === "name" && (
-            <NameStep
+          {/* Pre-clone: name + create */}
+          {activeClone === false && (
+            <CreateStep
               defaultName={defaultName}
-              onNext={(name, handle) => {
-                setDraft({ name, handle });
-                setPreStage("model");
-              }}
-            />
-          )}
-
-          {/* Pre-clone: decision model + creation */}
-          {activeClone === false && preStage === "model" && draft && (
-            <DecisionModelStep
-              name={draft.name}
-              handle={draft.handle}
               onCreated={(clone) => {
                 setActiveClone(clone);
                 setStep(0);
               }}
-              onBack={() => setPreStage("name")}
             />
           )}
 

@@ -14,7 +14,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from doppel.brain.identity.style import load_style, render_style_prompt
 from doppel.brain.identity.values import load_values, render_values_prompt
-from doppel.brain.identity.decision_dna import render_decision_dna
 from doppel.brain.models.types import EpistemicProfile, StyleFingerprint, ValueSystem
 
 # ── In-process identity cache ─────────────────────────────────────────────────
@@ -35,12 +34,11 @@ class IdentityLayer:
     that get injected into every LLM call.
     """
 
-    def __init__(self, style: StyleFingerprint, values: ValueSystem, epistemic: EpistemicProfile, clone_name: str, decision_profile: dict | None = None):
+    def __init__(self, style: StyleFingerprint, values: ValueSystem, epistemic: EpistemicProfile, clone_name: str):
         self.style = style
         self.values = values
         self.epistemic = epistemic
         self.clone_name = clone_name
-        self.decision_profile = decision_profile or {}
 
     @classmethod
     async def load(cls, session: AsyncSession, clone_id: UUID) -> "IdentityLayer":
@@ -52,13 +50,12 @@ class IdentityLayer:
         style, values, epistemic = await _load_all(session, clone_id)
         from sqlalchemy import text
         result = await session.execute(
-            text("SELECT display_name, decision_profile FROM clone_identity WHERE clone_id = :id"),
+            text("SELECT display_name FROM clone_identity WHERE clone_id = :id"),
             {"id": str(clone_id)},
         )
         row = result.mappings().first()
         name = row["display_name"] if row else "Unknown"
-        decision_profile = row["decision_profile"] if row else {}
-        identity = cls(style=style, values=values, epistemic=epistemic, clone_name=name, decision_profile=decision_profile)
+        identity = cls(style=style, values=values, epistemic=epistemic, clone_name=name)
         _IDENTITY_CACHE[key] = (time.monotonic(), identity)
         return identity
 
@@ -84,7 +81,6 @@ class IdentityLayer:
             + render_epistemic_prompt(self.epistemic)
             + "\n\n"
             + render_style_prompt(self.style)
-            + (("\n\n" + render_decision_dna(self.decision_profile)) if self.decision_profile else "")
         )
 
     def enforce_boundaries(self, response: str) -> tuple[bool, str | None]:
