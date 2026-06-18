@@ -163,11 +163,15 @@ class DoppelBrain:
 
         # ── 6. Metacognition check ────────────────────────────────────────
         prior_responses = [t.content for t in working if t.role == "clone"]
-        confidence, needs_escalation, escalation_reason = self._metacognition.assess(
+        decision = self._metacognition.assess(
             trace=trace,
             response_text=response_text,
             prior_responses=prior_responses,
+            perceived=perceived,
         )
+        confidence       = decision.confidence
+        needs_escalation = decision.needs_escalation
+        escalation_reason = decision.escalation_reason
         # Propagate updated escalation back to trace for logging
         trace.needs_escalation = needs_escalation
         trace.escalation_reason = escalation_reason
@@ -379,11 +383,15 @@ class DoppelBrain:
 
         # Post-stream: metacognition + self-check (sync, no extra LLM call)
         prior_responses = [t.content for t in working if t.role == "clone"]
-        confidence, needs_escalation, escalation_reason = self._metacognition.assess(
+        decision = self._metacognition.assess(
             trace=trace,
             response_text=full_text,
             prior_responses=prior_responses,
+            perceived=perceived,
         )
+        confidence        = decision.confidence
+        needs_escalation  = decision.needs_escalation
+        escalation_reason = decision.escalation_reason
         trace.needs_escalation = needs_escalation
         trace.escalation_reason = escalation_reason
         trace.confidence = confidence
@@ -398,6 +406,8 @@ class DoppelBrain:
             "path_taken": trace.path,
             "confidence": confidence,
             "needs_escalation": needs_escalation,
+            "approval_path": decision.approval_path.value,
+            "consequentiality": decision.consequentiality,
             "corrected_response": corrected,
             "sources": [s.model_dump(mode="json") for s in (trace.sources or [])],
             "latency_ms": latency_ms,
@@ -420,32 +430,44 @@ class DoppelBrain:
 
 def _message_needs_tools(message: str) -> bool:
     """
-    Cheap heuristic to decide if a message likely requires a tool call.
-    False positives are fine — tool_path.run() gracefully falls back to
-    a text answer if no tool is actually invoked.
+    Decide if a message should be routed to the tool path.
+    Two tiers:
+      1. Explicit service name → always route (LLM decides whether to invoke)
+      2. Generic action + generic subject → route (e.g. "find the file")
+    False positives are fine — tool_path gracefully falls back to text if
+    no tool is actually called.
     """
-    import re
     lower = message.lower()
-    # Action verbs that suggest an external operation
-    action_keywords = (
-        "post", "send", "share", "publish",        # write actions
-        "search", "find", "look up", "query",       # read actions
-        "create", "make", "add", "insert",          # create actions
-        "delete", "remove", "clear", "archive",     # delete actions
-        "list", "show me", "get me", "fetch",       # list actions
-        "update", "edit", "rename", "move",         # update actions
+
+    # Tier 1: specific service name mentioned → route regardless of verb
+    explicit_services = (
+        "slack", "google drive", "gdrive",
+        "gmail", "google mail",
+        "google calendar", "gcal",
+        "github", "notion", "linear",
+        "my drive", "my calendar", "my inbox",
+        "my slack", "my github", "my notion",
     )
-    # Service keywords that suggest an external platform
-    service_keywords = (
-        "slack", "google drive", "drive", "notion",
-        "github", "linear", "jira", "confluence",
-        "gmail", "email", "calendar", "sheet",
-        "spreadsheet", "doc", "pdf", "file", "folder",
-        "channel", "message", "ticket", "issue", "pr",
+    if any(kw in lower for kw in explicit_services):
+        return True
+
+    # Tier 2: generic action + generic object (still needs both to avoid false positives)
+    action_kw = (
+        "post", "send", "share", "publish",
+        "search", "find", "look up", "query",
+        "create", "make", "add", "insert",
+        "delete", "remove", "clear", "archive",
+        "list", "show me", "get me", "fetch",
+        "update", "edit", "rename", "move",
     )
-    has_action = any(kw in lower for kw in action_keywords)
-    has_service = any(kw in lower for kw in service_keywords)
-    return has_action and has_service
+    subject_kw = (
+        "file", "folder", "email", "message",
+        "channel", "issue", "pull request", "ticket",
+        "event", "meeting", "doc", "sheet", "spreadsheet",
+    )
+    has_action = any(kw in lower for kw in action_kw)
+    has_subject = any(kw in lower for kw in subject_kw)
+    return has_action and has_subject
 
 
 def _is_knowledge_weak(memory: MemoryContext) -> bool:

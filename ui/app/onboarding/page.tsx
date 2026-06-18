@@ -383,8 +383,8 @@ function SourceStep({
     return (
       <>
         <div className="ob-eyebrow"><span className="ob-eyebrow__dot" style={{ background: "#FBBF24", boxShadow: "0 0 0 4px rgba(251,191,36,0.20)" }} /> Step 1 of 4 · paste text</div>
-        <h1 className="ob-h-title">Paste anything your <em>clone should know.</em></h1>
-        <p className="ob-h-sub">Docs, emails, meeting notes — whatever captures how you think and write.</p>
+        <h1 className="ob-h-title">Paste something you&apos;ve <em>written.</em></h1>
+        <p className="ob-h-sub">Emails, docs, notes — anything that captures how you actually think and write.</p>
         <div className="ob-paste-card">
           <textarea
             autoFocus
@@ -411,8 +411,8 @@ function SourceStep({
     <>
       <div className="ob-eyebrow"><span className="ob-eyebrow__dot" /> Step 1 of 4 · 10 seconds</div>
       <CloneNameEditor handle={cloneHandle} initialName={cloneDisplayName} />
-      <h1 className="ob-h-title">Welcome, {first}. Let&apos;s <em>feed your clone.</em></h1>
-      <p className="ob-h-sub">Pick a source. Your clone starts learning right now — you&apos;ll see it work in the next step.</p>
+      <h1 className="ob-h-title">Welcome, {first}. Let&apos;s <em>build your clone.</em></h1>
+      <p className="ob-h-sub">Pick a source. Your clone starts capturing your voice right now — you&apos;ll see it in action in the next step.</p>
 
       <div className="ob-sources">
         {SOURCES.map((s) => (
@@ -452,11 +452,11 @@ function SourceStep({
 // ─── Step 1: Seed Q&A ────────────────────────────────────────────────────────
 
 const SEED_QUESTIONS = [
-  "What do you work on and what's your role?",
-  "How do you make hard decisions?",
-  "What do you believe that most people don't?",
-  "What are your top 3 priorities right now?",
-  "How would a close colleague describe your communication style?",
+  "What do you actually do, and what's your level?",
+  "What's a view you hold that most people in your field would push back on?",
+  "How do you make calls when the data is incomplete?",
+  "What are you trying to accomplish in the next 90 days?",
+  "How would your closest colleague describe how you communicate?",
 ];
 
 function QAStep({
@@ -486,9 +486,9 @@ function QAStep({
 
   return (
     <>
-      <div className="ob-eyebrow"><span className="ob-eyebrow__dot" /> Step 2 of 4 · anchor questions</div>
-      <h1 className="ob-h-title">Tell your clone <em>about you.</em></h1>
-      <p className="ob-h-sub">Answer a few questions to anchor your clone&apos;s identity. Skip any you&apos;d rather not answer.</p>
+      <div className="ob-eyebrow"><span className="ob-eyebrow__dot" /> Step 2 of 4 · your perspective</div>
+      <h1 className="ob-h-title">Give your clone <em>your views.</em></h1>
+      <p className="ob-h-sub">A few direct questions to shape how your clone thinks and argues. Skip anything you'd rather not answer.</p>
 
       <div className="flex flex-col gap-3 mt-9 max-w-xl">
         {SEED_QUESTIONS.map((q, i) => (

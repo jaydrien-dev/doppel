@@ -151,8 +151,9 @@ export function InterviewPanel({
 
   const scrollRef   = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const srRef       = useRef<SRInstance | null>(null);
-  const synthRef    = useRef<SpeechSynthesis | null>(null);
+  const srRef          = useRef<SRInstance | null>(null);
+  const synthRef       = useRef<SpeechSynthesis | null>(null);
+  const finalSRRef     = useRef<string>("");  // accumulated final transcript for current answer
 
   // Init speech synthesis ref
   useEffect(() => {
@@ -185,23 +186,30 @@ export function InterviewPanel({
     synthRef.current?.cancel();
   }, []);
 
-  // Start mic
+  // Start mic — accumulates final results in a ref so interim doesn't wipe prior text
   const startListening = useCallback((onResult: (t: string) => void) => {
     if (typeof window === "undefined") return;
     const SR = (window as unknown as Record<string, unknown>).SpeechRecognition as (new () => SRInstance) | undefined
            ?? (window as unknown as Record<string, unknown>).webkitSpeechRecognition as (new () => SRInstance) | undefined;
     if (!SR) return;
 
+    finalSRRef.current = "";  // reset accumulator for new answer
+
     const rec = new SR();
     rec.continuous     = true;
     rec.interimResults = true;
     rec.lang           = "en-US";
     rec.onresult = (e: SREvent) => {
-      let transcript = "";
+      let interim = "";
       for (let i = e.resultIndex; i < Object.keys(e.results).length; i++) {
-        transcript += e.results[i][0].transcript;
+        if (e.results[i].isFinal) {
+          finalSRRef.current += e.results[i][0].transcript + " ";
+        } else {
+          interim += e.results[i][0].transcript;
+        }
       }
-      onResult(transcript);
+      // Show committed text + live interim — never resets prior committed words
+      onResult(finalSRRef.current + interim);
     };
     rec.onerror = () => { setListening(false); };
     rec.onend   = () => { setListening(false); };
@@ -266,6 +274,7 @@ export function InterviewPanel({
 
     stopListening();
     stopSpeaking();
+    finalSRRef.current = "";
 
     const newExchanges: Exchange[] = [...exchanges, { question: currentQuestion, answer: trimmed }];
     setExchanges(newExchanges);

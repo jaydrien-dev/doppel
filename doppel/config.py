@@ -64,6 +64,7 @@ class Settings(BaseSettings):
     stripe_credits_standard_price_id: str = Field(default="", alias="STRIPE_CREDITS_STANDARD_PRICE_ID")
     stripe_credits_pro_price_id: str = Field(default="", alias="STRIPE_CREDITS_PRO_PRICE_ID")
     app_url: str = Field(default="http://localhost:3000", alias="APP_URL")
+    backend_url: str = Field(default="http://localhost:8000", alias="BACKEND_URL")
 
     # --- Ingestion ---
     ingestion_chunk_max_chars: int = 1800   # ~400–450 words per chunk
@@ -118,6 +119,10 @@ class Settings(BaseSettings):
     # --- Gmail Push (Pub/Sub) ---
     gmail_pubsub_topic: str = Field(default="", alias="GMAIL_PUBSUB_TOPIC")
     pubsub_verification_token: str = Field(default="", alias="PUBSUB_VERIFICATION_TOKEN")
+
+    # --- Twilio (WhatsApp + Voice channels) ---
+    twilio_account_sid: str = Field(default="", alias="TWILIO_ACCOUNT_SID")
+    twilio_auth_token: str = Field(default="", alias="TWILIO_AUTH_TOKEN")
 
 
 settings = Settings()  # type: ignore[call-arg]

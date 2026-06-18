@@ -1,9 +1,186 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import useSWR from "swr";
 import Link from "next/link";
 import { useClones } from "@/lib/hooks/useClones";
 import { ClonePicker } from "@/components/dashboard/ClonePicker";
+import { useUser } from "@clerk/nextjs";
+
+const fetcher = (url: string) => fetch(url).then((r) => r.json());
+
+// ---------------------------------------------------------------------------
+// Channels / connected tools panel
+// ---------------------------------------------------------------------------
+
+type ConnectedTool = {
+  id: string;
+  name: string;
+  server_url: string;
+  transport: string;
+  tool_names: string[];
+  enabled: boolean;
+  created_at: string;
+};
+
+const CHANNEL_DEFS: { id: string; label: string; desc: string; oauth?: boolean }[] = [
+  { id: "gmail",  label: "Gmail",          desc: "Read and send email on your behalf.", oauth: true },
+  { id: "gcal",   label: "Google Calendar", desc: "Read and create calendar events.",    oauth: true },
+  { id: "gdrive", label: "Google Drive",    desc: "Search and manage files.",            oauth: true },
+  { id: "slack",  label: "Slack",           desc: "Post messages and read channels.",    oauth: true },
+  { id: "github", label: "GitHub",          desc: "Read issues, PRs, and repos.",        oauth: true },
+  { id: "notion", label: "Notion",          desc: "Read and edit pages.",                oauth: true },
+];
+
+const TOOL_NAME_TO_ID: Record<string, string> = {
+  "Gmail":          "gmail",
+  "Google Calendar": "gcal",
+  "Google Drive":   "gdrive",
+  "Slack":          "slack",
+  "GitHub Integration": "github",
+  "Notion":         "notion",
+};
+
+function ChannelsPanel({ cloneId, cloneHandle }: { cloneId: string; cloneHandle: string }) {
+  const { user } = useUser();
+  const { data, mutate } = useSWR<ConnectedTool[]>(
+    `/api/tools?clone_id=${cloneId}`,
+    fetcher,
+    { refreshInterval: 30_000 }
+  );
+  const tools = data ?? [];
+  const connectedIds = new Set(tools.map((t) => TOOL_NAME_TO_ID[t.name]).filter(Boolean));
+
+  const [disconnecting, setDisconnecting] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  // WhatsApp webhook URL
+  const webhookUrl = typeof window !== "undefined"
+    ? `${window.location.protocol}//${window.location.hostname.replace("3000", "8000")}/webhook/whatsapp/${cloneId}`
+    : `https://api.doppel.ai/webhook/whatsapp/${cloneId}`;
+
+  async function disconnect(toolId: string) {
+    const tool = tools.find((t) => TOOL_NAME_TO_ID[t.name] === toolId);
+    if (!tool) return;
+    setDisconnecting(toolId);
+    await fetch(`/api/tools/${tool.id}`, { method: "DELETE" });
+    mutate();
+    setDisconnecting(null);
+  }
+
+  function connect(serviceId: string) {
+    const uid = user?.id ?? "";
+    window.location.href = `/api/oauth-start?service=${serviceId}&clone_id=${cloneId}&user_id=${uid}`;
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      {/* WhatsApp */}
+      <div style={{
+        borderRadius: 14, border: "1px solid rgba(255,255,255,0.08)",
+        background: "rgba(255,255,255,0.03)", padding: "16px 18px",
+        display: "flex", flexDirection: "column", gap: 10,
+      }}>
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+          <div>
+            <p style={{ fontSize: 13, fontWeight: 500, color: "rgba(255,255,255,0.75)", margin: 0 }}>WhatsApp</p>
+            <p style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", margin: "3px 0 0" }}>
+              Paste this URL into your Twilio number&apos;s webhook settings.
+            </p>
+          </div>
+          <span style={{
+            fontSize: 10, padding: "2px 8px", borderRadius: 999, flexShrink: 0, marginTop: 2,
+            color: "rgba(255,255,255,0.28)", border: "1px solid rgba(255,255,255,0.08)",
+          }}>
+            Manual setup
+          </span>
+        </div>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <code style={{
+            flex: 1, fontSize: 11, padding: "7px 10px", borderRadius: 8,
+            background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)",
+            color: "rgba(255,255,255,0.50)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+          }}>
+            {webhookUrl}
+          </code>
+          <button
+            onClick={() => { navigator.clipboard.writeText(webhookUrl); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
+            style={{
+              padding: "6px 12px", borderRadius: 8, fontSize: 11,
+              background: "transparent", border: "1px solid rgba(255,255,255,0.10)",
+              color: copied ? "rgba(52,211,153,0.80)" : "rgba(255,255,255,0.40)",
+              cursor: "pointer", fontFamily: "inherit", flexShrink: 0,
+              transition: "color 150ms",
+            }}
+          >
+            {copied ? "Copied" : "Copy"}
+          </button>
+        </div>
+      </div>
+
+      {/* OAuth channels */}
+      {CHANNEL_DEFS.map((ch) => {
+        const isConnected = connectedIds.has(ch.id);
+        const isDisconnecting = disconnecting === ch.id;
+
+        return (
+          <div key={ch.id} style={{
+            borderRadius: 14, border: "1px solid rgba(255,255,255,0.08)",
+            background: "rgba(255,255,255,0.03)", padding: "14px 18px",
+            display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12,
+          }}>
+            <div>
+              <p style={{ fontSize: 13, fontWeight: 500, color: "rgba(255,255,255,0.75)", margin: 0 }}>{ch.label}</p>
+              <p style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", margin: "3px 0 0" }}>{ch.desc}</p>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+              {isConnected && (
+                <span style={{
+                  fontSize: 11, padding: "2px 8px", borderRadius: 999,
+                  color: "rgba(52,211,153,0.70)", background: "rgba(52,211,153,0.08)",
+                  border: "1px solid rgba(52,211,153,0.18)",
+                }}>
+                  Connected
+                </span>
+              )}
+              {isConnected ? (
+                <button
+                  disabled={isDisconnecting}
+                  onClick={() => disconnect(ch.id)}
+                  style={{
+                    padding: "5px 12px", borderRadius: 8, fontSize: 11,
+                    background: "transparent", border: "1px solid rgba(248,113,113,0.15)",
+                    color: "rgba(248,113,113,0.60)", cursor: "pointer", fontFamily: "inherit",
+                    opacity: isDisconnecting ? 0.4 : 1,
+                    transition: "all 150ms",
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.borderColor = "rgba(248,113,113,0.30)"; e.currentTarget.style.color = "rgba(248,113,113,0.85)"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.borderColor = "rgba(248,113,113,0.15)"; e.currentTarget.style.color = "rgba(248,113,113,0.60)"; }}
+                >
+                  {isDisconnecting ? "…" : "Disconnect"}
+                </button>
+              ) : (
+                <button
+                  onClick={() => connect(ch.id)}
+                  style={{
+                    padding: "5px 12px", borderRadius: 8, fontSize: 11,
+                    background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.10)",
+                    color: "rgba(255,255,255,0.55)", cursor: "pointer", fontFamily: "inherit",
+                    transition: "all 150ms",
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.09)"; e.currentTarget.style.color = "rgba(255,255,255,0.80)"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.05)"; e.currentTarget.style.color = "rgba(255,255,255,0.55)"; }}
+                >
+                  Connect →
+                </button>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 
 // ---------------------------------------------------------------------------
@@ -441,189 +618,6 @@ function GdprPanel({ cloneHandle }: { cloneHandle: string | null }) {
 
 
 // ---------------------------------------------------------------------------
-// Connected Tools (MCP servers) panel
-// ---------------------------------------------------------------------------
-
-interface MCPServerRow {
-  id: string;
-  name: string;
-  server_url: string;
-  transport: string;
-  tool_names: string[];
-  enabled: boolean;
-}
-
-function ConnectedToolsPanel({ cloneId }: { cloneId: string | null }) {
-  const [servers, setServers] = useState<MCPServerRow[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [adding, setAdding] = useState(false);
-  const [nameDraft, setNameDraft] = useState("");
-  const [urlDraft, setUrlDraft] = useState("");
-  const [keyDraft, setKeyDraft] = useState("");
-  const [testingId, setTestingId] = useState<string | null>(null);
-  const [testResult, setTestResult] = useState<Record<string, string>>({});
-  const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    if (!cloneId) return;
-    setLoading(true);
-    fetch(`/api/tools?clone_id=${cloneId}`)
-      .then(r => r.json())
-      .then(d => setServers(Array.isArray(d) ? d : []))
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, [cloneId]);
-
-  async function handleAdd() {
-    if (!cloneId || !nameDraft.trim() || !urlDraft.trim()) return;
-    setSaving(true);
-    try {
-      const res = await fetch("/api/tools", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          clone_id: cloneId,
-          name: nameDraft.trim(),
-          server_url: urlDraft.trim(),
-          api_key: keyDraft.trim() || undefined,
-        }),
-      });
-      const d = await res.json();
-      if (d.ok) {
-        const newRow: MCPServerRow = { id: d.id, name: nameDraft.trim(), server_url: urlDraft.trim(), transport: "streamablehttp", tool_names: [], enabled: true };
-        setServers(prev => [...prev, newRow]);
-        setNameDraft(""); setUrlDraft(""); setKeyDraft(""); setAdding(false);
-      }
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function handleTest(id: string) {
-    if (!cloneId) return;
-    setTestingId(id);
-    setTestResult(prev => ({ ...prev, [id]: "Testing…" }));
-    try {
-      const res = await fetch(`/api/tools/${id}/test?clone_id=${cloneId}`, { method: "POST" });
-      const d = await res.json();
-      if (d.ok) {
-        setTestResult(prev => ({ ...prev, [id]: `${d.tool_count} tool${d.tool_count !== 1 ? "s" : ""} found` }));
-        setServers(prev => prev.map(s => s.id === id ? { ...s, tool_names: d.tools.map((t: { name: string }) => t.name) } : s));
-      } else {
-        setTestResult(prev => ({ ...prev, [id]: d.detail || "Connection failed" }));
-      }
-    } catch {
-      setTestResult(prev => ({ ...prev, [id]: "Connection failed" }));
-    } finally {
-      setTestingId(null);
-    }
-  }
-
-  async function handleDelete(id: string) {
-    if (!cloneId) return;
-    setDeletingId(id);
-    try {
-      await fetch(`/api/tools/${id}?clone_id=${cloneId}`, { method: "DELETE" });
-      setServers(prev => prev.filter(s => s.id !== id));
-      setTestResult(prev => { const n = { ...prev }; delete n[id]; return n; });
-    } finally {
-      setDeletingId(null);
-    }
-  }
-
-  if (!cloneId) return null;
-
-  return (
-    <div className="card" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <div>
-        <p style={{ fontSize: 13, fontWeight: 500, color: "rgba(255,255,255,0.80)", marginBottom: 4 }}>Connected tools</p>
-        <p style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", margin: 0 }}>
-          Connect MCP servers so your clone can take actions — post to Slack, search Drive, query Notion.
-        </p>
-      </div>
-
-      {loading && (
-        <p style={{ fontSize: 12, color: "rgba(255,255,255,0.25)", margin: 0 }}>Loading…</p>
-      )}
-
-      {!loading && servers.length === 0 && !adding && (
-        <p style={{ fontSize: 12, color: "rgba(255,255,255,0.25)", margin: 0 }}>No tools connected yet.</p>
-      )}
-
-      {servers.map(server => (
-        <div key={server.id} style={{ display: "flex", flexDirection: "column", gap: 8, padding: "12px 14px", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 12 }}>
-          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
-            <div style={{ minWidth: 0 }}>
-              <p style={{ fontSize: 13, fontWeight: 500, color: "rgba(255,255,255,0.75)", margin: 0 }}>{server.name}</p>
-              <p style={{ fontSize: 11, color: "rgba(255,255,255,0.28)", marginTop: 2, marginBottom: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{server.server_url}</p>
-            </div>
-            <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-              <button
-                onClick={() => handleTest(server.id)}
-                disabled={testingId === server.id}
-                className="btn btn--sm btn--ghost"
-                style={{ fontSize: 11 }}
-              >
-                {testingId === server.id ? "…" : "Test"}
-              </button>
-              <button
-                onClick={() => handleDelete(server.id)}
-                disabled={deletingId === server.id}
-                className="btn btn--sm btn--ghost"
-                style={{ fontSize: 11, color: "rgba(248,113,113,0.60)", borderColor: "rgba(248,113,113,0.12)" }}
-              >
-                {deletingId === server.id ? "…" : "Remove"}
-              </button>
-            </div>
-          </div>
-
-          {server.tool_names.length > 0 && (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-              {server.tool_names.slice(0, 6).map(name => (
-                <span key={name} style={{ fontSize: 10, padding: "2px 7px", borderRadius: 999, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)", color: "rgba(255,255,255,0.35)" }}>
-                  {name.split("__")[1] ?? name}
-                </span>
-              ))}
-              {server.tool_names.length > 6 && (
-                <span style={{ fontSize: 10, color: "rgba(255,255,255,0.22)" }}>+{server.tool_names.length - 6} more</span>
-              )}
-            </div>
-          )}
-
-          {testResult[server.id] && (
-            <p style={{ fontSize: 11, color: testResult[server.id].includes("failed") ? "rgba(248,113,113,0.60)" : "rgba(52,211,153,0.60)", margin: 0 }}>
-              {testResult[server.id]}
-            </p>
-          )}
-        </div>
-      ))}
-
-      {adding ? (
-        <div style={{ display: "flex", flexDirection: "column", gap: 10, padding: "12px 14px", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 12 }}>
-          <input value={nameDraft} onChange={e => setNameDraft(e.target.value)} placeholder="Name (e.g. Google Drive)" className="input" />
-          <input value={urlDraft} onChange={e => setUrlDraft(e.target.value)} placeholder="MCP server URL" className="input" />
-          <input value={keyDraft} onChange={e => setKeyDraft(e.target.value)} placeholder="API key (optional)" className="input" type="password" />
-          <div style={{ display: "flex", gap: 8 }}>
-            <button onClick={handleAdd} disabled={saving || !nameDraft.trim() || !urlDraft.trim()} className="btn btn--sm" style={{ flex: 1, justifyContent: "center" }}>
-              {saving ? "Adding…" : "Add tool"}
-            </button>
-            <button onClick={() => { setAdding(false); setNameDraft(""); setUrlDraft(""); setKeyDraft(""); }} className="btn btn--sm btn--ghost">
-              Cancel
-            </button>
-          </div>
-        </div>
-      ) : (
-        <button onClick={() => setAdding(true)} className="btn btn--ghost" style={{ width: "100%", justifyContent: "center", fontSize: 12 }}>
-          + Connect a tool
-        </button>
-      )}
-    </div>
-  );
-}
-
-
-// ---------------------------------------------------------------------------
 // Main settings page
 // ---------------------------------------------------------------------------
 export default function SettingsPage() {
@@ -638,21 +632,25 @@ export default function SettingsPage() {
           <p className="db-eyebrow">Account</p>
           <h1 className="db-h1">Settings</h1>
         </div>
+        {clones.length > 1 && (
+          <ClonePicker clones={clones} selected={clone ?? clones[0]} onSelect={c => setSelectedId(c.clone_id)} />
+        )}
       </div>
 
-      <div style={{ maxWidth: 640 }}>
+      <div style={{ maxWidth: 640, display: "flex", flexDirection: "column", gap: 0 }}>
 
+        {/* Account shortcuts */}
         <div
           style={{
             display: "flex", alignItems: "center", justifyContent: "space-between",
-            padding: "16px 20px", borderRadius: 14, marginBottom: 24,
+            padding: "16px 20px", borderRadius: 14, marginBottom: 16,
             background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)",
           }}
         >
           <div>
             <p style={{ fontSize: 13, fontWeight: 500, color: "rgba(255,255,255,0.70)", margin: 0 }}>Profile</p>
             <p style={{ fontSize: 12, color: "rgba(255,255,255,0.30)", margin: "2px 0 0" }}>
-              Name, bio, location, and account deletion.
+              Name, bio, location.
             </p>
           </div>
           <Link href="/dashboard/profile" className="btn" style={{ whiteSpace: "nowrap", flexShrink: 0 }}>
@@ -671,29 +669,22 @@ export default function SettingsPage() {
           ))}
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {/* Clone selector for per-clone settings */}
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "20px 0 4px" }}>
-            <p className="db-eyebrow" style={{ margin: 0 }}>Clone settings</p>
-            <ClonePicker clones={clones} selected={clone ?? clones[0]} onSelect={c => setSelectedId(c.clone_id)} />
+        {/* Clone-level settings */}
+        {clone && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <p className="db-eyebrow" style={{ padding: "0 4px 8px", marginBottom: 0 }}>Delegate policies</p>
+            <AdminPoliciesPanel cloneHandle={clone.handle} />
+
+            <p className="db-eyebrow" style={{ padding: "24px 4px 8px", marginBottom: 0 }}>Data retention</p>
+            <DataRetentionPanel cloneHandle={clone.handle} cloneId={clone.clone_id} />
+
+            <p className="db-eyebrow" style={{ padding: "24px 4px 8px", marginBottom: 0 }}>Preservation</p>
+            <PreservationPanel cloneHandle={clone.handle} />
+
+            <p className="db-eyebrow" style={{ padding: "24px 4px 8px", marginBottom: 0 }}>Your data rights</p>
+            <GdprPanel cloneHandle={clone.handle} />
           </div>
-
-          <p className="db-eyebrow" style={{ padding: "16px 4px 8px", marginBottom: 0 }}>Admin policies</p>
-          <AdminPoliciesPanel cloneHandle={clone?.handle ?? null} />
-
-          <p className="db-eyebrow" style={{ padding: "24px 4px 8px", marginBottom: 0 }}>Data retention</p>
-          <DataRetentionPanel cloneHandle={clone?.handle ?? null} cloneId={clone?.clone_id ?? null} />
-
-          <p className="db-eyebrow" style={{ padding: "24px 4px 8px", marginBottom: 0 }}>Preservation</p>
-          <PreservationPanel cloneHandle={clone?.handle ?? null} />
-
-          <p className="db-eyebrow" style={{ padding: "24px 4px 8px", marginBottom: 0 }}>Connected tools</p>
-          <ConnectedToolsPanel cloneId={clone?.clone_id ?? null} />
-
-          <p className="db-eyebrow" style={{ padding: "24px 4px 8px", marginBottom: 0 }}>Your data rights</p>
-          <GdprPanel cloneHandle={clone?.handle ?? null} />
-
-        </div>
+        )}
       </div>
     </div>
   );

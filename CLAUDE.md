@@ -4,8 +4,10 @@
 ### Brand
 - **Product name:** Doppel (always lowercase in UI: `doppel`)
 - **Legal entity:** Doppel AI, Inc.
-- **Tagline:** Knowledge shouldn't have a lifespan.
-- **Voice:** Direct, precise, no fluff. Short sentences. Never cheerful or salesy. Treat the user as an intelligent adult.
+- **Tagline:** Be in two places at once.
+- **Core idea:** Your clone executes on your behalf. Not answers — acts. Posts, schedules, searches, delegates, follows up. You stay in control; your clone handles the volume. People aren't replaced — they're extended.
+- **Voice:** Direct, precise, no fluff. Short sentences. Never cheerful or salesy. Treat the user as an intelligent adult. Execution-first: verbs over nouns, actions over descriptions.
+- **Words to avoid:** "knowledge", "memory", "train", "feed data", "learn", "lifespan" — these are old framing. Use: "execute", "act", "handle", "delegate", "connect", "tools", "approval".
 
 ### Color & Theme
 - **Background:** `#080808` — near-black, never pure black

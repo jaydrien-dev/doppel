@@ -38,6 +38,7 @@ class MCPServer:
     transport: str          # 'sse' | 'streamablehttp'
     api_key: str | None     # decrypted
     extra_headers: dict     # decrypted
+    native: bool = False    # True when handled by a native REST connector (no MCP proxy needed)
 
 
 def _build_headers(server: MCPServer) -> dict[str, str]:
@@ -158,6 +159,8 @@ async def load_clone_tools(
     if not server_rows:
         return [], {}
 
+    from doppel.brain.tools.connectors import get_native_tools
+
     all_tools: list[dict] = []
     servers_by_tool: dict[str, MCPServer] = {}
 
@@ -182,7 +185,15 @@ async def load_clone_tools(
             extra_headers=extra_headers,
         )
 
-        tools = await list_tools(server)
+        # Prefer native REST connector over placeholder MCP proxy URL
+        native_tools = get_native_tools(server.name)
+        if native_tools is not None:
+            server.native = True
+            tools = native_tools
+            _log.debug("Using native connector for %s (%d tools)", server.name, len(tools))
+        else:
+            tools = await list_tools(server)
+
         for tool in tools:
             servers_by_tool[tool["name"]] = server
         all_tools.extend(tools)

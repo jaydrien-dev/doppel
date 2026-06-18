@@ -110,11 +110,12 @@ async def run_stream(
             full_text += text_chunk
             yield "token", text_chunk
 
+    confidence = _compute_fast_confidence(memory)
     trace = ReasoningTrace(
         path="fast",
         framing=f"Fast path: {perceived.intent} / {perceived.stakes} stakes",
         retrieved_context_summary=f"{len(memory.episodic)} episodic, {len(memory.semantic)} semantic chunks",
-        confidence=0.75,
+        confidence=confidence,
         sources=sources,
     )
     yield "done", (full_text, trace)
@@ -171,17 +172,65 @@ async def run(
 
     response_text = response.content[0].text.strip()
 
-    # Build a minimal trace for the fast path
+    # Build a minimal trace with real confidence from memory signal
     sources = _extract_sources(memory)
+    confidence = _compute_fast_confidence(memory)
     trace = ReasoningTrace(
         path="fast",
         framing=f"Fast path: {perceived.intent} / {perceived.stakes} stakes",
         retrieved_context_summary=f"{len(memory.episodic)} episodic, {len(memory.semantic)} semantic chunks",
-        confidence=0.75,  # Fast path has a baseline confidence — metacognition will refine
+        confidence=confidence,
         sources=sources,
     )
 
     return response_text, trace
+
+
+def _compute_fast_confidence(memory: MemoryContext) -> float:
+    """
+    Compute real confidence from retrieved memory signal.
+    - High (0.82–0.92): rich episodic + semantic context
+    - Medium (0.58–0.72): some relevant chunks
+    - Low (0.35–0.50): little or no matching memory
+    """
+    episodic_count  = len(memory.episodic)
+    semantic_count  = len(memory.semantic)
+    total           = episodic_count + semantic_count
+
+    if total == 0:
+        return 0.38  # nothing retrieved — genuinely uncertain
+
+    # Episodic memories are richer signal than semantic
+    weighted = episodic_count * 1.5 + semantic_count * 1.0
+
+    # Check similarity scores if available (episodic MemoryEntry has .relevance or .similarity)
+    top_scores: list[float] = []
+    for entry in memory.episodic[:3]:
+        score = getattr(entry, "relevance", None) or getattr(entry, "similarity", None)
+        if score is not None:
+            top_scores.append(float(score))
+    for entry in memory.semantic[:2]:
+        score = getattr(entry, "relevance", None) or getattr(entry, "similarity", None)
+        if score is not None:
+            top_scores.append(float(score))
+
+    avg_score = sum(top_scores) / len(top_scores) if top_scores else 0.65
+
+    # Base confidence from quantity
+    if weighted >= 8:
+        base = 0.88
+    elif weighted >= 4:
+        base = 0.74
+    elif weighted >= 2:
+        base = 0.60
+    else:
+        base = 0.45
+
+    # Scale by similarity quality — high avg score boosts confidence, low drags it
+    quality_adjustment = (avg_score - 0.65) * 0.20   # ±0.13 range
+    confidence = max(0.30, min(0.95, base + quality_adjustment))
+
+    return round(confidence, 2)
 
 
 def _build_user_message(message: str, context_block: str, perceived: PerceivedInput) -> str:

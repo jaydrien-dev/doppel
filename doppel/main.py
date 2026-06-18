@@ -49,6 +49,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from doppel.brain.security.encryption import encrypt_field, decrypt_field
 from doppel.brain.context import (
     load_clone_keys,
+    get_google_client_id, get_google_client_secret,
     get_github_client_id, get_github_client_secret,
     get_notion_client_id, get_notion_client_secret,
     get_slack_client_id, get_slack_client_secret,
@@ -2544,13 +2545,14 @@ async def chat_stream(
       data: {"event": "done", "trace_id": "...", "confidence": ..., "sources": [...], ...}
     """
     caller_user_id = request.headers.get("X-User-Id")
+    caller_email = request.headers.get("X-User-Email")
     _t0 = time.monotonic()
 
     from doppel.brain.db.connection import AsyncSessionLocal
 
     async def _access():
         async with AsyncSessionLocal() as s:
-            await _check_clone_access(body.clone_id, caller_user_id, None, s)
+            await _check_clone_access(body.clone_id, caller_user_id, caller_email, s)
 
     async def _rate():
         async with AsyncSessionLocal() as s:
@@ -2560,12 +2562,18 @@ async def chat_stream(
     _log.info("[TIMING] preflight done in %.0fms", (time.monotonic() - _t0) * 1000)
 
     if caller_user_id:
-        body, consumer_brain_ctx = await asyncio.gather(
+        body, consumer_brain_ctx, consumer_ctx = await asyncio.gather(
             _handle_chat_credits_and_context(body, caller_user_id, session),
             _retrieve_consumer_brain(caller_user_id, body.message, session),
+            _build_consumer_context(caller_user_id),
         )
+        metadata = dict(body.metadata)
         if consumer_brain_ctx:
-            body = body.model_copy(update={"metadata": {**body.metadata, "consumer_brain": consumer_brain_ctx}})
+            metadata["consumer_brain"] = consumer_brain_ctx
+        if consumer_ctx:
+            metadata["consumer_context"] = consumer_ctx
+        if metadata != body.metadata:
+            body = body.model_copy(update={"metadata": metadata})
         asyncio.create_task(
             _maybe_update_consumer_profile(str(body.clone_id), caller_user_id, str(body.session_id))
         )
@@ -2602,12 +2610,13 @@ async def chat(
     Routes to fast (System 1) or slow (System 2) path automatically.
     """
     caller_user_id = request.headers.get("X-User-Id")
+    caller_email = request.headers.get("X-User-Email")
 
     from doppel.brain.db.connection import AsyncSessionLocal
 
     async def _access():
         async with AsyncSessionLocal() as s:
-            await _check_clone_access(body.clone_id, caller_user_id, None, s)
+            await _check_clone_access(body.clone_id, caller_user_id, caller_email, s)
 
     async def _rate():
         async with AsyncSessionLocal() as s:
@@ -2616,12 +2625,18 @@ async def chat(
     await asyncio.gather(_access(), _rate())
 
     if caller_user_id:
-        body, consumer_brain_ctx = await asyncio.gather(
+        body, consumer_brain_ctx, consumer_ctx = await asyncio.gather(
             _handle_chat_credits_and_context(body, caller_user_id, session),
             _retrieve_consumer_brain(caller_user_id, body.message, session),
+            _build_consumer_context(caller_user_id),
         )
+        metadata = dict(body.metadata)
         if consumer_brain_ctx:
-            body = body.model_copy(update={"metadata": {**body.metadata, "consumer_brain": consumer_brain_ctx}})
+            metadata["consumer_brain"] = consumer_brain_ctx
+        if consumer_ctx:
+            metadata["consumer_context"] = consumer_ctx
+        if metadata != body.metadata:
+            body = body.model_copy(update={"metadata": metadata})
     else:
         body = await _handle_chat_credits_and_context(body, caller_user_id, session)
 
@@ -2679,6 +2694,42 @@ async def _retrieve_consumer_brain(
             return None
         lines = [f"- [{r['category']}] {r['content']}" for r in results if r["similarity"] > 0.3]
         return "\n".join(lines) if lines else None
+    except Exception:
+        return None
+
+
+async def _build_consumer_context(consumer_user_id: str) -> str | None:
+    """
+    Build a structured profile context from the user's background/expertise memories.
+    Used to calibrate clone response depth and tone (CEO vs junior employee, etc).
+    Injected as consumer_context → "About the person you're talking to" in the system prompt.
+    """
+    try:
+        async with AsyncSessionLocal() as s:
+            rows = await s.execute(
+                sql_text("""
+                    SELECT content, category
+                    FROM consumer_memory
+                    WHERE consumer_user_id = :uid
+                      AND category IN ('background', 'expertise', 'role', 'preference')
+                    ORDER BY
+                      CASE category
+                        WHEN 'role'       THEN 1
+                        WHEN 'background' THEN 2
+                        WHEN 'expertise'  THEN 3
+                        WHEN 'preference' THEN 4
+                        ELSE 5
+                      END,
+                      created_at ASC
+                    LIMIT 20
+                """),
+                {"uid": consumer_user_id},
+            )
+            results = rows.mappings().all()
+        if not results:
+            return None
+        lines = [r["content"] for r in results]
+        return "The person you're speaking with:\n" + "\n".join(f"- {l}" for l in lines)
     except Exception:
         return None
 
@@ -10629,3 +10680,474 @@ async def test_mcp_server(
         "tool_count": len(tools),
         "tools": [{"name": t["name"], "description": t.get("description", "")} for t in tools],
     }
+
+
+# ---------------------------------------------------------------------------
+# OAuth — preset tool connections (GitHub, Gmail, Google Calendar, etc.)
+# ---------------------------------------------------------------------------
+
+import base64 as _base64
+from urllib.parse import urlencode as _urlencode
+from fastapi.responses import HTMLResponse as _HTMLResponse
+
+_PRESET_OAUTH: dict[str, dict] = {
+    "github": {
+        "name":              "GitHub Integration",
+        "auth_url":          "https://github.com/login/oauth/authorize",
+        "token_url":         "https://github.com/login/oauth/access_token",
+        "scopes":            "repo read:user",
+        "server_url":        "https://mcp.doppel.ai/github",
+        "client_id_fn":      get_github_client_id,
+        "client_secret_fn":  get_github_client_secret,
+    },
+    "gmail": {
+        "name":              "Gmail",
+        "auth_url":          "https://accounts.google.com/o/oauth2/v2/auth",
+        "token_url":         "https://oauth2.googleapis.com/token",
+        "scopes":            "https://mail.google.com/",
+        "server_url":        "https://mcp.doppel.ai/gmail",
+        "client_id_fn":      get_google_client_id,
+        "client_secret_fn":  get_google_client_secret,
+        "extra_params":      {"access_type": "offline", "prompt": "consent"},
+    },
+    "gcal": {
+        "name":              "Google Calendar",
+        "auth_url":          "https://accounts.google.com/o/oauth2/v2/auth",
+        "token_url":         "https://oauth2.googleapis.com/token",
+        "scopes":            "https://www.googleapis.com/auth/calendar",
+        "server_url":        "https://mcp.doppel.ai/gcal",
+        "client_id_fn":      get_google_client_id,
+        "client_secret_fn":  get_google_client_secret,
+        "extra_params":      {"access_type": "offline", "prompt": "consent"},
+    },
+    "gdrive": {
+        "name":              "Google Drive",
+        "auth_url":          "https://accounts.google.com/o/oauth2/v2/auth",
+        "token_url":         "https://oauth2.googleapis.com/token",
+        "scopes":            "https://www.googleapis.com/auth/drive",
+        "server_url":        "https://mcp.doppel.ai/gdrive",
+        "client_id_fn":      get_google_client_id,
+        "client_secret_fn":  get_google_client_secret,
+        "extra_params":      {"access_type": "offline", "prompt": "consent"},
+    },
+    "slack": {
+        "name":              "Slack",
+        "auth_url":          "https://slack.com/oauth/v2/authorize",
+        "token_url":         "https://slack.com/api/oauth.v2.access",
+        "scopes":            "channels:read,chat:write,files:write,reactions:write",
+        "server_url":        "https://mcp.doppel.ai/slack",
+        "client_id_fn":      get_slack_client_id,
+        "client_secret_fn":  get_slack_client_secret,
+    },
+    "notion": {
+        "name":              "Notion",
+        "auth_url":          "https://api.notion.com/v1/oauth/authorize",
+        "token_url":         "https://api.notion.com/v1/oauth/token",
+        "scopes":            "",
+        "server_url":        "https://mcp.doppel.ai/notion",
+        "client_id_fn":      get_notion_client_id,
+        "client_secret_fn":  get_notion_client_secret,
+        "token_auth":        "basic",
+    },
+    "linear": {
+        "name":              "Linear",
+        "auth_url":          "https://linear.app/oauth/authorize",
+        "token_url":         "https://api.linear.app/oauth/token",
+        "scopes":            "read write",
+        "server_url":        "https://mcp.doppel.ai/linear",
+        "client_id_fn":      lambda: os.environ.get("LINEAR_CLIENT_ID", ""),
+        "client_secret_fn":  lambda: os.environ.get("LINEAR_CLIENT_SECRET", ""),
+    },
+}
+
+_OAUTH_SUCCESS_HTML = """<!DOCTYPE html>
+<html>
+<head>
+<title>Connected — doppel</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  html, body {{ height: 100%; }}
+  body {{
+    background: #080808;
+    color: rgba(255,255,255,0.75);
+    font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    overflow: hidden;
+  }}
+  /* Dotted grid background */
+  body::before {{
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image: radial-gradient(rgba(255,255,255,0.065) 1px, transparent 1px);
+    background-size: 28px 28px;
+    -webkit-mask-image: radial-gradient(ellipse 70% 70% at 50% 50%, black, transparent);
+    mask-image: radial-gradient(ellipse 70% 70% at 50% 50%, black, transparent);
+    pointer-events: none;
+  }}
+  /* Ambient glow */
+  body::after {{
+    content: '';
+    position: fixed;
+    width: 480px;
+    height: 480px;
+    border-radius: 50%;
+    background: rgba(52,211,153,0.03);
+    filter: blur(120px);
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+  }}
+  .card {{
+    position: relative;
+    z-index: 1;
+    text-align: center;
+    padding: 48px 40px;
+    border-radius: 20px;
+    border: 1px solid rgba(255,255,255,0.08);
+    background: rgba(255,255,255,0.04);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    max-width: 380px;
+    width: 90%;
+    animation: fadeUp 0.5s cubic-bezier(0.34,1.56,0.64,1) both;
+  }}
+  @keyframes fadeUp {{
+    from {{ opacity: 0; transform: translateY(16px) scale(0.97); }}
+    to   {{ opacity: 1; transform: translateY(0)    scale(1);    }}
+  }}
+  .mark {{
+    width: 48px;
+    height: 48px;
+    border-radius: 13px;
+    background: rgba(52,211,153,0.10);
+    border: 1px solid rgba(52,211,153,0.20);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto 20px;
+  }}
+  .checkmark {{
+    width: 22px;
+    height: 22px;
+    color: rgba(52,211,153,0.85);
+  }}
+  .wordmark {{
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.22);
+    margin-bottom: 20px;
+  }}
+  h2 {{
+    font-size: 20px;
+    font-weight: 500;
+    color: rgba(255,255,255,0.85);
+    letter-spacing: -0.02em;
+    margin-bottom: 8px;
+  }}
+  p {{
+    font-size: 13px;
+    font-weight: 400;
+    color: rgba(255,255,255,0.35);
+    line-height: 1.6;
+  }}
+  .pill {{
+    display: inline-block;
+    margin-top: 20px;
+    padding: 4px 12px;
+    border-radius: 999px;
+    background: rgba(52,211,153,0.08);
+    border: 1px solid rgba(52,211,153,0.18);
+    font-size: 11px;
+    color: rgba(52,211,153,0.65);
+    letter-spacing: 0.01em;
+  }}
+</style>
+</head>
+<body>
+<div class="card">
+  <p class="wordmark">doppel</p>
+  <div class="mark">
+    <svg class="checkmark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="20 6 9 17 4 12"/>
+    </svg>
+  </div>
+  <h2>Connected</h2>
+  <p>You can close this window and return to doppel.</p>
+  <div class="pill">Authorization complete</div>
+</div>
+</body>
+</html>"""
+
+_OAUTH_ERROR_HTML = """<!DOCTYPE html>
+<html>
+<head><title>Connection failed — doppel</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  *{{box-sizing:border-box;margin:0;padding:0}}
+  body{{background:#080808;color:rgba(255,255,255,.75);font-family:system-ui,sans-serif;
+       display:flex;align-items:center;justify-content:center;min-height:100vh}}
+  .card{{text-align:center;padding:40px 32px;border:1px solid rgba(248,113,113,.15);
+        border-radius:16px;background:rgba(248,113,113,.04);max-width:360px}}
+  h2{{font-size:18px;font-weight:500;margin-bottom:8px;color:rgba(248,113,113,.80)}}
+  p{{font-size:13px;color:rgba(255,255,255,.35);line-height:1.5}}
+</style>
+</head>
+<body>
+<div class="card">
+  <h2>Connection failed</h2>
+  <p>{error}</p>
+</div>
+</body>
+</html>"""
+
+
+@app.get("/oauth/{service}/start")
+async def oauth_start(
+    service: str,
+    clone_id: str = Query(...),
+    user_id: str = Query(...),
+):
+    """Redirect browser to the OAuth provider login for a preset service."""
+    if service not in _PRESET_OAUTH:
+        raise HTTPException(status_code=404, detail=f"Unknown service: {service}")
+
+    cfg = _PRESET_OAUTH[service]
+
+    client_id = cfg["client_id_fn"]()
+    if not client_id:
+        return _HTMLResponse(
+            content=_OAUTH_ERROR_HTML.format(
+                error=f"{cfg['name']} OAuth is not configured on this server. "
+                      f"Set the corresponding CLIENT_ID and CLIENT_SECRET environment variables."
+            ),
+            status_code=503,
+        )
+
+    state = _base64.urlsafe_b64encode(f"{clone_id}:{user_id}:{service}".encode()).decode()
+    redirect_uri = f"{settings.backend_url}/oauth/{service}/callback"
+
+    params: dict[str, str] = {
+        "client_id":     client_id,
+        "redirect_uri":  redirect_uri,
+        "state":         state,
+        "response_type": "code",
+    }
+    if cfg.get("scopes"):
+        params["scope"] = cfg["scopes"]
+    params.update(cfg.get("extra_params", {}))
+
+    return RedirectResponse(url=f"{cfg['auth_url']}?{_urlencode(params)}")
+
+
+@app.get("/oauth/{service}/callback")
+async def oauth_callback(
+    service: str,
+    code: str = Query(...),
+    state: str = Query(...),
+    session: AsyncSession = Depends(get_session),
+):
+    """Exchange OAuth code for access token and store in clone_mcp_servers."""
+    if service not in _PRESET_OAUTH:
+        return _HTMLResponse(content=_OAUTH_ERROR_HTML.format(error="Unknown service"), status_code=404)
+
+    cfg = _PRESET_OAUTH[service]
+
+    # Decode state: base64("{clone_id}:{user_id}:{service}")
+    try:
+        # Add padding in case it's missing
+        padded = state + "=" * (-len(state) % 4)
+        decoded = _base64.urlsafe_b64decode(padded.encode()).decode()
+        clone_id_str, _user_id, _svc = decoded.rsplit(":", 2)
+    except Exception:
+        return _HTMLResponse(content=_OAUTH_ERROR_HTML.format(error="Invalid state parameter"), status_code=400)
+
+    redirect_uri = f"{settings.backend_url}/oauth/{service}/callback"
+
+    # Exchange code for access token
+    try:
+        token_body: dict = {
+            "client_id":     cfg["client_id_fn"](),
+            "client_secret": cfg["client_secret_fn"](),
+            "code":          code,
+            "redirect_uri":  redirect_uri,
+            "grant_type":    "authorization_code",
+        }
+        req_headers = {"Accept": "application/json"}
+
+        if cfg.get("token_auth") == "basic":
+            # Notion expects Basic auth and only code+redirect in body
+            cred_str = f"{cfg['client_id_fn']()}:{cfg['client_secret_fn']()}"
+            b64 = _base64.b64encode(cred_str.encode()).decode()
+            req_headers["Authorization"] = f"Basic {b64}"
+            token_body = {"code": code, "redirect_uri": redirect_uri, "grant_type": "authorization_code"}
+
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(cfg["token_url"], data=token_body, headers=req_headers)
+            token_json = resp.json()
+    except Exception as exc:
+        return _HTMLResponse(
+            content=_OAUTH_ERROR_HTML.format(error=f"Token exchange failed: {exc}"),
+            status_code=500,
+        )
+
+    # Extract access token — Slack bots nest under bot_token, users under authed_user
+    access_token = (
+        token_json.get("access_token")
+        or token_json.get("bot_token")
+        or (token_json.get("authed_user") or {}).get("access_token")
+    )
+    if not access_token:
+        err = token_json.get("error") or token_json.get("error_description") or "No access token in response"
+        return _HTMLResponse(content=_OAUTH_ERROR_HTML.format(error=err), status_code=400)
+
+    enc_token = encrypt_field(access_token)
+
+    # Store refresh token in headers_enc (Google services provide one)
+    import json as _json
+    refresh_token = token_json.get("refresh_token")
+    headers_enc = encrypt_field(_json.dumps({"refresh_token": refresh_token})) if refresh_token else None
+
+    # Upsert: update existing record for this clone+service, or insert new one
+    existing = await session.execute(
+        sql_text("SELECT id FROM clone_mcp_servers WHERE clone_id = :cid AND name = :name"),
+        {"cid": clone_id_str, "name": cfg["name"]},
+    )
+    existing_row = existing.mappings().first()
+
+    if existing_row:
+        await session.execute(
+            sql_text(
+                "UPDATE clone_mcp_servers SET api_key_enc = :token, headers_enc = :henc "
+                "WHERE id = :id"
+            ),
+            {"token": enc_token, "henc": headers_enc, "id": str(existing_row["id"])},
+        )
+    else:
+        await session.execute(
+            sql_text(
+                "INSERT INTO clone_mcp_servers "
+                "(clone_id, name, server_url, transport, api_key_enc, headers_enc) "
+                "VALUES (:cid, :name, :url, 'streamablehttp', :token, :henc)"
+            ),
+            {
+                "cid":   clone_id_str,
+                "name":  cfg["name"],
+                "url":   cfg["server_url"],
+                "token": enc_token,
+                "henc":  headers_enc,
+            },
+        )
+    await session.commit()
+
+    return _HTMLResponse(content=_OAUTH_SUCCESS_HTML)
+
+
+# ---------------------------------------------------------------------------
+# Twilio WhatsApp channel
+# ---------------------------------------------------------------------------
+
+def _twilio_validate_signature(auth_token: str, url: str, params: dict, signature: str) -> bool:
+    """
+    Validate a Twilio webhook request signature without the twilio SDK.
+    Spec: https://www.twilio.com/docs/usage/webhooks/webhooks-security#validating-signatures-from-twilio
+    """
+    import base64
+    import hashlib
+    import hmac
+
+    s = url + "".join(f"{k}{v}" for k, v in sorted(params.items()))
+    expected = base64.b64encode(
+        hmac.new(auth_token.encode(), s.encode(), hashlib.sha1).digest()
+    ).decode()
+    return hmac.compare_digest(expected, signature)
+
+
+@app.post("/webhook/whatsapp/{clone_id}")
+async def whatsapp_webhook(
+    clone_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+):
+    """
+    Twilio WhatsApp inbound webhook.
+
+    Configure your Twilio number's "When a message comes in" webhook to:
+      POST https://<your-domain>/webhook/whatsapp/<clone_id>
+
+    Returns TwiML <Response><Message>...</Message></Response>.
+    """
+    from fastapi.responses import Response as _Response
+    from uuid import UUID as _UUID
+    import xml.etree.ElementTree as _ET
+
+    def _twiml(body: str) -> _Response:
+        root = _ET.Element("Response")
+        msg = _ET.SubElement(root, "Message")
+        msg.text = body
+        return _Response(
+            content=_ET.tostring(root, encoding="unicode"),
+            media_type="application/xml",
+        )
+
+    # ── Validate Twilio signature ─────────────────────────────────────────
+    if settings.twilio_auth_token:
+        sig = request.headers.get("X-Twilio-Signature", "")
+        form = await request.form()
+        params = dict(form)
+        url = str(request.url)
+        if not _twilio_validate_signature(settings.twilio_auth_token, url, params, sig):
+            raise HTTPException(status_code=403, detail="Invalid Twilio signature")
+    else:
+        form = await request.form()
+        params = dict(form)
+
+    from_number = params.get("From", "")   # e.g. "whatsapp:+14155238886"
+    body_text   = params.get("Body", "").strip()
+
+    if not body_text:
+        return _twiml("I didn't catch that — could you resend?")
+
+    # ── Look up clone ─────────────────────────────────────────────────────
+    try:
+        cid = _UUID(clone_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Invalid clone_id")
+
+    clone_row = await session.execute(
+        sql_text("SELECT clone_id FROM clones WHERE clone_id = :cid AND is_active = TRUE"),
+        {"cid": str(cid)},
+    )
+    if not clone_row.fetchone():
+        raise HTTPException(status_code=404, detail="Clone not found")
+
+    # ── Run brain ─────────────────────────────────────────────────────────
+    from doppel.brain.models.types import BrainInput
+    from doppel.brain.orchestrator import DoppelBrain
+
+    brain_input = BrainInput(
+        clone_id=cid,
+        message=body_text,
+        context_type="chat",
+        sender_id=from_number,
+        owner_mode=False,
+    )
+
+    try:
+        brain = DoppelBrain(session=session, clone_id=cid)
+        output = await brain.process(brain_input)
+        reply = output.response
+    except Exception as exc:
+        import logging as _log
+        _log.getLogger(__name__).error("WhatsApp brain error: %s", exc, exc_info=True)
+        reply = "Something went wrong on my end — please try again in a moment."
+
+    return _twiml(reply)

@@ -24,24 +24,35 @@ const CLONE: NavItem[] = [
     ),
   },
   {
-    href: "/dashboard/activity",
-    label: "Activity",
-    advancedOnly: true,
+    href: "/dashboard/test",
+    label: "Approvals",
     icon: (
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-        <path d="M1.5 8h2.5l2-5 3 10 2-5h3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" opacity="0.8"/>
+        <path d="M2 8.5l3.5 3.5 8-8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.85"/>
       </svg>
     ),
   },
   {
     href: "/dashboard/clones",
-    label: "My Clones",
+    label: "Clones",
     icon: (
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
         <circle cx="6" cy="5.5" r="2" fill="currentColor" opacity="0.8"/>
         <circle cx="11" cy="5.5" r="1.6" fill="currentColor" opacity="0.45"/>
         <path d="M1.5 13.5c0-2.5 2-4.5 4.5-4.5s4.5 2 4.5 4.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" opacity="0.6"/>
         <path d="M11 9c1.8.3 3 1.7 3 3.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" opacity="0.35"/>
+      </svg>
+    ),
+  },
+  {
+    href: "/dashboard/channels",
+    label: "Channels",
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+        <circle cx="3.5" cy="8" r="1.8" fill="currentColor" opacity="0.7"/>
+        <circle cx="12.5" cy="4" r="1.8" fill="currentColor" opacity="0.7"/>
+        <circle cx="12.5" cy="12" r="1.8" fill="currentColor" opacity="0.7"/>
+        <path d="M5.2 7.3L10.8 4.7M5.2 8.7L10.8 11.3" stroke="currentColor" strokeWidth="1.3" opacity="0.4"/>
       </svg>
     ),
   },
@@ -56,8 +67,17 @@ const CLONE: NavItem[] = [
     ),
   },
   {
+    href: "/dashboard/activity",
+    label: "Activity",
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+        <path d="M1.5 8h2.5l2-5 3 10 2-5h3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" opacity="0.8"/>
+      </svg>
+    ),
+  },
+  {
     href: "/dashboard/identity",
-    label: "Identity",
+    label: "Voice",
     advancedOnly: true,
     icon: (
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
@@ -68,7 +88,7 @@ const CLONE: NavItem[] = [
   },
   {
     href: "/dashboard/memory",
-    label: "Memory",
+    label: "Knowledge",
     advancedOnly: true,
     icon: (
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
@@ -82,22 +102,14 @@ const CLONE: NavItem[] = [
     ),
   },
   {
-    href: "/dashboard/test",
-    label: "Train",
+    href: "/dashboard/synthesis",
+    label: "Synthesis",
     icon: (
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-        <path d="M5 13.5L7 9.5M9 9.5L11 13.5M4 5H12L10 9.5H6L4 5Z" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" opacity="0.7"/>
-        <path d="M6.5 2.5H9.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" opacity="0.5"/>
-      </svg>
-    ),
-  },
-  {
-    href: "/dashboard/deploy",
-    label: "Deploy",
-    icon: (
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-        <path d="M8 2L13 7L8 12" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" opacity="0.8"/>
-        <path d="M3 7H13" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" opacity="0.4"/>
+        <circle cx="4" cy="8" r="2" fill="currentColor" opacity="0.7"/>
+        <circle cx="12" cy="5" r="1.6" fill="currentColor" opacity="0.5"/>
+        <circle cx="12" cy="11" r="1.6" fill="currentColor" opacity="0.5"/>
+        <path d="M6 7.5L10.3 5.5M6 8.5L10.3 10.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" opacity="0.45"/>
       </svg>
     ),
   },
@@ -148,6 +160,16 @@ const MARKETPLACE: NavItem[] = [
 
 const ACCOUNT: NavItem[] = [
   {
+    href: "/dashboard/my-brain",
+    label: "My Brain",
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+        <path d="M8 2C5.2 2 3 4.2 3 7c0 1.7.8 3.2 2 4.1V13h6v-1.9c1.2-.9 2-2.4 2-4.1 0-2.8-2.2-5-5-5z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" opacity="0.85"/>
+        <path d="M6 13h4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" opacity="0.6"/>
+      </svg>
+    ),
+  },
+  {
     href: "/dashboard/profile",
     label: "Profile",
     icon: (
@@ -169,17 +191,6 @@ const ACCOUNT: NavItem[] = [
     ),
   },
   {
-    href: "/dashboard/credits",
-    label: "Credits",
-    advancedOnly: true,
-    icon: (
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-        <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.4" opacity="0.6"/>
-        <path d="M8 5v6M5.5 7h4a1 1 0 010 2H6" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" opacity="0.8"/>
-      </svg>
-    ),
-  },
-  {
     href: "/dashboard/api",
     label: "Developer",
     advancedOnly: true,
@@ -187,6 +198,17 @@ const ACCOUNT: NavItem[] = [
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
         <rect x="1.5" y="2.5" width="13" height="11" rx="2" stroke="currentColor" strokeWidth="1.4" opacity="0.6"/>
         <path d="M5 7L3.5 8.5 5 10M11 7l1.5 1.5L11 10M8.5 6l-1.5 5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" opacity="0.7"/>
+      </svg>
+    ),
+  },
+  {
+    href: "/dashboard/credits",
+    label: "Credits",
+    advancedOnly: true,
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+        <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.4" opacity="0.6"/>
+        <path d="M8 5v6M5.5 7h4a1 1 0 010 2H6" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" opacity="0.8"/>
       </svg>
     ),
   },

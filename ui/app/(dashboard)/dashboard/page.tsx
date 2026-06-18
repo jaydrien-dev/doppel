@@ -39,49 +39,36 @@ function StatsBar({ cloneId }: { cloneId: string }) {
     { refreshInterval: 60_000 }
   );
 
-  const approvalModifier =
-    quality?.approval_rate != null
-      ? quality.approval_rate >= 80
-        ? "stat-tile--green"
-        : quality.approval_rate < 60
-        ? "stat-tile--red"
-        : ""
-      : "";
+  const pending = quality?.pending_review ?? 0;
+  const total = quality?.total_responses ?? 0;
+  const autoExecuted = total > 0 ? total - pending : 0;
 
   const items: { label: string; value: string; sub: string; modifier: string }[] = [
     {
-      label: "Memories",
-      value: stats?.total != null ? stats.total.toLocaleString() : "—",
-      sub: stats?.sources?.length
-        ? `${stats.sources.length} source${stats.sources.length !== 1 ? "s" : ""} connected`
-        : "no sources yet",
+      label: "Tasks handled",
+      value: total > 0 ? total.toLocaleString() : "—",
+      sub: total > 0 ? `${autoExecuted} auto-executed` : "no tasks yet",
       modifier: "stat-tile--blue",
     },
     {
-      label: "Episodic",
-      value: stats?.episodic != null ? stats.episodic.toLocaleString() : "—",
-      sub: stats?.semantic != null ? `+${stats.semantic} semantic facts` : "",
+      label: "Awaiting review",
+      value: pending > 0 ? pending.toLocaleString() : "0",
+      sub: pending > 0 ? "needs your approval" : "all clear",
+      modifier: pending > 0 ? "stat-tile--red" : "",
+    },
+    {
+      label: "Tools connected",
+      value: stats?.sources?.length != null ? stats.sources.length.toLocaleString() : "—",
+      sub: (stats?.sources?.length ?? 0) > 0
+        ? `${stats!.sources!.join(", ").slice(0, 28)}`
+        : "connect tools in Channels",
+      modifier: (stats?.sources?.length ?? 0) > 0 ? "stat-tile--green" : "",
+    },
+    {
+      label: "Confidence",
+      value: quality?.avg_confidence != null ? `${quality.avg_confidence}%` : "—",
+      sub: quality?.approval_rate != null ? `${quality.approval_rate}% approved` : "no data yet",
       modifier: "",
-    },
-    {
-      label: "Responses",
-      value: quality?.total_responses != null ? quality.total_responses.toLocaleString() : "—",
-      sub:
-        (quality?.pending_review ?? 0) > 0
-          ? `${quality!.pending_review} pending review`
-          : quality
-          ? "all reviewed"
-          : "",
-      modifier: "stat-tile--green",
-    },
-    {
-      label: "Approval",
-      value: quality?.approval_rate != null ? `${quality.approval_rate}%` : "—",
-      sub:
-        quality?.avg_confidence != null
-          ? `${quality.avg_confidence}% avg confidence`
-          : "no responses yet",
-      modifier: approvalModifier,
     },
   ];
 
@@ -99,70 +86,21 @@ function StatsBar({ cloneId }: { cloneId: string }) {
 }
 
 // ---------------------------------------------------------------------------
-// Memory bars (advanced only)
+// Task feed
 // ---------------------------------------------------------------------------
-function CloneMemoryBar({ clone }: { clone: CloneOwnerInfo }) {
-  const { data: stats } = useSWR<BrainStats>(
-    `/api/brain/stats?clone_id=${clone.clone_id}`,
-    fetcher,
-    { refreshInterval: 60_000 }
-  );
-  const used = stats?.memory_used ?? stats?.episodic ?? 0;
-  const limit = stats?.memory_limit ?? 0;
-  if (!limit) return null;
 
-  const pct = Math.min((used / limit) * 100, 100);
-  const nearLimit = pct >= 80;
-  const atLimit = pct >= 100;
-  const barColor = atLimit ? "rgba(248,113,113,0.70)" : nearLimit ? "rgba(251,191,36,0.70)" : "rgba(255,255,255,0.35)";
+const APPROVAL_PATH_LABEL: Record<string, { label: string; color: string }> = {
+  auto_execute:     { label: "executed",   color: "rgba(52,211,153,0.70)" },
+  consumer_confirm: { label: "confirmed",  color: "rgba(96,165,250,0.70)" },
+  creator_review:   { label: "review",     color: "rgba(251,191,36,0.80)" },
+  dual_approval:    { label: "approval",   color: "rgba(248,113,113,0.75)" },
+};
 
-  function fmt(n: number) {
-    return n >= 1000 ? `${(n / 1000).toLocaleString(undefined, { maximumFractionDigits: 1 })}k` : n.toLocaleString();
-  }
-
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-      <span style={{ fontSize: 12, color: "rgba(255,255,255,0.50)", whiteSpace: "nowrap", minWidth: 120, overflow: "hidden", textOverflow: "ellipsis" }}>
-        {clone.listing_title || clone.display_name}
-      </span>
-      <div style={{ flex: 1, height: 4, borderRadius: 999, background: "rgba(255,255,255,0.06)", overflow: "hidden" }}>
-        <div style={{ height: "100%", width: `${pct}%`, borderRadius: 999, background: barColor, transition: "width 600ms ease" }} />
-      </div>
-      <span style={{
-        fontSize: 11, color: atLimit ? "rgba(248,113,113,0.80)" : nearLimit ? "rgba(251,191,36,0.80)" : "rgba(255,255,255,0.35)",
-        whiteSpace: "nowrap", minWidth: 80, textAlign: "right", fontVariantNumeric: "tabular-nums",
-      }}>
-        {fmt(used)} / {fmt(limit)}
-      </span>
-    </div>
-  );
-}
-
-function AllClonesMemoryBars() {
-  const { clones } = useClones();
-  if (clones.length === 0) return null;
-  return (
-    <div style={{
-      padding: "14px 18px", borderRadius: 14,
-      background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.07)",
-      marginBottom: 28, display: "flex", flexDirection: "column", gap: 12,
-    }}>
-      <p style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.10em", color: "rgba(255,255,255,0.25)", margin: "0 0 4px" }}>
-        Memory usage
-      </p>
-      {clones.map((c) => <CloneMemoryBar key={c.clone_id} clone={c} />)}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Recent queries
-// ---------------------------------------------------------------------------
-function RecentQueries({ cloneId, advanced }: { cloneId: string; advanced: boolean }) {
+function TaskFeed({ cloneId, advanced }: { cloneId: string; advanced: boolean }) {
   const { data, isLoading } = useSWR<{ traces: ActivityTrace[] }>(
-    `/api/activity?clone_id=${cloneId}&limit=8`,
+    `/api/activity?clone_id=${cloneId}&limit=10`,
     fetcher,
-    { refreshInterval: 30_000 }
+    { refreshInterval: 20_000 }
   );
   const traces = data?.traces ?? [];
 
@@ -182,9 +120,9 @@ function RecentQueries({ cloneId, advanced }: { cloneId: string; advanced: boole
   if (traces.length === 0) {
     return (
       <div className="card" style={{ textAlign: "center", padding: "40px 24px" }}>
-        <p style={{ fontSize: 13, color: "rgba(255,255,255,0.25)" }}>No queries yet.</p>
+        <p style={{ fontSize: 13, color: "rgba(255,255,255,0.25)" }}>No tasks yet.</p>
         <p style={{ fontSize: 12, color: "rgba(255,255,255,0.18)", marginTop: 4 }}>
-          Test your clone to see activity here.
+          Delegate something to see it here.
         </p>
       </div>
     );
@@ -193,11 +131,13 @@ function RecentQueries({ cloneId, advanced }: { cloneId: string; advanced: boole
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
       {traces.map((trace) => {
-        const sig = trace.feedback_signal;
+        const path = (trace as any).approval_path as string | undefined;
+        const pathMeta = path ? APPROVAL_PATH_LABEL[path] : null;
+
         const dotColor =
-          sig === "approved" ? "#34D399"
-          : sig === "edited"   ? "#60A5FA"
-          : sig === "rejected" ? "#F87171"
+          trace.feedback_signal === "approved" ? "#34D399"
+          : trace.feedback_signal === "edited"   ? "#60A5FA"
+          : trace.feedback_signal === "rejected" ? "#F87171"
           : "rgba(255,255,255,0.18)";
 
         return (
@@ -208,9 +148,19 @@ function RecentQueries({ cloneId, advanced }: { cloneId: string; advanced: boole
               {advanced && trace.confidence != null && (
                 <span className="act-row__conf">{trace.confidence}%</span>
               )}
-              {advanced && trace.needs_escalation && (
+              {pathMeta && (
+                <span style={{
+                  fontSize: 10, padding: "1px 7px", borderRadius: 999,
+                  color: pathMeta.color,
+                  border: `1px solid ${pathMeta.color.replace("0.70", "0.20").replace("0.75", "0.20").replace("0.80", "0.20")}`,
+                  background: pathMeta.color.replace("0.70", "0.07").replace("0.75", "0.07").replace("0.80", "0.07"),
+                }}>
+                  {pathMeta.label}
+                </span>
+              )}
+              {!pathMeta && advanced && trace.needs_escalation && (
                 <span className="badge badge--warn" style={{ padding: "1px 7px", fontSize: 10 }}>
-                  escalated
+                  review
                 </span>
               )}
               <span style={{ width: 22, textAlign: "right" }}>{rel(trace.created_at)}</span>
@@ -223,19 +173,20 @@ function RecentQueries({ cloneId, advanced }: { cloneId: string; advanced: boole
 }
 
 // ---------------------------------------------------------------------------
-// Sources panel (advanced only)
+// Connected tools panel (sidebar in advanced mode)
 // ---------------------------------------------------------------------------
-const SOURCE_LABELS: Record<string, string> = {
+const TOOL_LABELS: Record<string, string> = {
   gmail:   "Gmail",
   slack:   "Slack",
   github:  "GitHub",
   notion:  "Notion",
+  gdrive:  "Google Drive",
+  gcal:    "Calendar",
   upload:  "File upload",
   meeting: "Meetings",
-  seed_qa: "Manual Q&A",
 };
 
-function SourcesPanel({ cloneId }: { cloneId: string }) {
+function ToolsPanel({ cloneId }: { cloneId: string }) {
   const { data } = useSWR<BrainStats>(
     `/api/brain/stats?clone_id=${cloneId}`,
     fetcher,
@@ -243,15 +194,15 @@ function SourcesPanel({ cloneId }: { cloneId: string }) {
   );
 
   const connected = new Set(data?.sources ?? []);
-  const ALL = ["gmail", "slack", "github", "notion", "upload", "meeting", "seed_qa"];
+  const ALL = ["gmail", "slack", "gdrive", "gcal", "github", "notion"];
 
   return (
     <div className="card">
-      <p className="card-title">Data sources</p>
+      <p className="card-title">Connected tools</p>
       <div>
         {ALL.map((src) => (
           <div key={src} className="src-row">
-            <span className="src-row__name">{SOURCE_LABELS[src]}</span>
+            <span className="src-row__name">{TOOL_LABELS[src] ?? src}</span>
             {connected.has(src) ? (
               <span className="src-row__status src-row__status--on">
                 <span style={{ width: 6, height: 6, borderRadius: 999, background: "#34D399", display: "inline-block" }} />
@@ -259,7 +210,7 @@ function SourcesPanel({ cloneId }: { cloneId: string }) {
               </span>
             ) : (
               <Link
-                href="/dashboard/train"
+                href="/dashboard/settings"
                 className="src-row__status src-row__status--off"
                 style={{ transition: "color 180ms" }}
               >
@@ -269,15 +220,14 @@ function SourcesPanel({ cloneId }: { cloneId: string }) {
           </div>
         ))}
       </div>
-      <Link href="/dashboard/train" className="btn btn--sm" style={{ marginTop: 14, width: "100%", justifyContent: "center" }}>
-        Manage sources
+      <Link href="/dashboard/settings" className="btn btn--sm" style={{ marginTop: 14, width: "100%", justifyContent: "center" }}>
+        Manage channels →
       </Link>
     </div>
   );
 }
 
-// Compact sources summary for simple mode
-function SourcesSummary({ cloneId }: { cloneId: string }) {
+function ToolsSummary({ cloneId }: { cloneId: string }) {
   const { data } = useSWR<BrainStats>(
     `/api/brain/stats?clone_id=${cloneId}`,
     fetcher,
@@ -296,14 +246,14 @@ function SourcesSummary({ cloneId }: { cloneId: string }) {
         {count > 0 ? (
           <>
             <span style={{ color: "rgba(52,211,153,0.80)" }}>●</span>
-            {" "}{count} source{count !== 1 ? "s" : ""} connected
+            {" "}{count} tool{count !== 1 ? "s" : ""} connected
           </>
         ) : (
-          "No sources connected yet"
+          "No tools connected yet"
         )}
       </span>
-      <Link href="/dashboard/train" style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", textDecoration: "none" }}>
-        Manage →
+      <Link href="/dashboard/settings" style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", textDecoration: "none" }}>
+        Connect →
       </Link>
     </div>
   );
@@ -317,10 +267,10 @@ function NoCloneState() {
     <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", padding: 32 }}>
       <div className="card" style={{ width: "100%", maxWidth: 448 }}>
         <h1 style={{ fontSize: 20, fontWeight: 300, color: "rgba(255,255,255,0.85)", marginBottom: 8 }}>
-          Create your clone
+          Create your delegate
         </h1>
         <p style={{ fontSize: 13, color: "rgba(255,255,255,0.40)", marginBottom: 28, lineHeight: 1.6 }}>
-          Your digital consciousness — a chatbot that thinks and sounds exactly like you.
+          Your delegate handles tasks, responds on your behalf, and executes across your tools — while you stay in control.
         </p>
         <Link href="/onboarding" className="btn btn--primary">
           Get started →
@@ -386,54 +336,49 @@ export default function DashboardPage() {
     <div className="db-page" style={{ "--page-accent": "#1A73E8" } as React.CSSProperties}>
       <div className="db-page-head">
         <div>
-          <p className="db-eyebrow">Overview</p>
+          <p className="db-eyebrow">Delegate</p>
           <h1 className="db-h1">
-            Your clone is responding. <em>Stay in the loop.</em>
+            Your delegate is active. <em>Here's what it handled.</em>
           </h1>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <TourTrigger />
           <ClonePicker clones={clones} selected={clone} onSelect={c => setSelectedId(c.clone_id)} />
           <Link href="/dashboard/test" className="btn btn--primary">
-            Test clone →
+            Delegate task →
           </Link>
         </div>
       </div>
 
-      {/* Advanced-only: stats + memory */}
-      {advanced && (
-        <>
-          <StatsBar cloneId={clone.clone_id} />
-          <AllClonesMemoryBars />
-        </>
-      )}
+      {/* Advanced-only: stats */}
+      {advanced && <StatsBar cloneId={clone.clone_id} />}
 
       {/* Two-col in advanced, single-col in simple */}
       {advanced ? (
         <div style={{ display: "grid", gridTemplateColumns: "1fr 280px", gap: 20, alignItems: "start" }}>
           <div>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
-              <h3 className="db-h3">Recent queries</h3>
+              <h3 className="db-h3">Task feed</h3>
               <Link href="/dashboard/activity" className="btn btn--ghost btn--sm">
                 View all →
               </Link>
             </div>
-            <RecentQueries cloneId={clone.clone_id} advanced={advanced} />
+            <TaskFeed cloneId={clone.clone_id} advanced={advanced} />
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-            <SourcesPanel cloneId={clone.clone_id} />
+            <ToolsPanel cloneId={clone.clone_id} />
           </div>
         </div>
       ) : (
         <div>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
-            <h3 className="db-h3">Recent queries</h3>
+            <h3 className="db-h3">Task feed</h3>
             <Link href="/dashboard/activity" className="btn btn--ghost btn--sm">
               View all →
             </Link>
           </div>
-          <RecentQueries cloneId={clone.clone_id} advanced={advanced} />
-          <SourcesSummary cloneId={clone.clone_id} />
+          <TaskFeed cloneId={clone.clone_id} advanced={advanced} />
+          <ToolsSummary cloneId={clone.clone_id} />
         </div>
       )}
     </div>

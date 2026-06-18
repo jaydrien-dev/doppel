@@ -1,34 +1,27 @@
 const DOMAIN_CONTEXT: Record<string, string> = {
-  expertise: `Focus: what they work on, their deep skills, what problems they solve best, and what makes their approach distinctive.
-Start by asking what they do. Then drill into: specific areas of depth, how they learned it, what they know that others miss, their most non-obvious insight in their field.`,
+  expertise: `You are extracting deep knowledge about what they work on and what makes them distinctive.
+Open by asking what they do. Then probe: what's their specific area of depth, what problems do they solve that others can't, what do they know that isn't written anywhere, what's their most non-obvious insight.
+Keep drilling — don't move on until you've hit something specific and surprising.`,
 
-  decisions: `Focus: how they think through hard choices, the mental models they rely on, how they handle uncertainty and incomplete information.
-Start by asking how they make hard decisions. Then drill into: frameworks they use, how they weight trade-offs, what they do when the data is unclear, a decision they got right and why.`,
+  decisions: `You are extracting how they actually think through hard choices.
+Open by asking how they make hard decisions. Then probe: what frameworks do they rely on, how do they handle uncertainty, what do they do when data is missing, walk me through a real decision — what were the options, what did you choose and why.
+Push for specific examples, not abstract principles.`,
 
-  beliefs: `Focus: strongly-held opinions, contrarian views, principles they'd defend in a room of skeptics.
-Start by asking what they believe that most people in their field disagree with. Then drill into: why they hold that view, what evidence changed their mind, what they used to believe but no longer do.`,
+  beliefs: `You are extracting their strongly-held, possibly contrarian views.
+Open by asking what they believe that most people in their field get wrong. Then probe: why do they hold that view, what would change their mind, what did they used to believe but no longer do, what's a hill they'd die on.
+These should be opinions they'd defend publicly, not safe takes.`,
 
-  network: `Focus: the key people in their professional life, what each person represents, how they think about relationships.
-Start by asking who they learn from most. Then drill into: who they call when stuck, who challenges them, how they maintain trust, who they'd want in the room for a critical decision.`,
+  network: `You are extracting how they think about key relationships in their professional life.
+Open by asking who they learn from most right now. Then probe: who do they call when genuinely stuck, who challenges them in ways that make them better, who would they want in the room for a critical decision and why.
+Focus on what each relationship represents to them, not just names.`,
 };
 
-function buildSystem(cloneName: string, domain: string): string {
-  const ctx = DOMAIN_CONTEXT[domain] ?? DOMAIN_CONTEXT.expertise;
-  return `You are extracting knowledge from ${cloneName} through a focused interview.
-
-Domain: ${ctx}
-
-Rules:
-- Ask exactly ONE question per response.
-- Follow up on what they just said — probe specifics, examples, the "why".
-- Questions should be short and direct (one sentence).
-- Never summarize, explain, or comment on their answer — just ask the next question.
-- After 10 or more exchanges, you may signal the interview is complete by ending your question with the token [DONE].
-- Respond ONLY with a JSON object in this exact format:
-  {"question": "Your question here", "done": false}
-  or when ending:
-  {"question": "One last thing — what should your clone always remember about how you work?", "done": true}`;
-}
+const OPENERS: Record<string, string> = {
+  expertise: "What do you work on, and what's the part of it that you know better than almost anyone?",
+  decisions: "Walk me through the last hard decision you made — what made it hard?",
+  beliefs:   "What's something you believe about your field that most people would push back on?",
+  network:   "Who do you learn the most from right now, and what specifically do you get from them?",
+};
 
 export async function POST(req: Request) {
   const { clone_name, domain, history = [] } = await req.json() as {
@@ -37,52 +30,60 @@ export async function POST(req: Request) {
     history: { question: string; answer: string }[];
   };
 
-  // Convert history to Anthropic message format
+  const domainCtx = DOMAIN_CONTEXT[domain] ?? DOMAIN_CONTEXT.expertise;
+
+  const system = `You are interviewing ${clone_name} to extract knowledge for their AI clone.
+
+${domainCtx}
+
+Rules:
+- Output ONLY the next question. Nothing else — no preamble, no "Great answer!", no commentary, no explanation.
+- One sentence. Direct. Specific to what they just said.
+- After 10 or more exchanges, prefix your question with [DONE] to signal the interview is complete.
+- Never repeat a question you've already asked.`;
+
+  // Build conversation naturally — assistant asks, user answers
   const messages: { role: "user" | "assistant"; content: string }[] = [];
-  for (const turn of history) {
-    messages.push({ role: "assistant", content: JSON.stringify({ question: turn.question, done: false }) });
-    messages.push({ role: "user", content: turn.answer });
-  }
-  // Seed the first turn if no history
-  if (messages.length === 0) {
-    messages.push({ role: "user", content: "Ready. Ask me your first question." });
+
+  if (history.length === 0) {
+    // First question — no prior answers yet
+    messages.push({ role: "user", content: "Start the interview." });
+  } else {
+    for (const turn of history) {
+      messages.push({ role: "assistant", content: turn.question });
+      messages.push({ role: "user",      content: turn.answer });
+    }
   }
 
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
-      "Content-Type": "application/json",
-      "x-api-key": process.env.ANTHROPIC_API_KEY ?? "",
+      "Content-Type":    "application/json",
+      "x-api-key":       process.env.ANTHROPIC_API_KEY ?? "",
       "anthropic-version": "2023-06-01",
     },
     body: JSON.stringify({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 200,
-      system: buildSystem(clone_name, domain),
+      model:      "claude-haiku-4-5-20251001",
+      max_tokens: 150,
+      system,
       messages,
     }),
   });
 
   if (!res.ok) {
-    return Response.json({ error: "AI unavailable" }, { status: 500 });
+    // Return hardcoded opener on API failure so the UI never goes blank
+    return Response.json({
+      question: OPENERS[domain] ?? OPENERS.expertise,
+      done: false,
+    });
   }
 
   const data = await res.json();
-  const raw: string = data.content?.[0]?.text ?? "";
+  const raw: string = (data.content?.[0]?.text ?? "").trim();
 
-  // Parse the JSON response, fallback gracefully
-  try {
-    const match = raw.match(/\{[\s\S]*\}/);
-    if (match) {
-      const parsed = JSON.parse(match[0]) as { question: string; done: boolean };
-      // Force done after 12 exchanges
-      if (history.length >= 12) parsed.done = true;
-      return Response.json(parsed);
-    }
-  } catch {
-    // ignore parse error
-  }
+  const done = raw.startsWith("[DONE]") || history.length >= 12;
+  const question = raw.replace(/^\[DONE\]\s*/i, "").trim()
+    || (OPENERS[domain] ?? OPENERS.expertise);
 
-  // Fallback: treat raw text as question
-  return Response.json({ question: raw.trim(), done: history.length >= 12 });
+  return Response.json({ question, done });
 }

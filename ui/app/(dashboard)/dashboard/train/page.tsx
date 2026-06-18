@@ -6,7 +6,6 @@ import { ClonePicker } from "@/components/dashboard/ClonePicker";
 import type { CloneOwnerInfo } from "@/lib/types";
 import { getGmailAuthUrl, triggerGmailSync } from "@/lib/api";
 import { IngestionJobBanner } from "@/components/dashboard/IngestionJobBanner";
-import { TopicCoverageCard } from "@/components/dashboard/TopicCoverageCard";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
 import { useAdvancedMode } from "@/lib/context/AdvancedModeContext";
 
@@ -254,7 +253,6 @@ function TrainCloneContent({ clone }: { clone: CloneOwnerInfo }) {
 
       </div>
 
-      <TopicCoverageCard cloneId={clone.clone_id} />
     </>
   );
 }

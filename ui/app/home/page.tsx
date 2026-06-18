@@ -538,7 +538,7 @@ function ConvSidebar({
 
       {/* My Brain + Org shortcuts */}
       <div style={{ padding: "0 8px 6px", display: "flex", flexDirection: "column", gap: 4 }}>
-        <Link href="/consumer/brain" style={{
+        <Link href="/dashboard/my-brain" style={{
           display: "flex", alignItems: "center", gap: 10,
           padding: "11px 16px", borderRadius: 12,
           background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.09)",

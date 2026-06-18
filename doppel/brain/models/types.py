@@ -5,6 +5,7 @@ These flow through every layer of the cognitive architecture.
 from __future__ import annotations
 
 from datetime import datetime
+from enum import Enum
 from typing import Any, Literal, Optional
 from uuid import UUID, uuid4
 
@@ -283,6 +284,38 @@ class BrainOutput(BaseModel):
     path_taken: Literal["fast", "slow"]
     latency_ms: Optional[int] = None
     style_score: Optional[float] = None    # auto-eval, populated async
+
+
+# ---------------------------------------------------------------------------
+# APPROVAL ROUTING
+# ---------------------------------------------------------------------------
+
+class ApprovalPath(str, Enum):
+    """
+    4-path routing matrix from dual confidence scoring.
+
+    Representational confidence (how well clone knows the owner) ×
+    Consequentiality (blast radius if wrong) → routing decision.
+
+                       LOW CONSQ        HIGH CONSQ
+    HIGH REPR      AUTO_EXECUTE    CONSUMER_CONFIRM
+    LOW  REPR     CREATOR_REVIEW      DUAL_APPROVAL
+    """
+    AUTO_EXECUTE     = "auto_execute"      # execute immediately, no approval needed
+    CONSUMER_CONFIRM = "consumer_confirm"  # ask the consumer to confirm before acting
+    CREATOR_REVIEW   = "creator_review"    # queue for creator to review + approve
+    DUAL_APPROVAL    = "dual_approval"     # both creator AND consumer must approve
+
+
+class ApprovalDecision(BaseModel):
+    """Output of dual confidence scoring — drives approval routing."""
+    repr_confidence: float        # 0-1: how faithfully clone represents the owner
+    consequentiality: float       # 0-1: blast radius if action is wrong
+    approval_path: ApprovalPath
+    # Backwards-compatible fields (orchestrator uses these directly)
+    confidence: float             # = repr_confidence (for existing code)
+    needs_escalation: bool        # True when creator must review (CREATOR_REVIEW | DUAL_APPROVAL)
+    escalation_reason: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------

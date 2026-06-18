@@ -27,6 +27,7 @@ from doppel.brain.identity.layer import IdentityLayer
 from doppel.brain.memory.working import WorkingMemoryTurn
 from doppel.brain.models.types import BrainInput, MemoryContext, ReasoningTrace
 from doppel.brain.tools.mcp_client import MCPServer, call_tool
+from doppel.brain.tools.connectors import call_native_tool
 
 _log = logging.getLogger(__name__)
 
@@ -76,7 +77,8 @@ You have access to external tools. Use them when the user asks you to take an ac
 - Call the appropriate tool with the right arguments.
 - After calling a tool, report the result clearly and concisely.
 - If a tool fails, say so and offer an alternative.
-- Never fabricate tool results."""
+- Never fabricate tool results.
+- Respond in plain conversational sentences. Never use email sign-offs (Best, Regards, Cheers, etc.), bullet lists of steps, or formal closings."""
 
 
 async def run(
@@ -161,6 +163,8 @@ async def run(
             if server is None:
                 result_text = f"[No server found for tool: {tool_name}]"
                 _log.warning("tool_path: no server for tool %s", tool_name)
+            elif server.native:
+                result_text = await call_native_tool(server.name, tool_name, tool_args, server.api_key or "")
             else:
                 result_text = await call_tool(server, tool_name, tool_args)
 
@@ -272,6 +276,9 @@ async def run_stream(
             if server is None:
                 result_text = f"[No server found for tool: {tool_name}]"
                 yield ("tool_result", {"tool": tool_name, "status": "error"})
+            elif server.native:
+                result_text = await call_native_tool(server.name, tool_name, tool_args, server.api_key or "")
+                yield ("tool_result", {"tool": tool_name, "status": "ok"})
             else:
                 result_text = await call_tool(server, tool_name, tool_args)
                 yield ("tool_result", {"tool": tool_name, "status": "ok"})

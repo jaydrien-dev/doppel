@@ -111,14 +111,14 @@ function Nav() {
 // CONSTELLATION (3D hero visual)
 // ---------------------------------------------------------------------------
 const NODES = [
-  { id: "sarah", name: "Sarah", initial: "S", role: "Architecture",  color: "#1A73E8", r: 200, a:   0, size: 64, line: "Why we chose Postgres over Dynamo" },
-  { id: "maya",  name: "Maya",  initial: "M", role: "Design",        color: "#E91E63", r: 200, a:  72, size: 64, line: "When the design is done" },
-  { id: "reza",  name: "Reza",  initial: "R", role: "GTM",           color: "#F57C00", r: 200, a: 144, size: 64, line: "Positioning that holds up" },
-  { id: "jia",   name: "Jia",   initial: "J", role: "CFO",           color: "#34D399", r: 200, a: 216, size: 64, line: "Runway, then strategy" },
-  { id: "amit",  name: "Amit",  initial: "A", role: "Debug",         color: "#7B1FA2", r: 200, a: 288, size: 64, line: "Read the error twice" },
-  { id: "lin",   name: "Lin",   initial: "L", role: "Clinical ops",  color: "#C2185B", r: 100, a:  30, size: 44, line: "Handoff breaks the system" },
-  { id: "tom",   name: "Tom",   initial: "T", role: "Operator",      color: "#A78BFA", r: 100, a: 150, size: 44, line: "After PMF is the hard year" },
-  { id: "eli",   name: "Eli",   initial: "E", role: "Teaching",      color: "#FBBF24", r: 100, a: 270, size: 44, line: "How you ask is half the answer" },
+  { id: "sarah", name: "Sarah", initial: "S", role: "Engineering",  color: "#1A73E8", r: 200, a:   0, size: 64, line: "Posted incident update to Slack" },
+  { id: "maya",  name: "Maya",  initial: "M", role: "Design",       color: "#E91E63", r: 200, a:  72, size: 64, line: "Scheduled design review for Tuesday" },
+  { id: "reza",  name: "Reza",  initial: "R", role: "Sales",        color: "#F57C00", r: 200, a: 144, size: 64, line: "Sent follow-up to 6 prospects" },
+  { id: "jia",   name: "Jia",   initial: "J", role: "Finance",      color: "#34D399", r: 200, a: 216, size: 64, line: "Updated board deck in Drive" },
+  { id: "amit",  name: "Amit",  initial: "A", role: "Engineering",  color: "#7B1FA2", r: 200, a: 288, size: 64, line: "Opened GitHub issue from Slack thread" },
+  { id: "lin",   name: "Lin",   initial: "L", role: "Operations",   color: "#C2185B", r: 100, a:  30, size: 44, line: "Rescheduled 4 conflicting meetings" },
+  { id: "tom",   name: "Tom",   initial: "T", role: "Sales",        color: "#A78BFA", r: 100, a: 150, size: 44, line: "Filed deal notes to Notion" },
+  { id: "eli",   name: "Eli",   initial: "E", role: "Education",    color: "#FBBF24", r: 100, a: 270, size: 44, line: "Sent weekly summary to parents" },
 ];
 
 function Constellation() {
@@ -266,7 +266,7 @@ function Hero() {
             <span className="hero__pill__badge">
               <span className="hero__pill__dot" /> Live
             </span>
-            <span>412 expert clones answering right now</span>
+            <span>412 clones executing right now</span>
           </div>
 
           <h1 className="hero__h1">
@@ -276,8 +276,8 @@ function Hero() {
           </h1>
 
           <p className="hero__sub">
-            An AI clone trained on your actual work.
-            It answers while you&apos;re somewhere else.
+            Your clone acts on your behalf.
+            Sends, schedules, searches, delegates — while you&apos;re elsewhere.
           </p>
 
           <div className="hero__ctas">
@@ -309,14 +309,14 @@ function Hero() {
 // TICKER
 // ---------------------------------------------------------------------------
 const TICK_ITEMS = [
-  { who: "Sarah", role: "Architecture", color: "#1A73E8", line: "answered \"why Postgres over Dynamo\"", t: "2s" },
-  { who: "Maya",  role: "Design",       color: "#E91E63", line: "reviewed \"checkout v2 critique\"", t: "11s" },
-  { who: "Reza",  role: "GTM",          color: "#F57C00", line: "answered \"positioning rewrite\"", t: "24s" },
-  { who: "Amit",  role: "Debug",        color: "#7B1FA2", line: "explained \"flaky test in CI\"", t: "37s" },
-  { who: "Jia",   role: "CFO",          color: "#34D399", line: "modeled \"runway with new hires\"", t: "52s" },
-  { who: "Lin",   role: "Clinical ops", color: "#C2185B", line: "answered \"weekend triage staffing\"", t: "1m" },
-  { who: "Tom",   role: "Operator",     color: "#A78BFA", line: "advised \"killing a product line\"", t: "1m" },
-  { who: "Eli",   role: "Teaching",     color: "#FBBF24", line: "structured \"week 3 prereqs\"", t: "2m" },
+  { who: "Sarah", role: "Engineering", color: "#1A73E8", line: "posted incident update to #eng-alerts", t: "2s" },
+  { who: "Maya",  role: "Design",      color: "#E91E63", line: "scheduled design review with 3 stakeholders", t: "11s" },
+  { who: "Reza",  role: "GTM",         color: "#F57C00", line: "drafted and sent follow-up to 6 prospects", t: "24s" },
+  { who: "Amit",  role: "Engineering", color: "#7B1FA2", line: "opened GitHub issue from Slack thread", t: "37s" },
+  { who: "Jia",   role: "Finance",     color: "#34D399", line: "updated runway model and shared with board", t: "52s" },
+  { who: "Lin",   role: "Operations",  color: "#C2185B", line: "rescheduled 4 meetings after calendar conflict", t: "1m" },
+  { who: "Tom",   role: "Sales",       color: "#A78BFA", line: "sent weekly pipeline summary to leadership", t: "1m" },
+  { who: "Eli",   role: "Teaching",    color: "#FBBF24", line: "filed student feedback to Notion database", t: "2m" },
 ];
 
 function Ticker() {
@@ -342,34 +342,33 @@ function Ticker() {
 // ---------------------------------------------------------------------------
 const DEMO_THREADS = [
   {
-    expert: { id: "sarah", name: "Sarah Chen", role: "Architecture · former Stripe", color: "#1A73E8", initial: "S" },
-    seed: "Should we rewrite our payments service or refactor in flight?",
-    response: "Rewrite only if the API surface is fundamentally wrong, the team can't reason about failure modes, or on-call cost exceeds new-feature cost. Otherwise refactor — you keep velocity and tribal knowledge.",
-    confidence: 92,
+    expert: { id: "reza", name: "Reza · Sales", role: "Clone connected to Slack, Gmail, Notion", color: "#1A73E8", initial: "R" },
+    seed: "Post to #deals that Acme signed. Draft a follow-up email to their team.",
+    response: "Done. Posted to #deals and drafted the follow-up — it's in your Gmail drafts waiting for your review.",
+    confidence: 97,
     sources: [
-      { kind: "Notion", color: "#7B1FA2", label: "Rewrite RFC, Apr 2021" },
-      { kind: "Slack",  color: "#34D399", label: "#payments-arch, 14 threads" },
-      { kind: "Email",  color: "#1A73E8", label: "Post-mortem, Jun 2021" },
+      { kind: "Slack",  color: "#34D399", label: "Posted to #deals · 1s" },
+      { kind: "Gmail",  color: "#1A73E8", label: "Draft created · ready to send" },
     ],
   },
   {
-    expert: { id: "maya", name: "Maya Lee", role: "Design lead · ex-Figma", color: "#E91E63", initial: "M" },
-    seed: "How do I know my design is done?",
-    response: "When two designers can't agree, neither has met the user. Done is when your strongest critic has run out of fixable things to flag — not when you've stopped iterating.",
-    confidence: 88,
+    expert: { id: "maya", name: "Maya · Design", role: "Clone connected to Google Calendar, Notion", color: "#E91E63", initial: "M" },
+    seed: "Schedule a design review with the product team for sometime next week.",
+    response: "Scheduled for Tuesday 2pm — everyone was free. Invite sent, Notion doc linked in the description.",
+    confidence: 94,
     sources: [
-      { kind: "Figma",  color: "#E91E63", label: "Review threads, 720 comments" },
-      { kind: "Notion", color: "#7B1FA2", label: "Critique frameworks" },
+      { kind: "Calendar", color: "#E91E63", label: "Invite sent · 4 attendees" },
+      { kind: "Notion",   color: "#7B1FA2", label: "Design review doc attached" },
     ],
   },
   {
-    expert: { id: "jia", name: "Jia Park", role: "Fractional CFO", color: "#34D399", initial: "J" },
-    seed: "How do I think about burn vs growth at seed?",
-    response: "Show me your next 18 months first. We'll talk strategy after we agree on the math. At seed, runway is the only constraint that matters — everything else is downstream.",
-    confidence: 95,
+    expert: { id: "sarah", name: "Sarah · Engineering", role: "Clone connected to GitHub, Slack", color: "#34D399", initial: "S" },
+    seed: "Open a GitHub issue for the login timeout bug. Pull in the Slack thread context.",
+    response: "Issue opened with full context from #backend-bugs. Assigned to the on-call engineer and labeled as P1.",
+    confidence: 96,
     sources: [
-      { kind: "Sheets", color: "#2E7D32", label: "240 client financial models" },
-      { kind: "Email",  color: "#1A73E8", label: "660 investor threads" },
+      { kind: "GitHub", color: "#34D399", label: "Issue #847 opened · P1" },
+      { kind: "Slack",  color: "#7B1FA2", label: "Thread context imported" },
     ],
   },
 ];
@@ -397,10 +396,10 @@ function DemoSection() {
             <span className="eyebrow__dot" /> Live demo
           </div>
           <h2 className="sec-h2" style={{ ["--accent-c" as string]: color }}>
-            Ask anyone. <br /> Get a <em>cited</em> answer.
+            Delegate a task. <br /> Your clone <em>handles it.</em>
           </h2>
           <p className="sec-sub">
-            Every clone answers in voice, with real sources and a confidence score. Try one:
+            Connect your tools once. Then just tell your clone what to do.
           </p>
 
           <div className="demo__presets" style={{ marginTop: 18 }}>
@@ -462,12 +461,12 @@ function DemoSection() {
                     ))}
                   </div>
                   <div className="demo__msg__conf">
-                    <span>Confidence</span>
+                    <span>Tools used</span>
                     <span className="demo__msg__conf__bar">
                       <span className="demo__msg__conf__fill" style={{ ["--target-w" as string]: `${thread.confidence}%` }} />
                     </span>
-                    <span className="demo__msg__conf__val">{thread.confidence}%</span>
-                    <span>· 1.8s</span>
+                    <span className="demo__msg__conf__val">{thread.sources.length}</span>
+                    <span>· 2.1s</span>
                   </div>
                 </div>
               </div>
@@ -476,7 +475,7 @@ function DemoSection() {
 
           <div className="demo__prompt">
             <input
-              placeholder={`Ask ${thread.expert.name.split(" ")[0]}…`}
+              placeholder={`Tell ${thread.expert.name.split(" ")[0].split("·")[0].trim()} to…`}
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               disabled={stage === "typing"}
@@ -507,7 +506,7 @@ const SW_FEATURES = [
   {
     id: "screen",
     label: "Sees your screen",
-    body: "No copy-paste. The clone reads what you're working on and responds with full context.",
+    body: "No copy-paste. The clone reads what you're working on and acts with full context.",
     icon: (
       <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
         <path d="M1 8s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5z" stroke="currentColor" strokeWidth="1.35" strokeLinejoin="round"/>
@@ -679,7 +678,7 @@ function ScreenwatchSection() {
           </div>
 
           <h2 className="sec-h2" style={{ ["--accent-c" as string]: ACCENT, marginBottom: 16 }}>
-            Your clone <em>watches</em><br />with you.
+            Your clone runs<br /><em>on your desktop.</em>
           </h2>
 
           <p style={{
@@ -687,7 +686,7 @@ function ScreenwatchSection() {
             color: "var(--fg-dark-3)",
             maxWidth: 460, marginBottom: 40,
           }}>
-            A lightweight overlay that floats above every app on your desktop. It reads your screen, hears your voice, and responds in real time — without breaking your focus.
+            A lightweight overlay that floats above every app. It reads your screen, hears your voice, and executes tasks in real time — without breaking your flow.
           </p>
 
           {/* Feature list */}
@@ -971,7 +970,7 @@ function ScreenwatchSection() {
                   <p style={{ margin: 0, fontSize: 11, fontWeight: 500, color: "rgba(255,255,255,0.80)" }}>boo</p>
                   <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 2 }}>
                     <span style={{ width: 5, height: 5, borderRadius: "50%", background: "rgba(52,211,153,0.70)", display: "inline-block", animation: "sw-breathe 2.5s ease-in-out infinite" }} />
-                    <span style={{ fontSize: 10, color: "rgba(52,211,153,0.60)" }}>watching</span>
+                    <span style={{ fontSize: 10, color: "rgba(52,211,153,0.60)" }}>active</span>
                   </div>
                 </div>
                 {/* Buttons */}
@@ -1017,26 +1016,26 @@ function ScreenwatchSection() {
 // ---------------------------------------------------------------------------
 const CARDS = [
   {
-    num: "01", title: "Capture",
-    body: "Connect Gmail, Slack, GitHub, Notion. Everything you've ever decided becomes permanent, searchable memory.",
+    num: "01", title: "Connect",
+    body: "Link your tools once — Slack, Gmail, GitHub, Drive, Calendar, Notion. Your clone gets access to act on your behalf.",
     meta: "Takes 5 minutes",
     bg: "linear-gradient(135deg, #1A73E8 0%, #0D47A1 100%)", dot: "#4A90E2",
   },
   {
-    num: "02", title: "Train",
-    body: "Doppel learns your voice, your reasoning, your shortcuts. Not just what you know — how you think.",
-    meta: "Runs in the background",
+    num: "02", title: "Delegate",
+    body: "Tell your clone what to handle. It executes: posts, schedules, searches, creates, follows up. You stay in control.",
+    meta: "Natural language commands",
     bg: "linear-gradient(135deg, #7B1FA2 0%, #4A148C 100%)", dot: "#A78BFA",
   },
   {
-    num: "03", title: "Deploy",
-    body: "Share a link. Anyone you give access can ask your clone — while you're in a meeting, asleep, or off the grid.",
-    meta: "One click",
+    num: "03", title: "Approve",
+    body: "High-stakes actions pause for your sign-off. You set the thresholds. Nothing irreversible happens without you.",
+    meta: "You're always in the loop",
     bg: "linear-gradient(135deg, #E91E63 0%, #880E4F 100%)", dot: "#F06292",
   },
   {
-    num: "04", title: "Compound",
-    body: "Your knowledge doesn't leave when you do. It compounds. Every answer makes the clone sharper.",
+    num: "04", title: "Scale",
+    body: "One of you isn't enough. Your clone handles the volume while you focus on what only you can do.",
     meta: "Free → Enterprise",
     bg: "linear-gradient(135deg, #00838F 0%, #006064 100%)", dot: "#34D399",
   },
@@ -1086,7 +1085,7 @@ function CardStack() {
           <span className="eyebrow__dot" /> Why doppel
         </div>
         <h2 className="sec-h2" style={{ margin: "0 auto", ["--accent-c" as string]: "#A78BFA" }}>
-          Knowledge shouldn&apos;t have <br /> <em>a lifespan.</em>
+          One of you <br /> <em>isn&apos;t enough.</em>
         </h2>
       </div>
 
@@ -1150,10 +1149,10 @@ function CardStack() {
 // STAT TILES
 // ---------------------------------------------------------------------------
 const STATS = [
-  { val: 412, suffix: "+",  lbl: "expert clones live",              c: "#1A73E8", pct: 92 },
-  { val: 84,  suffix: "%",  lbl: "average answer accuracy",         c: "#34D399", pct: 84 },
-  { val: 1.8, suffix: "s",  lbl: "avg response time",               c: "#FBBF24", pct: 68 },
-  { val: 80,  suffix: "%",  lbl: "of every paid query to creator",  c: "#E91E63", pct: 80 },
+  { val: 412, suffix: "+",  lbl: "active clones executing",          c: "#1A73E8", pct: 92 },
+  { val: 94,  suffix: "%",  lbl: "tasks completed without escalation", c: "#34D399", pct: 94 },
+  { val: 2.1, suffix: "s",  lbl: "avg tool execution time",           c: "#FBBF24", pct: 68 },
+  { val: 80,  suffix: "%",  lbl: "of revenue to clone creator",       c: "#E91E63", pct: 80 },
 ];
 
 function StatTile({ val, suffix, lbl, c, pct }: { val: number; suffix: string; lbl: string; c: string; pct: number }) {
@@ -1215,26 +1214,26 @@ function StatsSection() {
 const PLANS = [
   {
     name: "Free", color: "#34D399", monthly: 0, yearly: 0,
-    desc: "Build your clone. Share it. Yours forever.",
-    feats: ["2 clones", "500 memory chunks per clone", "50 queries / month", "Train from any source (Gmail, Notion, Slack…)", "Public chat link", "Sell on the marketplace · 70% rev share"],
+    desc: "Set up your clone. Connect your tools. Start delegating.",
+    feats: ["2 clones", "3 connected tools per clone", "50 executions / month", "Approval flows included", "Public clone link", "Sell on the marketplace · 70% rev share"],
     cta: "Start free", featured: false,
   },
   {
     name: "Personal", color: "#1A73E8", monthly: 15, yearly: 150,
-    desc: "Sell your knowledge. Earn on every query.",
-    feats: ["5 clones", "5,000 memory chunks per clone", "250 queries / month", "80% revenue share on consumer queries", "Priority marketplace listing", "API access", "Custom clone pricing"],
+    desc: "More tools. More volume. Your clone works full-time.",
+    feats: ["5 clones", "Unlimited connected tools", "250 executions / month", "80% revenue share on delegated tasks", "Priority marketplace listing", "API access", "Custom approval thresholds"],
     cta: "Get Personal", featured: false,
   },
   {
     name: "Pro", color: "#A78BFA", monthly: 49, yearly: 490, featured: true, perSeat: true,
-    desc: "Scale your knowledge across a team.",
-    feats: ["20 clones org-wide · everything in Personal", "30,000 memory chunks per clone", "1,250 queries / month", "Org-wide audit log", "Priority support"],
+    desc: "A clone for every person on your team.",
+    feats: ["20 clones org-wide · everything in Personal", "1,250 executions / month per seat", "Team approval flows & audit log", "Shared tool connections", "Priority support"],
     cta: "Get Pro",
   },
   {
     name: "Max", color: "#E91E63", monthly: 149, yearly: 1490, perSeat: true,
-    desc: "Enterprise-grade. No compromises.",
-    feats: ["50 clones org-wide · everything in Pro", "200,000 memory chunks per clone", "5,000 queries / month", "SOC 2 Type II", "Guaranteed uptime SLA", "Dedicated CSM + priority support", "Custom contracts"],
+    desc: "Enterprise-grade execution. No compromises.",
+    feats: ["50 clones org-wide · everything in Pro", "5,000 executions / month per seat", "SOC 2 Type II", "Guaranteed uptime SLA", "Dedicated CSM + priority support", "Custom contracts"],
     cta: "Talk to us", featured: false,
   },
 ];
