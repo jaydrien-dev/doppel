@@ -263,19 +263,11 @@ function CloneCard({ clone, onDeleted }: { clone: CloneRow; onDeleted: () => voi
       </div>
 
       {/* Stats row */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-        <div>
-          <p style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em", color: "rgba(255,255,255,0.20)", marginBottom: 2 }}>Plan</p>
-          <p style={{ fontSize: 12, fontWeight: 500, margin: 0, color: PLAN_COLORS[clone.subscription_tier] ?? "rgba(255,255,255,0.4)" }}>
-            {PLAN_LABELS[clone.subscription_tier] ?? clone.subscription_tier}
-          </p>
-        </div>
-        <div>
-          <p style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em", color: "rgba(255,255,255,0.20)", marginBottom: 2 }}>Price</p>
-          <p style={{ fontSize: 12, color: "rgba(255,255,255,0.50)", margin: 0 }}>
-            {clone.price_per_query > 0 ? `${Math.round(clone.price_per_query)} cr/q` : "Free"}
-          </p>
-        </div>
+      <div>
+        <p style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em", color: "rgba(255,255,255,0.20)", marginBottom: 2 }}>Plan</p>
+        <p style={{ fontSize: 12, fontWeight: 500, margin: 0, color: PLAN_COLORS[clone.subscription_tier] ?? "rgba(255,255,255,0.4)" }}>
+          {PLAN_LABELS[clone.subscription_tier] ?? clone.subscription_tier}
+        </p>
       </div>
 
       {/* Actions */}

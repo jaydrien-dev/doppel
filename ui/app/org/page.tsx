@@ -212,11 +212,6 @@ function CloneCard({ clone, index }: { clone: OrgClone; index: number }) {
               </svg>
               {clone.total_queries.toLocaleString()} queries
             </span>
-            <span style={{ fontSize: 11, color: "rgba(255,255,255,0.30)" }}>
-              {clone.price_per_query > 0
-                ? `${clone.price_per_query} cr / query`
-                : "Free"}
-            </span>
           </div>
 
           {/* CTA */}

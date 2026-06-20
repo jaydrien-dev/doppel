@@ -651,7 +651,7 @@ function ConvSidebar({
                       {c.display_name}
                     </p>
                     <p style={{ fontSize: 10, color: "rgba(255,255,255,0.30)", margin: "1px 0 0" }}>
-                      {c.price_per_query > 0 ? `${c.price_per_query} cr` : "Free"} · org
+                      org
                     </p>
                   </div>
                 </button>

@@ -26,7 +26,10 @@ from doppel.brain.context import get_anthropic_key
 from doppel.brain.identity.layer import IdentityLayer
 from doppel.brain.memory.working import WorkingMemoryTurn
 from doppel.brain.models.types import BrainInput, MemoryContext, ReasoningTrace
-from doppel.brain.tools.mcp_client import MCPServer, call_tool
+from uuid import UUID
+from sqlalchemy import text as sql_text
+from sqlalchemy.ext.asyncio import AsyncSession
+from doppel.brain.tools.mcp_client import MCPServer, call_tool, call_native_tool_with_refresh
 from doppel.brain.tools.connectors import call_native_tool
 
 _log = logging.getLogger(__name__)
@@ -53,8 +56,14 @@ def _build_messages(
     return messages
 
 
-def _build_system(identity: IdentityLayer, memory: MemoryContext) -> str:
+def _build_system(
+    identity: IdentityLayer,
+    memory: MemoryContext,
+    recent_actions: list[dict] | None = None,
+) -> str:
     """Build the system prompt for the tool path."""
+    import datetime
+
     persona = identity.render_persona_block()
 
     # Inject relevant memory as context
@@ -65,6 +74,37 @@ def _build_system(identity: IdentityLayer, memory: MemoryContext) -> str:
     if memory.semantic:
         facts = "\n".join(f"- {f.fact}" for f in memory.semantic[:5])
         context_parts.append(f"## Key facts\n{facts}")
+
+    # Inject recent tool actions from past sessions so clone has cross-session context
+    if recent_actions:
+        lines: list[str] = []
+        now = datetime.datetime.utcnow().replace(tzinfo=datetime.timezone.utc)
+        for action in recent_actions:
+            tool = action.get("title", "")
+            ctx = action.get("context") or {}
+            args = ctx.get("args") or {}
+            # Build a compact one-liner: tool_name | key args | relative time
+            arg_summary = ", ".join(f"{k}={str(v)[:60]}" for k, v in list(args.items())[:3])
+            ts = action.get("created_at")
+            if ts:
+                try:
+                    if isinstance(ts, str):
+                        dt = datetime.datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                    else:
+                        dt = ts.replace(tzinfo=datetime.timezone.utc) if ts.tzinfo is None else ts
+                    diff = int((now - dt).total_seconds())
+                    if diff < 3600:
+                        rel = f"{diff // 60}m ago"
+                    elif diff < 86400:
+                        rel = f"{diff // 3600}h ago"
+                    else:
+                        rel = f"{diff // 86400}d ago"
+                except Exception:
+                    rel = ""
+            else:
+                rel = ""
+            lines.append(f"- {tool}: {arg_summary} ({rel})" if arg_summary else f"- {tool} ({rel})")
+        context_parts.append("## Recent tool actions (previous sessions)\n" + "\n".join(lines))
 
     context_block = "\n\n".join(context_parts)
 
@@ -81,6 +121,36 @@ You have access to external tools. Use them when the user asks you to take an ac
 - Respond in plain conversational sentences. Never use email sign-offs (Best, Regards, Cheers, etc.), bullet lists of steps, or formal closings."""
 
 
+async def _log_tool_action(
+    clone_id: UUID,
+    tool_name: str,
+    tool_args: dict,
+    result: str,
+    server_name: str,
+    session: AsyncSession,
+) -> None:
+    """Insert a tool execution record into proposals for the approvals page."""
+    try:
+        await session.execute(
+            sql_text("""
+                INSERT INTO proposals
+                  (clone_id, proposal_type, title, content, context, confidence, status, executed_at)
+                VALUES
+                  (:cid, 'tool_action', :title, :content, :ctx::jsonb, :conf, 'executed', NOW())
+            """),
+            {
+                "cid": str(clone_id),
+                "title": tool_name,
+                "content": result[:2000],
+                "ctx": json.dumps({"args": tool_args, "server": server_name}),
+                "conf": 0.85,
+            },
+        )
+        await session.commit()
+    except Exception as exc:
+        _log.warning("Failed to log tool action to proposals: %s", exc)
+
+
 async def run(
     brain_input: BrainInput,
     identity: IdentityLayer,
@@ -88,6 +158,9 @@ async def run(
     working: list[WorkingMemoryTurn],
     mcp_tools: list[dict],
     servers_by_name: dict[str, MCPServer],
+    session: AsyncSession | None = None,
+    clone_id: UUID | None = None,
+    recent_actions: list[dict] | None = None,
 ) -> tuple[str, ReasoningTrace]:
     """
     Non-streaming tool path. Returns (response_text, trace).
@@ -98,7 +171,7 @@ async def run(
     trace.framing = "tool_path"
 
     messages = _build_messages(brain_input, memory, working)
-    system = _build_system(identity, memory)
+    system = _build_system(identity, memory, recent_actions)
     api_key = get_anthropic_key()
 
     tool_names_called: list[str] = []
@@ -164,9 +237,19 @@ async def run(
                 result_text = f"[No server found for tool: {tool_name}]"
                 _log.warning("tool_path: no server for tool %s", tool_name)
             elif server.native:
-                result_text = await call_native_tool(server.name, tool_name, tool_args, server.api_key or "")
+                if session is not None:
+                    result_text = await call_native_tool_with_refresh(server, tool_name, tool_args, session)
+                else:
+                    result_text = await call_native_tool(server.name, tool_name, tool_args, server.api_key or "")
             else:
                 result_text = await call_tool(server, tool_name, tool_args)
+
+            # Log to proposals table for approvals page
+            if session is not None and clone_id is not None:
+                await _log_tool_action(
+                    clone_id, tool_name, tool_args, result_text,
+                    server.name if server else "unknown", session,
+                )
 
             tool_results.append({
                 "type": "tool_result",
@@ -189,6 +272,9 @@ async def run_stream(
     working: list[WorkingMemoryTurn],
     mcp_tools: list[dict],
     servers_by_name: dict[str, MCPServer],
+    session: AsyncSession | None = None,
+    clone_id: UUID | None = None,
+    recent_actions: list[dict] | None = None,
 ) -> AsyncGenerator[tuple[str, object], None]:
     """
     Streaming tool path. Yields:
@@ -203,7 +289,7 @@ async def run_stream(
     trace.framing = "tool_path"
 
     messages = _build_messages(brain_input, memory, working)
-    system = _build_system(identity, memory)
+    system = _build_system(identity, memory, recent_actions)
     api_key = get_anthropic_key()
 
     tool_names_called: list[str] = []
@@ -277,11 +363,22 @@ async def run_stream(
                 result_text = f"[No server found for tool: {tool_name}]"
                 yield ("tool_result", {"tool": tool_name, "status": "error"})
             elif server.native:
-                result_text = await call_native_tool(server.name, tool_name, tool_args, server.api_key or "")
-                yield ("tool_result", {"tool": tool_name, "status": "ok"})
+                if session is not None:
+                    result_text = await call_native_tool_with_refresh(server, tool_name, tool_args, session)
+                else:
+                    result_text = await call_native_tool(server.name, tool_name, tool_args, server.api_key or "")
+                status = "error" if "Authorization failed" in result_text else "ok"
+                yield ("tool_result", {"tool": tool_name, "status": status})
             else:
                 result_text = await call_tool(server, tool_name, tool_args)
                 yield ("tool_result", {"tool": tool_name, "status": "ok"})
+
+            # Log to proposals table for approvals page
+            if session is not None and clone_id is not None:
+                await _log_tool_action(
+                    clone_id, tool_name, tool_args, result_text,
+                    server.name if server else "unknown", session,
+                )
 
             tool_results.append({
                 "type": "tool_result",

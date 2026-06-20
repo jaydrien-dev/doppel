@@ -278,7 +278,6 @@ function CloneChat({ clone, userId }: { clone: CloneOwnerInfo; userId: string })
   const [input,           setInput]           = useState("");
   const [shareCopied,     setShareCopied]     = useState(false);
   const [moreOpen,        setMoreOpen]        = useState(false);
-  const [credits,         setCredits]         = useState<{ plan: number; bought: number } | null>(null);
   const [consent,         setConsent]         = useState<"loading" | null | boolean>("loading");
   const [profile,         setProfile]         = useState<{ exists: boolean; total_sessions?: number } | null>(null);
   const [knowledgeAreas,  setKnowledgeAreas]  = useState<{ area: string; depth: string }[]>([]);
@@ -345,15 +344,6 @@ function CloneChat({ clone, userId }: { clone: CloneOwnerInfo; userId: string })
       .then(d => { if (d) setProfile(d); })
       .catch(() => {});
   }, [userId, clone.handle]);
-
-  // Credits
-  useEffect(() => {
-    if (!userId) return;
-    fetch("/api/credits/balance")
-      .then(r => r.ok ? r.json() : null)
-      .then(d => { if (d) setCredits({ plan: d.plan_credits ?? 0, bought: d.bought_credits ?? 0 }); })
-      .catch(() => {});
-  }, [userId]);
 
   // Knowledge map
   useEffect(() => {
@@ -685,18 +675,6 @@ function CloneChat({ clone, userId }: { clone: CloneOwnerInfo; userId: string })
                 <IAgent />Running tool…
               </span>
             )}
-            <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 5 }}>
-              {credits !== null && credits.plan > 0 && (
-                <span style={{ fontSize: 10, padding: "2px 7px", borderRadius: 999, background: "rgba(96,165,250,0.07)", border: "1px solid rgba(96,165,250,0.13)", color: "rgba(96,165,250,0.60)", fontVariantNumeric: "tabular-nums" }}>
-                  {credits.plan.toLocaleString()} plan
-                </span>
-              )}
-              {credits !== null && credits.bought > 0 && (
-                <span style={{ fontSize: 10, padding: "2px 7px", borderRadius: 999, background: "rgba(196,181,253,0.07)", border: "1px solid rgba(196,181,253,0.12)", color: "rgba(196,181,253,0.55)", fontVariantNumeric: "tabular-nums" }}>
-                  {credits.bought.toLocaleString()} bought
-                </span>
-              )}
-            </div>
           </div>
         </div>
       </div>

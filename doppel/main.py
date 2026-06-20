@@ -2423,17 +2423,16 @@ async def _handle_chat_credits_and_context(
     )
     price_rec = price_row.mappings().first()
     caller_is_owner = bool(caller_user_id and price_rec and caller_user_id == price_rec["user_id"])
-    is_paid = (
-        price_rec
-        and float(price_rec["price_per_query"]) > 0
-        and not (caller_is_owner and body.owner_mode)
-    )
+    # All messages use credits — owner in owner_mode is exempt
+    charge_credits = price_rec and not (caller_is_owner and body.owner_mode)
 
-    if is_paid:
+    if charge_credits:
         if not caller_user_id:
             raise HTTPException(status_code=401, detail="Login required to query this clone")
         multiplier = CREDITS_MULTIPLIER.get(body.response_mode, 1)
-        credits_cost = int(float(price_rec["price_per_query"])) * multiplier
+        # Minimum 1 credit per query — price_per_query of 0 (legacy free clones) now costs 1
+        base_price = max(1, int(float(price_rec["price_per_query"])))
+        credits_cost = base_price * multiplier
 
         org_pair = (await session.execute(
             sql_text("""
@@ -2477,12 +2476,6 @@ async def _handle_chat_credits_and_context(
                 """),
                 {"earn": creator_earn, "cid": str(body.clone_id)},
             )
-        await session.commit()
-    elif price_rec:
-        await session.execute(
-            sql_text("UPDATE clone_identity SET total_queries = total_queries + 1 WHERE clone_id = :cid"),
-            {"cid": str(body.clone_id)},
-        )
         await session.commit()
 
     # Consumer profile: inject cross-session summary
@@ -11048,7 +11041,7 @@ async def oauth_callback(
         )
     await session.commit()
 
-    return _HTMLResponse(content=_OAUTH_SUCCESS_HTML)
+    return _HTMLResponse(content=_OAUTH_SUCCESS_HTML.format())
 
 
 # ---------------------------------------------------------------------------

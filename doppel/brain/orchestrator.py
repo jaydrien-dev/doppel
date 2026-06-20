@@ -141,6 +141,9 @@ class DoppelBrain:
         from doppel.brain.reasoning import tool_path as _tool_path
         mcp_tools, servers_by_name = await load_clone_tools(self._session, self._clone_id)
 
+        # ── 4d. Load recent tool actions for cross-session context ────────
+        recent_actions = await _load_recent_tool_actions(self._session, self._clone_id)
+
         # ── 5. Reasoning (tool path, fast, or slow) ───────────────────────
         if mcp_tools and _message_needs_tools(brain_input.message):
             response_text, trace = await _tool_path.run(
@@ -150,6 +153,9 @@ class DoppelBrain:
                 working=working,
                 mcp_tools=mcp_tools,
                 servers_by_name=servers_by_name,
+                session=self._session,
+                clone_id=self._clone_id,
+                recent_actions=recent_actions,
             )
         else:
             response_text, trace = await self._reasoning.think(
@@ -326,6 +332,9 @@ class DoppelBrain:
         from doppel.brain.reasoning import tool_path as _tool_path
         mcp_tools, servers_by_name = await load_clone_tools(self._session, self._clone_id)
 
+        # ── 4d. Load recent tool actions for cross-session context ────────
+        recent_actions = await _load_recent_tool_actions(self._session, self._clone_id)
+
         path = route(perceived)
         mode = brain_input.response_mode
         if mode == "fast":
@@ -344,6 +353,9 @@ class DoppelBrain:
                 working=working,
                 mcp_tools=mcp_tools,
                 servers_by_name=servers_by_name,
+                session=self._session,
+                clone_id=self._clone_id,
+                recent_actions=recent_actions,
             )
         else:
             kwargs = dict(
@@ -537,6 +549,40 @@ async def _check_blocked_topics(
         return None
     except Exception:
         return None  # non-fatal — don't block the request on DB errors
+
+
+async def _load_recent_tool_actions(
+    session: AsyncSession,
+    clone_id: UUID,
+    limit: int = 15,
+) -> list[dict]:
+    """
+    Load recent tool_action proposals for cross-session context injection.
+    Returns dicts with title, context (args/server), created_at.
+    Non-fatal — returns [] on any error.
+    """
+    try:
+        from sqlalchemy import text as _text
+        rows = await session.execute(
+            _text("""
+                SELECT title, context, created_at
+                FROM proposals
+                WHERE clone_id = :cid AND proposal_type = 'tool_action'
+                ORDER BY created_at DESC
+                LIMIT :n
+            """),
+            {"cid": str(clone_id), "n": limit},
+        )
+        results = []
+        for r in rows.mappings():
+            results.append({
+                "title": r["title"],
+                "context": r["context"] if isinstance(r["context"], dict) else {},
+                "created_at": r["created_at"],
+            })
+        return results
+    except Exception:
+        return []
 
 
 async def _persist_async(

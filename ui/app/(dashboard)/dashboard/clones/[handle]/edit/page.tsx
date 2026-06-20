@@ -66,7 +66,6 @@ export default function CloneEditPage({ params }: { params: Promise<{ handle: st
   const [displayName, setDisplayName]   = useState("");
   const [listingTitle, setListingTitle] = useState("");
   const [description, setDescription]   = useState("");
-  const [price, setPrice]               = useState("0.00");
   const [category, setCategory]         = useState("other");
   const [accessMode, setAccessMode]     = useState<"private" | "org_scoped" | "public">("private");
   const [showPublicWarning, setShowPublicWarning] = useState(false);
@@ -92,7 +91,6 @@ export default function CloneEditPage({ params }: { params: Promise<{ handle: st
         setDisplayName(d.display_name ?? "");
         setListingTitle(d.listing_title ?? d.display_name ?? "");
         setDescription(d.listing_description ?? "");
-        setPrice(String(Math.round((d.price_per_query ?? 0) as number)));
         setCategory(d.category ?? "other");
         setAccessMode(d.access_mode === "public" ? "public" : d.access_mode === "org_scoped" ? "org_scoped" : "private");
         setIsListed(d.is_listed ?? false);
@@ -115,7 +113,6 @@ export default function CloneEditPage({ params }: { params: Promise<{ handle: st
           display_name:        displayName.trim() || clone.display_name,
           listing_title:       listingTitle.trim() || displayName.trim() || clone.display_name,
           listing_description: description,
-          price_per_query:     parseInt(price) || 0,
           category,
           access_mode:         accessMode,
           is_listed:           isListed,
@@ -165,8 +162,6 @@ export default function CloneEditPage({ params }: { params: Promise<{ handle: st
       </div>
     );
   }
-
-  const isFree = parseInt(price) === 0;
 
   return (
     <div className="db-page">
@@ -296,58 +291,6 @@ export default function CloneEditPage({ params }: { params: Promise<{ handle: st
                 />
               </div>
             </div>
-          </div>
-
-          {/* Pricing */}
-          <div className="card">
-            <p className="card-title">Pricing</p>
-            <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
-              {(["free", "paid"] as const).map((p) => {
-                const active = p === "free" ? isFree : !isFree;
-                return (
-                  <button
-                    key={p}
-                    onClick={() => {
-                      if (p === "free") setPrice("0");
-                      else if (isFree) setPrice("1");
-                    }}
-                    style={{
-                      flex: 1, padding: 14, borderRadius: 12, cursor: "pointer",
-                      fontFamily: "inherit", textAlign: "left",
-                      background: active ? "rgba(26,115,232,0.10)" : "rgba(255,255,255,0.04)",
-                      border: `1.5px solid ${active ? "rgba(26,115,232,0.5)" : "rgba(255,255,255,0.06)"}`,
-                    }}
-                  >
-                    <p style={{ fontSize: 13, fontWeight: 500, color: active ? "rgba(107,174,255,0.90)" : "rgba(255,255,255,0.60)", marginBottom: 2 }}>
-                      {p === "free" ? "Free" : "Paid"}
-                    </p>
-                    <p style={{ fontSize: 11, color: "rgba(255,255,255,0.30)" }}>
-                      {p === "free" ? "Anyone can query at no cost" : "Charge per query"}
-                    </p>
-                  </button>
-                );
-              })}
-            </div>
-            {!isFree && (
-              <div>
-                <FieldLabel>Credits per query</FieldLabel>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, maxWidth: 160 }}>
-                  <input
-                    type="number"
-                    min="1"
-                    step="1"
-                    value={price}
-                    onChange={(e) => setPrice(e.target.value)}
-                    placeholder="1"
-                    className="input"
-                  />
-                  <span style={{ fontSize: 13, color: "rgba(255,255,255,0.30)", flexShrink: 0 }}>cr</span>
-                </div>
-                <p style={{ fontSize: 11, color: "rgba(255,255,255,0.25)", marginTop: 5 }}>
-                  Standard clones charge 1 credit. Premium clones can charge more.
-                </p>
-              </div>
-            )}
           </div>
 
           {/* Access */}
@@ -509,10 +452,7 @@ export default function CloneEditPage({ params }: { params: Promise<{ handle: st
               <p style={{ fontSize: 12, color: "#5F6368", lineHeight: 1.5, minHeight: 40 }}>
                 {description || "No description yet."}
               </p>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 14, paddingTop: 12, borderTop: "1px solid rgba(0,0,0,0.07)" }}>
-                <span style={{ fontSize: 13, fontWeight: 500, color: "#1D1D1F" }}>
-                  {isFree ? "Free" : `$${parseFloat(price).toFixed(2)}/query`}
-                </span>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", marginTop: 14, paddingTop: 12, borderTop: "1px solid rgba(0,0,0,0.07)" }}>
                 <div style={{ padding: "5px 14px", borderRadius: 9999, background: "#1A73E8", color: "#fff", fontSize: 12, fontWeight: 500 }}>
                   Ask
                 </div>
