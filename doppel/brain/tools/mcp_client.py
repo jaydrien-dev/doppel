@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 from uuid import UUID
 
@@ -22,12 +22,15 @@ import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 
-from doppel.brain.security.encryption import decrypt_field
+from doppel.brain.security.encryption import decrypt_field, encrypt_field
 
 _log = logging.getLogger(__name__)
 
 _TOOL_CALL_TIMEOUT = 30.0   # seconds per MCP tool call
 _LIST_TIMEOUT      = 10.0   # seconds for tools/list
+
+# Google services that support token refresh
+_GOOGLE_SERVICES = {"Gmail", "Google Calendar", "Google Drive"}
 
 
 @dataclass
@@ -39,6 +42,7 @@ class MCPServer:
     api_key: str | None     # decrypted
     extra_headers: dict     # decrypted
     native: bool = False    # True when handled by a native REST connector (no MCP proxy needed)
+    refresh_token: str | None = None  # Google OAuth refresh token (stored in extra_headers)
 
 
 def _build_headers(server: MCPServer) -> dict[str, str]:
@@ -129,6 +133,83 @@ async def call_tool(server: MCPServer, namespaced_tool_name: str, args: dict) ->
     return "\n".join(parts) or "[Empty result]"
 
 
+async def refresh_google_token(server: MCPServer, session: AsyncSession) -> bool:
+    """
+    Use the stored refresh_token to get a new Google access token.
+    Updates server.api_key in-place and persists the new token to the DB.
+    Returns True on success, False if refresh fails.
+    """
+    if not server.refresh_token:
+        return False
+
+    try:
+        from doppel.brain.context import get_google_client_id, get_google_client_secret
+        client_id = get_google_client_id()
+        client_secret = get_google_client_secret()
+        if not client_id or not client_secret:
+            _log.warning("refresh_google_token: Google OAuth credentials not configured")
+            return False
+
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                "https://oauth2.googleapis.com/token",
+                data={
+                    "grant_type": "refresh_token",
+                    "refresh_token": server.refresh_token,
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                },
+            )
+            resp.raise_for_status()
+            token_data = resp.json()
+
+        new_token = token_data.get("access_token")
+        if not new_token:
+            _log.warning("refresh_google_token: no access_token in response for %s", server.name)
+            return False
+
+        # Update in-memory
+        server.api_key = new_token
+
+        # Persist to DB
+        enc = encrypt_field(new_token)
+        await session.execute(
+            text("UPDATE clone_mcp_servers SET api_key_enc = :enc WHERE id = :id"),
+            {"enc": enc, "id": str(server.id)},
+        )
+        await session.commit()
+        _log.info("refresh_google_token: refreshed token for %s", server.name)
+        return True
+
+    except Exception as exc:
+        _log.warning("refresh_google_token: failed for %s: %s", server.name, exc)
+        return False
+
+
+async def call_native_tool_with_refresh(
+    server: MCPServer,
+    tool_name: str,
+    args: dict,
+    session: AsyncSession,
+) -> str:
+    """
+    Call a native tool and automatically refresh the Google token on 401.
+    Retries once after a successful refresh.
+    """
+    from doppel.brain.tools.connectors import call_native_tool
+
+    result = await call_native_tool(server.name, tool_name, args, server.api_key or "")
+
+    # If auth failed and we have a refresh token, try once
+    if "Authorization failed" in result and server.name in _GOOGLE_SERVICES and server.refresh_token:
+        _log.info("call_native_tool_with_refresh: 401 on %s — attempting token refresh", server.name)
+        refreshed = await refresh_google_token(server, session)
+        if refreshed:
+            result = await call_native_tool(server.name, tool_name, args, server.api_key or "")
+
+    return result
+
+
 async def load_clone_tools(
     session: AsyncSession,
     clone_id: UUID,
@@ -183,6 +264,7 @@ async def load_clone_tools(
             transport=row[3],
             api_key=api_key,
             extra_headers=extra_headers,
+            refresh_token=extra_headers.get("refresh_token"),
         )
 
         # Prefer native REST connector over placeholder MCP proxy URL

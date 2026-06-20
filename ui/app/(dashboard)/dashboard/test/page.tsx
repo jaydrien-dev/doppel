@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import useSWR, { mutate } from "swr";
+import useSWR from "swr";
 import { useClones } from "@/lib/hooks/useClones";
 import { ClonePicker } from "@/components/dashboard/ClonePicker";
 import { LoadingSpinner } from "@/components/ui/LoadingSpinner";
@@ -16,238 +16,134 @@ function rel(iso: string): string {
   return `${Math.floor(diff / 86400)}d ago`;
 }
 
-const PATH_META: Record<string, { label: string; color: string; desc: string }> = {
-  creator_review: {
-    label: "Your review",
-    color: "rgba(251,191,36,0.80)",
-    desc: "Delegate wasn't confident enough to act alone.",
-  },
-  dual_approval: {
-    label: "Dual approval",
-    color: "rgba(248,113,113,0.75)",
-    desc: "High-stakes action — both you and the recipient must confirm.",
-  },
-};
+// ─── Types ────────────────────────────────────────────────────────────────────
 
-type PendingItem = {
+type ToolAction = {
   id: string;
-  input_message: string;
-  response: string;
+  title: string;       // tool_name e.g. "Gmail__send_email"
+  content: string;     // result text
+  context: { args?: Record<string, unknown>; server?: string };
+  status: string;      // "executed"
   confidence: number | null;
-  approval_path: string | null;
   created_at: string;
-  sender_id: string | null;
 };
 
-function ApprovalCard({
-  item,
-  cloneId,
-  onResolved,
-}: {
-  item: PendingItem;
-  cloneId: string;
-  onResolved: () => void;
-}) {
-  const [loading, setLoading] = useState(false);
-  const [edited, setEdited] = useState(item.response);
-  const [editing, setEditing] = useState(false);
-  const path = item.approval_path ?? "creator_review";
-  const meta = PATH_META[path] ?? PATH_META.creator_review;
+// ─── Tool action row ──────────────────────────────────────────────────────────
 
-  async function submit(signal: "approved" | "rejected", corrected?: string) {
-    setLoading(true);
-    try {
-      await fetch("/api/feedback", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          trace_id: item.id,
-          clone_id: cloneId,
-          signal_type: signal,
-          corrected_response: corrected ?? null,
-        }),
-      });
-      onResolved();
-    } finally {
-      setLoading(false);
-    }
-  }
+function ToolActionRow({ action }: { action: ToolAction }) {
+  const [expanded, setExpanded] = useState(false);
+  const service = action.context?.server ?? action.title.split("__")[0] ?? "Tool";
+  const toolFn = action.title.includes("__") ? action.title.split("__").slice(1).join("__").replace(/_/g, " ") : action.title;
+  const isError = action.content.startsWith("[") && action.content.includes("error");
 
   return (
     <div style={{
-      borderRadius: 16,
-      border: `1px solid ${meta.color.replace("0.80", "0.15").replace("0.75", "0.15")}`,
-      background: meta.color.replace("0.80", "0.04").replace("0.75", "0.04"),
-      padding: "18px 20px",
-      display: "flex",
-      flexDirection: "column",
-      gap: 14,
+      borderRadius: 12, border: `1px solid ${isError ? "rgba(248,113,113,0.12)" : "rgba(255,255,255,0.07)"}`,
+      background: isError ? "rgba(248,113,113,0.03)" : "rgba(255,255,255,0.02)",
+      padding: "13px 16px",
     }}>
-      {/* Header */}
-      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
-        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <span style={{
-            fontSize: 10, textTransform: "uppercase", letterSpacing: "0.10em",
-            color: meta.color, fontWeight: 500,
-          }}>
-            {meta.label}
-          </span>
-          <p style={{ fontSize: 13, color: "rgba(255,255,255,0.80)", margin: 0, lineHeight: 1.4 }}>
-            {item.input_message}
-          </p>
-          {item.sender_id && (
-            <p style={{ fontSize: 11, color: "rgba(255,255,255,0.30)", margin: 0 }}>
-              from {item.sender_id}
+      <div
+        style={{ display: "flex", alignItems: "center", gap: 12, cursor: "pointer" }}
+        onClick={() => setExpanded(!expanded)}
+      >
+        {/* Status dot */}
+        <div style={{
+          width: 7, height: 7, borderRadius: "50%", flexShrink: 0,
+          background: isError ? "rgba(248,113,113,0.70)" : "rgba(52,211,153,0.65)",
+        }} />
+
+        {/* Tool info */}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+            <span style={{ fontSize: 12, fontWeight: 500, color: "rgba(255,255,255,0.70)" }}>{service}</span>
+            <span style={{ fontSize: 11, color: "rgba(255,255,255,0.35)" }}>·</span>
+            <span style={{ fontSize: 12, color: "rgba(255,255,255,0.50)" }}>{toolFn}</span>
+          </div>
+          {!expanded && (
+            <p style={{ fontSize: 11, color: "rgba(255,255,255,0.30)", margin: "2px 0 0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {action.content}
             </p>
           )}
         </div>
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, flexShrink: 0 }}>
-          <span style={{ fontSize: 11, color: "rgba(255,255,255,0.30)" }}>{rel(item.created_at)}</span>
-          {item.confidence != null && (
-            <span style={{ fontSize: 10, color: "rgba(255,255,255,0.30)" }}>
-              {item.confidence}% confidence
-            </span>
-          )}
+
+        {/* Time + chevron */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+          <span style={{ fontSize: 11, color: "rgba(255,255,255,0.25)" }}>{rel(action.created_at)}</span>
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" style={{ transform: expanded ? "rotate(180deg)" : "none", transition: "transform 150ms", opacity: 0.3 }}>
+            <path d="M2 3.5l3 3 3-3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
         </div>
       </div>
 
-      {/* Proposed response */}
-      <div style={{
-        borderRadius: 10,
-        background: "rgba(255,255,255,0.03)",
-        border: "1px solid rgba(255,255,255,0.07)",
-        padding: "12px 14px",
-      }}>
-        <p style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.09em", color: "rgba(255,255,255,0.25)", marginBottom: 8 }}>
-          Proposed response
-        </p>
-        {editing ? (
-          <textarea
-            value={edited}
-            onChange={(e) => setEdited(e.target.value)}
-            style={{
-              width: "100%", minHeight: 100, resize: "vertical",
-              background: "rgba(255,255,255,0.04)",
-              border: "1px solid rgba(255,255,255,0.12)",
-              borderRadius: 8, padding: "8px 10px",
-              color: "rgba(255,255,255,0.75)", fontSize: 13,
-              fontFamily: "inherit", lineHeight: 1.5, outline: "none",
-            }}
-          />
-        ) : (
-          <p style={{ fontSize: 13, color: "rgba(255,255,255,0.60)", margin: 0, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>
-            {item.response}
-          </p>
-        )}
-      </div>
-
-      {/* Actions */}
-      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        <button
-          disabled={loading}
-          onClick={() => editing ? submit("approved", edited) : submit("approved")}
-          style={{
-            padding: "7px 16px", borderRadius: 9, fontSize: 12, fontWeight: 500,
-            cursor: loading ? "not-allowed" : "pointer", fontFamily: "inherit",
-            background: "rgba(52,211,153,0.12)", border: "1px solid rgba(52,211,153,0.22)",
-            color: "rgba(52,211,153,0.85)", opacity: loading ? 0.5 : 1,
-            transition: "all 150ms",
-          }}
-          onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(52,211,153,0.20)"; }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(52,211,153,0.12)"; }}
-        >
-          {editing ? "Approve edited" : "Approve"}
-        </button>
-        <button
-          disabled={loading}
-          onClick={() => setEditing(!editing)}
-          style={{
-            padding: "7px 16px", borderRadius: 9, fontSize: 12, fontWeight: 500,
-            cursor: "pointer", fontFamily: "inherit",
-            background: "transparent", border: "1px solid rgba(255,255,255,0.10)",
-            color: "rgba(255,255,255,0.45)",
-            transition: "all 150ms",
-          }}
-          onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.05)"; e.currentTarget.style.color = "rgba(255,255,255,0.65)"; }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "rgba(255,255,255,0.45)"; }}
-        >
-          {editing ? "Cancel edit" : "Edit"}
-        </button>
-        <button
-          disabled={loading}
-          onClick={() => submit("rejected")}
-          style={{
-            padding: "7px 16px", borderRadius: 9, fontSize: 12, fontWeight: 500,
-            cursor: loading ? "not-allowed" : "pointer", fontFamily: "inherit",
-            background: "transparent", border: "1px solid rgba(248,113,113,0.15)",
-            color: "rgba(248,113,113,0.60)", opacity: loading ? 0.5 : 1,
-            transition: "all 150ms",
-          }}
-          onMouseEnter={(e) => { e.currentTarget.style.borderColor = "rgba(248,113,113,0.30)"; e.currentTarget.style.color = "rgba(248,113,113,0.80)"; }}
-          onMouseLeave={(e) => { e.currentTarget.style.borderColor = "rgba(248,113,113,0.15)"; e.currentTarget.style.color = "rgba(248,113,113,0.60)"; }}
-        >
-          Reject
-        </button>
-      </div>
+      {expanded && (
+        <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid rgba(255,255,255,0.06)", display: "flex", flexDirection: "column", gap: 10 }}>
+          {action.context?.args && Object.keys(action.context.args).length > 0 && (
+            <div>
+              <p style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.09em", color: "rgba(255,255,255,0.22)", margin: "0 0 6px" }}>Args</p>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {Object.entries(action.context.args).map(([k, v]) => (
+                  <span key={k} style={{
+                    fontSize: 11, padding: "2px 8px", borderRadius: 6,
+                    background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)",
+                    color: "rgba(255,255,255,0.45)",
+                  }}>
+                    <span style={{ color: "rgba(255,255,255,0.30)" }}>{k}:</span> {String(v).slice(0, 80)}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+          <div>
+            <p style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.09em", color: "rgba(255,255,255,0.22)", margin: "0 0 6px" }}>Result</p>
+            <p style={{ fontSize: 12, color: isError ? "rgba(248,113,113,0.65)" : "rgba(255,255,255,0.50)", margin: 0, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>
+              {action.content}
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-function ApprovalInbox({ cloneId }: { cloneId: string }) {
-  const key = `/api/activity?clone_id=${cloneId}&pending_review=true&limit=20`;
-  const { data, isLoading } = useSWR<{ traces: PendingItem[] }>(key, fetcher, { refreshInterval: 15_000 });
-  const items = (data?.traces ?? []).filter((t) => (t as any).needs_escalation);
+// ─── Tool actions feed ────────────────────────────────────────────────────────
 
-  if (isLoading) {
-    return (
-      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        {[...Array(3)].map((_, i) => (
-          <div key={i} style={{ height: 160, borderRadius: 16, background: "rgba(255,255,255,0.04)", animation: "pulse 1.5s ease-in-out infinite" }} />
-        ))}
-      </div>
-    );
-  }
+function ToolActionsFeed({ cloneId }: { cloneId: string }) {
+  const { data, isLoading } = useSWR<{ proposals: ToolAction[] }>(
+    `/api/proposals?clone_id=${cloneId}&proposal_type=tool_action&limit=50`,
+    fetcher,
+    { refreshInterval: 10_000 }
+  );
+  const actions = data?.proposals ?? [];
 
-  if (items.length === 0) {
-    return (
-      <div style={{
-        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-        padding: "64px 24px", gap: 12,
-        borderRadius: 16, border: "1px solid rgba(255,255,255,0.06)",
-        background: "rgba(255,255,255,0.02)",
-      }}>
-        <div style={{
-          width: 40, height: 40, borderRadius: "50%",
-          background: "rgba(52,211,153,0.10)", border: "1px solid rgba(52,211,153,0.18)",
-          display: "flex", alignItems: "center", justifyContent: "center",
-        }}>
-          <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-            <path d="M3 9.5l4 4 8-8" stroke="rgba(52,211,153,0.80)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
-          </svg>
-        </div>
-        <p style={{ fontSize: 14, fontWeight: 500, color: "rgba(255,255,255,0.60)", margin: 0 }}>
-          All clear
-        </p>
-        <p style={{ fontSize: 12, color: "rgba(255,255,255,0.28)", margin: 0 }}>
-          No tasks waiting for your review.
-        </p>
-      </div>
-    );
-  }
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      {items.map((item) => (
-        <ApprovalCard
-          key={item.id}
-          item={item}
-          cloneId={cloneId}
-          onResolved={() => mutate(key)}
-        />
+  if (isLoading) return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      {[...Array(4)].map((_, i) => (
+        <div key={i} style={{ height: 56, borderRadius: 12, background: "rgba(255,255,255,0.03)" }} />
       ))}
     </div>
   );
+
+  if (actions.length === 0) return (
+    <div style={{
+      display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+      padding: "56px 24px", gap: 10, borderRadius: 14,
+      border: "1px solid rgba(255,255,255,0.06)", background: "rgba(255,255,255,0.02)",
+    }}>
+      <p style={{ fontSize: 13, color: "rgba(255,255,255,0.35)", margin: 0 }}>No tool actions yet.</p>
+      <p style={{ fontSize: 12, color: "rgba(255,255,255,0.22)", margin: 0 }}>
+        Ask your clone to send an email, search Drive, post to Slack — it will appear here.
+      </p>
+    </div>
+  );
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      {actions.map((a) => <ToolActionRow key={a.id} action={a} />)}
+    </div>
+  );
 }
+
+// ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function ApprovalsPage() {
   const { clones, isLoading } = useClones();
@@ -255,34 +151,31 @@ export default function ApprovalsPage() {
 
   if (isLoading) return <LoadingSpinner />;
 
-  if (clones.length === 0) {
-    return (
-      <div style={{ padding: 32 }}>
-        <p style={{ fontSize: 13, color: "rgba(255,255,255,0.40)" }}>
-          Create your clone first.{" "}
-          <a href="/onboarding" style={{ color: "rgba(255,255,255,0.60)", textDecoration: "underline", textUnderlineOffset: 2 }}>
-            Get started →
-          </a>
-        </p>
-      </div>
-    );
-  }
+  if (clones.length === 0) return (
+    <div style={{ padding: 32 }}>
+      <p style={{ fontSize: 13, color: "rgba(255,255,255,0.40)" }}>
+        Create your clone first.{" "}
+        <a href="/onboarding" style={{ color: "rgba(255,255,255,0.60)", textDecoration: "underline", textUnderlineOffset: 2 }}>Get started →</a>
+      </p>
+    </div>
+  );
 
   const clone = clones.find(c => c.clone_id === selectedId) ?? clones[0];
 
   return (
-    <div className="db-page" style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+    <div className="db-page" style={{ display: "flex", flexDirection: "column", gap: 20 }}>
       <div className="db-page-head">
         <div>
-          <p className="db-eyebrow">Delegate</p>
+          <p className="db-eyebrow">Clone</p>
           <h1 className="db-h1">Approvals</h1>
-          <p style={{ fontSize: 13, color: "rgba(255,255,255,0.35)", marginTop: 4 }}>
-            Tasks your delegate flagged for your review before acting.
+          <p style={{ fontSize: 12, color: "rgba(255,255,255,0.30)", marginTop: 4 }}>
+            Every action your clone takes on your behalf.
           </p>
         </div>
         <ClonePicker clones={clones} selected={clone} onSelect={c => setSelectedId(c.clone_id)} />
       </div>
-      <ApprovalInbox cloneId={clone.clone_id} />
+
+      <ToolActionsFeed cloneId={clone.clone_id} />
     </div>
   );
 }
