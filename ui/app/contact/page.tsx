@@ -311,7 +311,7 @@ export default function ContactPage() {
                 <div className="rail-card__val">Book a demo</div>
                 <div className="rail-card__hint">
                   Custom pricing, SOC 2, dedicated support.{" "}
-                  <a href="mailto:sales@doppel.ai" style={{ color: "#A78BFA" }}>
+                  <a href="mailto:doppel156@gmail.com" style={{ color: "#A78BFA" }}>
                     Talk to sales →
                   </a>
                 </div>
@@ -322,8 +322,7 @@ export default function ContactPage() {
                 <div className="rail-card__label">Company</div>
                 <div className="rail-card__val">Doppel AI, Inc.</div>
                 <div className="rail-card__hint">
-                  hello@doppel.ai<br />
-                  legal@doppel.ai
+                  doppel156@gmail.com
                 </div>
               </div>
             </div>

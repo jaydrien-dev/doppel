@@ -127,26 +127,31 @@ async def _log_tool_action(
     tool_args: dict,
     result: str,
     server_name: str,
-    session: AsyncSession,
 ) -> None:
-    """Insert a tool execution record into proposals for the approvals page."""
+    """Insert a tool execution record into proposals for the approvals page.
+
+    Uses its own fresh session so it never interferes with the caller's session
+    or partial transactions (same pattern as _persist_async in orchestrator.py).
+    """
+    from doppel.brain.db.connection import AsyncSessionLocal
     try:
-        await session.execute(
-            sql_text("""
-                INSERT INTO proposals
-                  (clone_id, proposal_type, title, content, context, confidence, status, executed_at)
-                VALUES
-                  (:cid, 'tool_action', :title, :content, :ctx::jsonb, :conf, 'executed', NOW())
-            """),
-            {
-                "cid": str(clone_id),
-                "title": tool_name,
-                "content": result[:2000],
-                "ctx": json.dumps({"args": tool_args, "server": server_name}),
-                "conf": 0.85,
-            },
-        )
-        await session.commit()
+        async with AsyncSessionLocal() as fresh:
+            await fresh.execute(
+                sql_text("""
+                    INSERT INTO proposals
+                      (clone_id, proposal_type, title, content, context, confidence, status, executed_at)
+                    VALUES
+                      (:cid, 'tool_action', :title, :content, :ctx::jsonb, :conf, 'executed', NOW())
+                """),
+                {
+                    "cid": str(clone_id),
+                    "title": tool_name,
+                    "content": result[:2000] if result else "",
+                    "ctx": json.dumps({"args": tool_args, "server": server_name}),
+                    "conf": 0.85,
+                },
+            )
+            await fresh.commit()
     except Exception as exc:
         _log.warning("Failed to log tool action to proposals: %s", exc)
 
@@ -244,11 +249,11 @@ async def run(
             else:
                 result_text = await call_tool(server, tool_name, tool_args)
 
-            # Log to proposals table for approvals page
-            if session is not None and clone_id is not None:
+            # Log to proposals table for approvals page (fire-and-forget, own session)
+            if clone_id is not None:
                 await _log_tool_action(
                     clone_id, tool_name, tool_args, result_text,
-                    server.name if server else "unknown", session,
+                    server.name if server else "unknown",
                 )
 
             tool_results.append({
@@ -373,11 +378,11 @@ async def run_stream(
                 result_text = await call_tool(server, tool_name, tool_args)
                 yield ("tool_result", {"tool": tool_name, "status": "ok"})
 
-            # Log to proposals table for approvals page
-            if session is not None and clone_id is not None:
+            # Log to proposals table for approvals page (fire-and-forget, own session)
+            if clone_id is not None:
                 await _log_tool_action(
                     clone_id, tool_name, tool_args, result_text,
-                    server.name if server else "unknown", session,
+                    server.name if server else "unknown",
                 )
 
             tool_results.append({

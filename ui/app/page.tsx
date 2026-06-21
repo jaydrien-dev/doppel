@@ -693,27 +693,107 @@ function StatsSection() {
 const PLANS = [
   {
     name: "Free", color: "#34D399", monthly: 0, yearly: 0,
-    desc: "Set up your clone. Connect your tools. Start delegating.",
-    feats: ["2 clones", "3 connected tools per clone", "50 executions / month", "Approval flows included", "Public clone link", "Sell on the marketplace · 70% rev share"],
-    cta: "Start free", featured: false,
+    desc: "Build your clone. Share it. Yours forever.",
+    feats: [
+      "2 clones",
+      "500 memory chunks per clone",
+      "50 queries / month per clone",
+      "Train from any source (Gmail, Notion, Slack…)",
+      "Public /c/[handle] chat link",
+      "Sell on the marketplace · 70% rev share",
+    ],
+    cta: "Start free", featured: false, contactSales: false,
   },
   {
     name: "Personal", color: "#1A73E8", monthly: 15, yearly: 150,
-    desc: "More tools. More volume. Your clone works full-time.",
-    feats: ["5 clones", "Unlimited connected tools", "250 executions / month", "80% revenue share on delegated tasks", "Priority marketplace listing", "API access", "Custom approval thresholds"],
-    cta: "Get Personal", featured: false,
+    desc: "Sell your knowledge. Earn on every query.",
+    feats: [
+      "5 clones",
+      "5,000 memory chunks per clone",
+      "250 queries / month per clone",
+      "80% revenue share on consumer queries",
+      "Priority marketplace listing",
+      "API access",
+      "Custom clone pricing",
+    ],
+    cta: "Get Personal", featured: false, contactSales: false,
   },
   {
-    name: "Pro", color: "#A78BFA", monthly: 49, yearly: 490, featured: true, perSeat: true,
-    desc: "A clone for every person on your team.",
-    feats: ["20 clones org-wide · everything in Personal", "1,250 executions / month per seat", "Team approval flows & audit log", "Shared tool connections", "Priority support"],
-    cta: "Get Pro",
+    name: "Pro", color: "#A78BFA", monthly: 49, yearly: 490, perSeat: true,
+    desc: "Scale your knowledge across a team.",
+    feats: [
+      "20 clones org-wide · everything in Personal per seat",
+      "30,000 memory chunks per clone",
+      "1,250 queries / month per clone",
+      "Org-wide audit log",
+      "Priority support",
+    ],
+    cta: "Get Pro", featured: true, contactSales: false,
   },
   {
     name: "Max", color: "#E91E63", monthly: 149, yearly: 1490, perSeat: true,
-    desc: "Enterprise-grade execution. No compromises.",
-    feats: ["50 clones org-wide · everything in Pro", "5,000 executions / month per seat", "SOC 2 Type II", "Guaranteed uptime SLA", "Dedicated CSM + priority support", "Custom contracts"],
-    cta: "Talk to us", featured: false,
+    desc: "Enterprise-grade. No compromises.",
+    feats: [
+      "50 clones org-wide · everything in Pro",
+      "200,000 memory chunks per clone",
+      "5,000 queries / month per clone",
+      "SOC 2 Type II",
+      "Guaranteed uptime SLA",
+      "Dedicated CSM + priority support",
+      "Custom contracts + volume pricing",
+    ],
+    cta: "Talk to us", featured: false, contactSales: true,
+  },
+];
+
+const DFY_PACKAGES = [
+  {
+    name: "Clone Starter",
+    price: 499,
+    turnaround: "3 business days",
+    color: "#34D399",
+    desc: "We build one fully configured clone for you — trained on your materials, connected to your tools, ready to delegate.",
+    feats: [
+      "1 custom-built clone",
+      "Up to 3 connectors configured",
+      "Knowledge base loaded from your docs",
+      "Approval flows set up for your workflows",
+      "30-minute handover call",
+      "Includes 3 months of Personal plan",
+    ],
+  },
+  {
+    name: "Clone Studio",
+    price: 1490,
+    turnaround: "5 business days",
+    color: "#A78BFA",
+    featured: true,
+    desc: "Your full delegate stack — multiple clones, every tool connected, trained on your business, ready to run.",
+    feats: [
+      "Up to 5 custom-built clones",
+      "All connectors configured (Google, Slack, WhatsApp, AI models)",
+      "Full knowledge base from your docs, emails, and SOPs",
+      "Custom approval logic per workflow",
+      "Team onboarding session (up to 5 people)",
+      "Includes 6 months of Pro plan",
+      "30-day post-launch support",
+    ],
+  },
+  {
+    name: "Clone Enterprise",
+    price: -1,
+    turnaround: "Custom timeline",
+    color: "#FB923C",
+    desc: "We build and deploy a full clone infrastructure for your company — every department, every tool, every workflow delegated.",
+    feats: [
+      "Unlimited clones across departments",
+      "Custom connector development for proprietary tools",
+      "Full data ingestion from internal systems",
+      "Org-wide approval architecture design",
+      "Executive and team training programme",
+      "Dedicated Doppel engineer for first 90 days",
+      "Includes Business plan for 12 months",
+    ],
   },
 ];
 
@@ -739,28 +819,113 @@ function PricingSection() {
         <h2 className="sec-h2" style={{ margin: "0 auto", ["--accent-c" as string]: "#1A73E8" }}>
           Start <em>free.</em> Scale when it matters.
         </h2>
-        <div className="pricing__toggle">
-          <span className="pricing__toggle__pill" ref={pillRef} />
-          <button
-            className={`pricing__toggle__btn ${!yearly ? "pricing__toggle__btn--active" : ""}`}
-            data-active={!yearly}
-            onClick={() => setYearly(false)}
-          >
-            Monthly
-          </button>
-          <button
-            className={`pricing__toggle__btn ${yearly ? "pricing__toggle__btn--active" : ""}`}
-            data-active={yearly}
-            onClick={() => setYearly(true)}
-          >
-            Yearly <span className="pricing__toggle__save">save 17%</span>
-          </button>
+      </div>
+
+      {/* Done-for-you packages */}
+      <div style={{ maxWidth: 1200, margin: "0 auto 52px", padding: "0 24px" }}>
+        <div style={{ textAlign: "center", marginBottom: 36 }}>
+          <div className="eyebrow" style={{ ["--eyebrow-c" as string]: "#A78BFA", justifyContent: "center", marginBottom: 12 }}>
+            <span className="eyebrow__dot" /> Done for you
+          </div>
+          <h3 style={{ fontSize: 28, fontWeight: 300, color: "rgba(255,255,255,0.90)", margin: "0 0 10px", letterSpacing: "-0.02em" }}>
+            We build your clone for you.
+          </h3>
+          <p style={{ fontSize: 14, color: "rgba(255,255,255,0.40)", maxWidth: 480, margin: "0 auto", lineHeight: 1.65 }}>
+            Don&apos;t have time to set it up? We configure everything — training, connectors, approval flows, the works — and hand you a ready-to-run delegate.
+          </p>
+        </div>
+
+        <div style={{ display: "grid", gap: 14, gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))" }}>
+          {DFY_PACKAGES.map((pkg) => (
+            <div
+              key={pkg.name}
+              className={`plan ${"featured" in pkg && pkg.featured ? "plan--featured" : ""}`}
+              style={{ ["--plan-c" as string]: pkg.color }}
+            >
+              <div className="plan__head">
+                <div className="plan__name">
+                  <span className="plan__name__dot" />
+                  {pkg.name}
+                </div>
+                {"featured" in pkg && pkg.featured && (
+                  <span className="plan__badge">
+                    <span style={{ display: "inline-flex" }}>{I.sparkle}</span> Most popular
+                  </span>
+                )}
+              </div>
+
+              {pkg.price === -1 ? (
+                <div className="plan__price">
+                  <span className="plan__price__big" style={{ fontSize: 24 }}>Custom</span>
+                </div>
+              ) : (
+                <div className="plan__price">
+                  <span className="plan__price__big">${pkg.price.toLocaleString()}</span>
+                  <span className="plan__price__per">one-time</span>
+                </div>
+              )}
+
+              <p style={{ fontSize: 11, color: "rgba(255,255,255,0.30)", margin: "2px 0 6px", display: "flex", alignItems: "center", gap: 5 }}>
+                <svg width="10" height="10" viewBox="0 0 12 12" fill="none">
+                  <circle cx="6" cy="6" r="5" stroke="currentColor" strokeWidth="1.2"/>
+                  <path d="M6 3.5v2.8l1.5 1.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+                </svg>
+                {pkg.turnaround}
+              </p>
+
+              <p className="plan__desc">{pkg.desc}</p>
+
+              <ul className="plan__feats">
+                {pkg.feats.map((f, i) => <li key={i}>{I.check} {f}</li>)}
+              </ul>
+
+              <Link
+                href="/contact"
+                className="plan__cta"
+                style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, textDecoration: "none" }}
+              >
+                {pkg.price === -1 ? "Talk to us" : "Book now"}
+              </Link>
+            </div>
+          ))}
         </div>
       </div>
 
-      <div className="pricing__grid">
+      {/* Self-serve divider */}
+      <div style={{ maxWidth: 1200, margin: "0 auto 40px", padding: "0 24px" }}>
+        <div style={{ borderTop: "1px solid rgba(255,255,255,0.07)", paddingTop: 48, textAlign: "center", marginBottom: 32 }}>
+          <div className="eyebrow" style={{ ["--eyebrow-c" as string]: "#1A73E8", justifyContent: "center", marginBottom: 12 }}>
+            <span className="eyebrow__dot" /> Self-serve
+          </div>
+          <h3 style={{ fontSize: 28, fontWeight: 300, color: "rgba(255,255,255,0.90)", margin: "0 0 10px", letterSpacing: "-0.02em" }}>
+            Or do it yourself, on your schedule.
+          </h3>
+        </div>
+      </div>
+
+      {/* Monthly/yearly toggle */}
+      <div className="pricing__toggle" style={{ marginBottom: 32 }}>
+        <span className="pricing__toggle__pill" ref={pillRef} />
+        <button
+          className={`pricing__toggle__btn ${!yearly ? "pricing__toggle__btn--active" : ""}`}
+          data-active={!yearly}
+          onClick={() => setYearly(false)}
+        >
+          Monthly
+        </button>
+        <button
+          className={`pricing__toggle__btn ${yearly ? "pricing__toggle__btn--active" : ""}`}
+          data-active={yearly}
+          onClick={() => setYearly(true)}
+        >
+          Yearly <span className="pricing__toggle__save">save 17%</span>
+        </button>
+      </div>
+
+      {/* Self-serve plans */}
+      <div className="pricing__grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
         {PLANS.map((p) => {
-          const price = yearly ? Math.round(p.yearly / 12) : p.monthly;
+          const price = p.monthly === -1 ? -1 : (yearly ? Math.round(p.yearly / 12) : p.monthly);
           return (
             <div key={p.name} className={`plan ${p.featured ? "plan--featured" : ""}`} style={{ ["--plan-c" as string]: p.color }}>
               <div className="plan__head">
@@ -776,6 +941,10 @@ function PricingSection() {
               </div>
               {p.monthly === 0 ? (
                 <div className="plan__free">Free forever</div>
+              ) : price === -1 ? (
+                <div className="plan__price">
+                  <span className="plan__price__big" style={{ fontSize: 24 }}>Custom</span>
+                </div>
               ) : (
                 <div className="plan__price">
                   <span className="plan__price__big">${price}</span>
@@ -790,7 +959,7 @@ function PricingSection() {
                 {p.feats.map((f, i) => <li key={i}>{I.check} {f}</li>)}
               </ul>
               <Link
-                href={p.cta === "Talk to us" ? "/contact" : "/sign-up"}
+                href={"contactSales" in p && p.contactSales ? "/contact" : "/sign-up"}
                 className="plan__cta"
                 style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, textDecoration: "none" }}
               >
@@ -816,7 +985,7 @@ function FinalCTA() {
           Start with one clone.<br />
           <em>You.</em>
         </h2>
-        <p className="cta__sub">Free forever. Two minutes to set up. No credit card.</p>
+        <p className="cta__sub">Free to start. Two minutes to set up. No credit card.</p>
         <div className="cta__row">
           <Link href={isSignedIn ? "/home" : "/sign-up"} className="btn btn--primary btn--lg">
             {isSignedIn ? <>Open app {I.arrow}</> : <>Start free {I.arrow}</>}

@@ -110,7 +110,6 @@ const PLANS: {
     contactSales: true,
   },
 ];
-
 // Price IDs are resolved server-side — no NEXT_PUBLIC_ vars needed.
 
 const ISparkle = (
@@ -412,6 +411,7 @@ function BillingContent() {
         <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><rect x="1" y="4.5" width="10" height="7" rx="1.5" stroke="currentColor" strokeWidth="1.1"/><path d="M3.5 4.5V3A2.5 2.5 0 018.5 3v1.5" stroke="currentColor" strokeWidth="1.1"/></svg>
         Payments processed securely by Stripe. We never store card details.
       </div>
+
     </div>
   );
 }
