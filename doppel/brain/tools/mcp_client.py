@@ -281,7 +281,7 @@ async def load_clone_tools(
     try:
         rows = await session.execute(
             text(
-                "SELECT id, name, server_url, transport, api_key_enc, headers_enc, expires_at "
+                "SELECT id, name, server_url, transport, api_key_enc, headers_enc "
                 "FROM clone_mcp_servers "
                 "WHERE clone_id = :cid AND enabled = TRUE"
             ),
