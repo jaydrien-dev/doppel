@@ -217,7 +217,7 @@ function Constellation() {
 
         <div className="you">
           you
-          <span className="you__label">your clone</span>
+          <span className="you__label">your doppel</span>
         </div>
 
         {activeNode && (() => {
@@ -275,13 +275,14 @@ function Hero() {
           </h1>
 
           <p className="hero__sub">
-            Your clone acts on your behalf.
-            Sends, schedules, searches, delegates — while you&apos;re elsewhere.
+            A doppel is the AI agent you actually trust —
+            manufactured for you, by you.
+            It knows how you think. It acts as you. Not for you.
           </p>
 
           <div className="hero__ctas">
             <Link href={isSignedIn ? "/home" : "/sign-up"} className="btn btn--primary btn--lg">
-              {isSignedIn ? <>Open app {I.arrow}</> : <>Start free {I.arrow}</>}
+              {isSignedIn ? <>Open app {I.arrow}</> : <>Build your clone {I.arrow}</>}
             </Link>
             <Link href="/contact" className="btn btn--ghost-light btn--lg">
               Talk to us
@@ -290,10 +291,10 @@ function Hero() {
 
           <div className="hero__trust">
             <span className="hero__trust__item">
-              <span className="hero__trust__dot" /> Free forever for individuals
+              <span className="hero__trust__dot" /> Free to start — no credit card
             </span>
             <span className="hero__trust__item">
-              <span className="hero__trust__dot" /> No credit card
+              <span className="hero__trust__dot" /> Yours alone. Private by default.
             </span>
           </div>
         </div>
@@ -395,10 +396,11 @@ function DemoSection() {
             <span className="eyebrow__dot" /> Live demo
           </div>
           <h2 className="sec-h2" style={{ ["--accent-c" as string]: color }}>
-            Delegate a task. <br /> Your clone <em>handles it.</em>
+            You say it once. <br /> Your clone <em>handles it.</em>
           </h2>
           <p className="sec-sub">
-            Connect your tools once. Then just tell your clone what to do.
+            Your clone knows your tools, your tone, your priorities.
+            It acts — then reports back.
           </p>
 
           <div className="demo__presets" style={{ marginTop: 18 }}>
@@ -495,27 +497,27 @@ function DemoSection() {
 // ---------------------------------------------------------------------------
 const CARDS = [
   {
-    num: "01", title: "Connect",
-    body: "Link your tools once — Slack, Gmail, GitHub, Drive, Calendar, Notion. Your clone gets access to act on your behalf.",
-    meta: "Takes 5 minutes",
+    num: "01", title: "It's made from you",
+    body: "Your clone is trained on your words, your decisions, your way of working. Not a generic AI — a version of you that knows your context.",
+    meta: "Private to you. Always.",
     bg: "linear-gradient(135deg, #1A73E8 0%, #0D47A1 100%)", dot: "#4A90E2",
   },
   {
-    num: "02", title: "Delegate",
-    body: "Tell your clone what to handle. It executes: posts, schedules, searches, creates, follows up. You stay in control.",
+    num: "02", title: "It acts as you",
+    body: "Connect your tools once. Then tell your clone what to handle — it posts, schedules, drafts, follows up. As you would, not instead of you.",
     meta: "Natural language commands",
     bg: "linear-gradient(135deg, #7B1FA2 0%, #4A148C 100%)", dot: "#A78BFA",
   },
   {
-    num: "03", title: "Approve",
-    body: "High-stakes actions pause for your sign-off. You set the thresholds. Nothing irreversible happens without you.",
+    num: "03", title: "You stay in control",
+    body: "Anything consequential pauses for your approval. You set the thresholds. Nothing irreversible happens without your sign-off.",
     meta: "You're always in the loop",
     bg: "linear-gradient(135deg, #E91E63 0%, #880E4F 100%)", dot: "#F06292",
   },
   {
-    num: "04", title: "Scale",
-    body: "One of you isn't enough. Your clone handles the volume while you focus on what only you can do.",
-    meta: "Free → Enterprise",
+    num: "04", title: "It earns your trust",
+    body: "The more you use it, the better it knows you. Your clone gets sharper over time — shaped entirely by you, accountable to you.",
+    meta: "The only AI that's actually yours",
     bg: "linear-gradient(135deg, #00838F 0%, #006064 100%)", dot: "#34D399",
   },
 ];
@@ -564,7 +566,7 @@ function CardStack() {
           <span className="eyebrow__dot" /> Why doppel
         </div>
         <h2 className="sec-h2" style={{ margin: "0 auto", ["--accent-c" as string]: "#A78BFA" }}>
-          One of you <br /> <em>isn&apos;t enough.</em>
+          Built from you. <br /> <em>Acts like you.</em>
         </h2>
       </div>
 
@@ -982,13 +984,13 @@ function FinalCTA() {
     <section className="cta">
       <div className="cta__inner">
         <h2 className="cta__title">
-          Start with one clone.<br />
-          <em>You.</em>
+          The only AI that&apos;s<br />
+          <em>actually yours.</em>
         </h2>
-        <p className="cta__sub">Free to start. Two minutes to set up. No credit card.</p>
+        <p className="cta__sub">Built from you. Acts like you. Accountable to you. Free to start.</p>
         <div className="cta__row">
           <Link href={isSignedIn ? "/home" : "/sign-up"} className="btn btn--primary btn--lg">
-            {isSignedIn ? <>Open app {I.arrow}</> : <>Start free {I.arrow}</>}
+            {isSignedIn ? <>Open app {I.arrow}</> : <>Build your clone {I.arrow}</>}
           </Link>
           <Link href="/contact" className="btn btn--ghost-light btn--lg">Talk to us</Link>
         </div>

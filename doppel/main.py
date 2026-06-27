@@ -85,6 +85,8 @@ async def lifespan(app: FastAPI):
     import logging
     from doppel.brain.db.connection import engine
     _log = logging.getLogger(__name__)
+    from doppel.brain.tasks.scheduler import scheduler as _automation_scheduler
+
     try:
         schema_sql = _SCHEMA_FILE.read_text()
         # Strip comment lines, then split into individual statements
@@ -110,7 +112,13 @@ async def lifespan(app: FastAPI):
         _log.info("DB schema migration: %d/%d statements applied", ok, len(statements))
     except Exception as exc:
         _log.warning("Schema migration failed entirely: %s", exc)
-    yield
+
+    # Start automation scheduler
+    _automation_scheduler.start()
+    try:
+        yield
+    finally:
+        await _automation_scheduler.stop()
 
 
 app = FastAPI(
@@ -217,7 +225,7 @@ TIER_MEMORY_LIMITS: dict[str, int] = {
 
 # Weekly plan credits per tier — resets every Monday, unused do NOT roll over
 TIER_WEEKLY_CREDITS: dict[str, int] = {
-    "free": 0,
+    "free": 50,       # starter allowance — enough to try the platform
     "personal": 100,
     "enterprise_pro": 500,
     "enterprise_max": 2_000,
@@ -556,7 +564,10 @@ async def create_clone(
         {"uid": body.user_id},
     )
     org_rec = org_row.mappings().first()
-    initial_access_mode = (org_rec["default_clone_access_mode"] if org_rec else None) or "private"
+    # Org members default to org_scoped so teammates can access; non-org defaults to private
+    initial_access_mode = (org_rec["default_clone_access_mode"] if org_rec else None) or (
+        "org_scoped" if org_rec else "private"
+    )
 
     try:
         await session.execute(
@@ -605,6 +616,7 @@ async def get_my_clone(
                    is_listed, price_per_query, category, listing_description
             FROM clone_identity
             WHERE user_id = :user_id
+            ORDER BY created_at ASC
             LIMIT 1
         """),
         {"user_id": user_id},
@@ -2318,7 +2330,7 @@ async def get_my_keys(
     """Return masked API keys for the authenticated owner's clone."""
 
     row = await session.execute(
-        sql_text("SELECT clone_id, api_keys FROM clone_identity WHERE user_id = :uid LIMIT 1"),
+        sql_text("SELECT clone_id, api_keys FROM clone_identity WHERE user_id = :uid ORDER BY created_at ASC LIMIT 1"),
         {"uid": user_id},
     )
     record = row.mappings().first()
@@ -2349,7 +2361,7 @@ async def save_my_key(
         )
 
     row = await session.execute(
-        sql_text("SELECT clone_id, api_keys FROM clone_identity WHERE user_id = :uid LIMIT 1"),
+        sql_text("SELECT clone_id, api_keys FROM clone_identity WHERE user_id = :uid ORDER BY created_at ASC LIMIT 1"),
         {"uid": body.user_id},
     )
     record = row.mappings().first()
@@ -2382,7 +2394,7 @@ async def delete_my_key(
         )
 
     row = await session.execute(
-        sql_text("SELECT clone_id, api_keys FROM clone_identity WHERE user_id = :uid LIMIT 1"),
+        sql_text("SELECT clone_id, api_keys FROM clone_identity WHERE user_id = :uid ORDER BY created_at ASC LIMIT 1"),
         {"uid": user_id},
     )
     record = row.mappings().first()
@@ -2422,16 +2434,19 @@ async def _handle_chat_credits_and_context(
         {"cid": str(body.clone_id)},
     )
     price_rec = price_row.mappings().first()
-    caller_is_owner = bool(caller_user_id and price_rec and caller_user_id == price_rec["user_id"])
+    if not price_rec:
+        raise HTTPException(status_code=404, detail="Clone not found")
+    caller_is_owner = bool(caller_user_id and caller_user_id == price_rec["user_id"])
     # All messages use credits — owner in owner_mode is exempt
-    charge_credits = price_rec and not (caller_is_owner and body.owner_mode)
+    charge_credits = not (caller_is_owner and body.owner_mode)
 
     if charge_credits:
         if not caller_user_id:
             raise HTTPException(status_code=401, detail="Login required to query this clone")
         multiplier = CREDITS_MULTIPLIER.get(body.response_mode, 1)
-        # Minimum 1 credit per query — price_per_query of 0 (legacy free clones) now costs 1
-        base_price = max(1, int(float(price_rec["price_per_query"])))
+        # Minimum 1 credit per query — NULL or 0 price_per_query (legacy) now costs 1
+        raw_price = price_rec["price_per_query"]
+        base_price = max(1, int(float(raw_price))) if raw_price is not None else 1
         credits_cost = base_price * multiplier
 
         org_pair = (await session.execute(
@@ -2958,21 +2973,33 @@ async def get_session_messages(
     request: Request,
     session: AsyncSession = Depends(get_session),
 ) -> dict:
-    """Return the chat history for a session, ordered chronologically."""
+    """Return the chat history for a session, ordered chronologically.
+    Caller must be the owner of the clone or the consumer who sent the messages."""
+    caller_user_id = request.headers.get("X-User-Id")
+    if not caller_user_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
     rows = await session.execute(
         sql_text("""
             SELECT
-                brain_input->>'message' AS user_message,
-                response                AS clone_message,
+                brain_input->>'message'    AS user_message,
+                brain_input->>'sender_id'  AS sender_id,
+                response                    AS clone_message,
                 path,
                 confidence,
                 created_at
             FROM reasoning_traces
             WHERE session_id = :sid
+              AND (
+                  brain_input->>'sender_id' = :uid
+                  OR clone_id IN (
+                      SELECT clone_id FROM clone_identity WHERE user_id = :uid ORDER BY created_at ASC LIMIT 1
+                  )
+              )
             ORDER BY created_at ASC
             LIMIT 200
         """),
-        {"sid": session_id},
+        {"sid": session_id, "uid": caller_user_id},
     )
     messages = []
     for r in rows.mappings():
@@ -4504,7 +4531,7 @@ async def create_checkout_session(
     row = await session.execute(
         sql_text("""
             SELECT clone_id, display_name, stripe_customer_id
-            FROM clone_identity WHERE user_id = :uid LIMIT 1
+            FROM clone_identity WHERE user_id = :uid ORDER BY created_at ASC LIMIT 1
         """),
         {"uid": body.user_id},
     )
@@ -4559,7 +4586,7 @@ async def create_customer_portal(
     stripe_lib.api_key = settings.stripe_secret_key
 
     row = await session.execute(
-        sql_text("SELECT stripe_customer_id FROM clone_identity WHERE user_id = :uid LIMIT 1"),
+        sql_text("SELECT stripe_customer_id FROM clone_identity WHERE user_id = :uid ORDER BY created_at ASC LIMIT 1"),
         {"uid": body.user_id},
     )
     record = row.mappings().first()
@@ -4682,7 +4709,7 @@ async def billing_status(
     row = await session.execute(
         sql_text("""
             SELECT subscription_tier, stripe_customer_id, stripe_subscription_id
-            FROM clone_identity WHERE user_id = :uid LIMIT 1
+            FROM clone_identity WHERE user_id = :uid ORDER BY created_at ASC LIMIT 1
         """),
         {"uid": user_id},
     )
@@ -4726,7 +4753,7 @@ async def sync_billing_from_stripe(
         sql_text("""
             SELECT clone_id, stripe_customer_id, subscription_tier, admin_tier_override,
                    stripe_subscription_id
-            FROM clone_identity WHERE user_id = :uid LIMIT 1
+            FROM clone_identity WHERE user_id = :uid ORDER BY created_at ASC LIMIT 1
         """),
         {"uid": user_id},
     )
@@ -4831,7 +4858,7 @@ async def get_usage(
         sql_text("""
             SELECT clone_id, subscription_tier, rate_limit_per_day,
                    created_at
-            FROM clone_identity WHERE user_id = :uid LIMIT 1
+            FROM clone_identity WHERE user_id = :uid ORDER BY created_at ASC LIMIT 1
         """),
         {"uid": user_id},
     )
@@ -7093,7 +7120,7 @@ async def list_dev_keys(
     """List all developer API keys for the user's clone (secrets masked)."""
 
     row = await session.execute(
-        sql_text("SELECT clone_id FROM clone_identity WHERE user_id = :uid LIMIT 1"),
+        sql_text("SELECT clone_id FROM clone_identity WHERE user_id = :uid ORDER BY created_at ASC LIMIT 1"),
         {"uid": user_id},
     )
     record = row.mappings().first()
@@ -7131,7 +7158,7 @@ async def create_dev_key(
     """Generate a new developer API key. Returns the full secret ONCE."""
 
     row = await session.execute(
-        sql_text("SELECT clone_id FROM clone_identity WHERE user_id = :uid LIMIT 1"),
+        sql_text("SELECT clone_id FROM clone_identity WHERE user_id = :uid ORDER BY created_at ASC LIMIT 1"),
         {"uid": body.user_id},
     )
     record = row.mappings().first()
@@ -7171,7 +7198,7 @@ async def revoke_dev_key(
     """Revoke a developer API key."""
 
     row = await session.execute(
-        sql_text("SELECT clone_id FROM clone_identity WHERE user_id = :uid LIMIT 1"),
+        sql_text("SELECT clone_id FROM clone_identity WHERE user_id = :uid ORDER BY created_at ASC LIMIT 1"),
         {"uid": user_id},
     )
     record = row.mappings().first()
@@ -7215,7 +7242,7 @@ async def create_org(
     """Create a new org (team workspace). Requires enterprise_pro or enterprise_max plan."""
 
     tier_row = await session.execute(
-        sql_text("SELECT subscription_tier, clone_id FROM clone_identity WHERE user_id = :uid LIMIT 1"),
+        sql_text("SELECT subscription_tier, clone_id FROM clone_identity WHERE user_id = :uid ORDER BY created_at ASC LIMIT 1"),
         {"uid": body.user_id},
     )
     record = tier_row.mappings().first()
@@ -7241,6 +7268,15 @@ async def create_org(
                 VALUES (:oid, :uid, :cid, 'admin')
             """),
             {"oid": str(org["id"]), "uid": body.user_id, "cid": str(clone_id) if clone_id else None},
+        )
+        # Seed org credit pool at 0 so the pool row exists and members don't get a false 402
+        await session.execute(
+            sql_text("""
+                INSERT INTO org_credit_pools (org_id, credits, updated_at)
+                VALUES (:oid, 0, NOW())
+                ON CONFLICT (org_id) DO NOTHING
+            """),
+            {"oid": str(org["id"])},
         )
         await session.commit()
     except Exception as e:
@@ -7391,12 +7427,20 @@ async def add_org_member(
     if existing.first():
         return {"status": "already_member", "user_id": body.target_user_id}
 
+    # Look up the new member's clone so it appears in the org member list
+    member_clone_row = await session.execute(
+        sql_text("SELECT clone_id FROM clone_identity WHERE user_id = :uid ORDER BY created_at ASC LIMIT 1"),
+        {"uid": body.target_user_id},
+    )
+    member_clone = member_clone_row.mappings().first()
+    member_clone_id = str(member_clone["clone_id"]) if member_clone else None
+
     await session.execute(
         sql_text("""
-            INSERT INTO org_memberships (org_id, user_id, role)
-            VALUES (:oid, :uid, :role)
+            INSERT INTO org_memberships (org_id, user_id, clone_id, role)
+            VALUES (:oid, :uid, :cid, :role)
         """),
-        {"oid": org_id, "uid": body.target_user_id, "role": body.role},
+        {"oid": org_id, "uid": body.target_user_id, "cid": member_clone_id, "role": body.role},
     )
     await session.commit()
     return {"status": "added", "user_id": body.target_user_id, "role": body.role}
@@ -7981,7 +8025,7 @@ async def join_org(
 
     # Get clone_id for this user
     clone_row = await session.execute(
-        sql_text("SELECT clone_id FROM clone_identity WHERE user_id = :uid LIMIT 1"),
+        sql_text("SELECT clone_id FROM clone_identity WHERE user_id = :uid ORDER BY created_at ASC LIMIT 1"),
         {"uid": body.user_id},
     )
     clone_rec = clone_row.mappings().first()
@@ -8170,7 +8214,7 @@ async def join_org_by_token(
 
     # Resolve clone_id (nullable)
     clone_row = await session.execute(
-        sql_text("SELECT clone_id FROM clone_identity WHERE user_id = :uid LIMIT 1"),
+        sql_text("SELECT clone_id FROM clone_identity WHERE user_id = :uid ORDER BY created_at ASC LIMIT 1"),
         {"uid": body.user_id},
     )
     clone_rec = clone_row.mappings().first()
@@ -8528,7 +8572,7 @@ async def get_identity(
                        epistemic_profile, admin_policies,
                        is_preserved, legal_hold_until,
                        retention_days_episodic, retention_days_traces
-                FROM clone_identity WHERE user_id = :uid LIMIT 1
+                FROM clone_identity WHERE user_id = :uid ORDER BY created_at ASC LIMIT 1
             """),
             {"uid": user_id},
         )
@@ -8574,7 +8618,7 @@ async def patch_identity(
         )
     else:
         row = await session.execute(
-            sql_text("SELECT clone_id FROM clone_identity WHERE user_id = :uid LIMIT 1"),
+            sql_text("SELECT clone_id FROM clone_identity WHERE user_id = :uid ORDER BY created_at ASC LIMIT 1"),
             {"uid": body.user_id},
         )
     rec = row.mappings().first()
@@ -8607,7 +8651,7 @@ async def patch_admin_policies(
     """Update admin policies (topic blocks, escalation threshold, etc.)."""
 
     row = await session.execute(
-        sql_text("SELECT clone_id FROM clone_identity WHERE user_id = :uid LIMIT 1"),
+        sql_text("SELECT clone_id FROM clone_identity WHERE user_id = :uid ORDER BY created_at ASC LIMIT 1"),
         {"uid": body.user_id},
     )
     rec = row.mappings().first()
@@ -9498,7 +9542,7 @@ async def gdpr_export(
                    style_fingerprint, value_system, created_at, updated_at,
                    retention_days_episodic, retention_days_traces,
                    is_preserved, legal_hold_until
-            FROM clone_identity WHERE user_id = :uid LIMIT 1
+            FROM clone_identity WHERE user_id = :uid ORDER BY created_at ASC LIMIT 1
         """),
         {"uid": user_id},
     )
@@ -9581,7 +9625,7 @@ async def gdpr_delete(
     clone_row = await session.execute(
         sql_text("""
             SELECT clone_id, handle, is_preserved, legal_hold_until
-            FROM clone_identity WHERE user_id = :uid LIMIT 1
+            FROM clone_identity WHERE user_id = :uid ORDER BY created_at ASC LIMIT 1
         """),
         {"uid": user_id},
     )
@@ -11144,3 +11188,356 @@ async def whatsapp_webhook(
         reply = "Something went wrong on my end — please try again in a moment."
 
     return _twiml(reply)
+
+
+# =============================================================================
+# TASKS — Long-running agentic tasks
+# =============================================================================
+
+async def _verify_clone_owner_by_clone_id(clone_id: str, user_id: str | None, session: AsyncSession) -> None:
+    """Raise 403 if user_id does not own clone_id."""
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    row = await session.execute(
+        sql_text("SELECT user_id FROM clone_identity WHERE clone_id = :cid"),
+        {"cid": clone_id},
+    )
+    rec = row.mappings().first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Clone not found")
+    if rec["user_id"] != user_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+
+@app.get("/clones/{clone_id}/tasks")
+async def list_tasks(
+    clone_id: str,
+    request: Request,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    user_id = request.headers.get("X-User-Id")
+    await _verify_clone_owner_by_clone_id(clone_id, user_id, session)
+
+    rows = await session.execute(
+        sql_text("""
+            SELECT id, title, instruction, status, plan_steps, current_step,
+                   result, error, automation_id, created_at, updated_at, completed_at
+            FROM clone_tasks
+            WHERE clone_id = :cid
+            ORDER BY created_at DESC
+            LIMIT :lim OFFSET :off
+        """),
+        {"cid": clone_id, "lim": limit, "off": offset},
+    )
+    tasks = [dict(r) for r in rows.mappings().all()]
+    for t in tasks:
+        if t.get("plan_steps") and not isinstance(t["plan_steps"], list):
+            try:
+                t["plan_steps"] = json.loads(t["plan_steps"])
+            except Exception:
+                t["plan_steps"] = []
+        if t.get("created_at"):
+            t["created_at"] = t["created_at"].isoformat()
+        if t.get("updated_at"):
+            t["updated_at"] = t["updated_at"].isoformat()
+        if t.get("completed_at"):
+            t["completed_at"] = t["completed_at"].isoformat()
+        if t.get("id"):
+            t["id"] = str(t["id"])
+        if t.get("automation_id"):
+            t["automation_id"] = str(t["automation_id"])
+    return {"tasks": tasks}
+
+
+@app.post("/clones/{clone_id}/tasks", status_code=201)
+async def create_task(
+    clone_id: str,
+    body: dict,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    user_id = request.headers.get("X-User-Id")
+    await _verify_clone_owner_by_clone_id(clone_id, user_id, session)
+
+    instruction = (body.get("instruction") or "").strip()
+    if not instruction:
+        raise HTTPException(status_code=400, detail="instruction is required")
+
+    task_id = uuid4()
+    title = instruction[:60]
+
+    await session.execute(
+        sql_text("""
+            INSERT INTO clone_tasks (id, clone_id, title, instruction, status)
+            VALUES (:tid, :cid, :title, :instr, 'pending')
+        """),
+        {"tid": str(task_id), "cid": clone_id, "title": title, "instr": instruction},
+    )
+    await session.commit()
+
+    # Fire task runner in background
+    from doppel.brain.tasks.runner import run_task as _run_task
+    background_tasks.add_task(_run_task, task_id)
+
+    return {"task_id": str(task_id), "status": "pending", "title": title}
+
+
+@app.get("/clones/{clone_id}/tasks/{task_id}")
+async def get_task(
+    clone_id: str,
+    task_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    user_id = request.headers.get("X-User-Id")
+    await _verify_clone_owner_by_clone_id(clone_id, user_id, session)
+
+    row = await session.execute(
+        sql_text("""
+            SELECT id, title, instruction, status, plan_steps, current_step,
+                   result, error, automation_id, created_at, updated_at, completed_at
+            FROM clone_tasks
+            WHERE id = :tid AND clone_id = :cid
+        """),
+        {"tid": task_id, "cid": clone_id},
+    )
+    task = row.mappings().first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    t = dict(task)
+    if t.get("plan_steps") and not isinstance(t["plan_steps"], list):
+        try:
+            t["plan_steps"] = json.loads(t["plan_steps"])
+        except Exception:
+            t["plan_steps"] = []
+    for key in ("created_at", "updated_at", "completed_at"):
+        if t.get(key):
+            t[key] = t[key].isoformat()
+    t["id"] = str(t["id"])
+    if t.get("automation_id"):
+        t["automation_id"] = str(t["automation_id"])
+    return t
+
+
+@app.delete("/clones/{clone_id}/tasks/{task_id}", status_code=204)
+async def cancel_task(
+    clone_id: str,
+    task_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    user_id = request.headers.get("X-User-Id")
+    await _verify_clone_owner_by_clone_id(clone_id, user_id, session)
+
+    await session.execute(
+        sql_text("""
+            UPDATE clone_tasks SET status = 'cancelled', updated_at = NOW()
+            WHERE id = :tid AND clone_id = :cid AND status NOT IN ('completed', 'cancelled')
+        """),
+        {"tid": task_id, "cid": clone_id},
+    )
+    await session.commit()
+
+
+@app.post("/clones/{clone_id}/tasks/{task_id}/resume", status_code=200)
+async def resume_task(
+    clone_id: str,
+    task_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Approve the pending step and resume execution."""
+    user_id = request.headers.get("X-User-Id")
+    await _verify_clone_owner_by_clone_id(clone_id, user_id, session)
+
+    row = await session.execute(
+        sql_text("SELECT status FROM clone_tasks WHERE id = :tid AND clone_id = :cid"),
+        {"tid": task_id, "cid": clone_id},
+    )
+    rec = row.mappings().first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if rec["status"] != "waiting_approval":
+        raise HTTPException(status_code=400, detail=f"Task is {rec['status']}, not waiting_approval")
+
+    from doppel.brain.tasks.runner import resume_task as _resume_task
+    asyncio.create_task(_resume_task(UUID(task_id)))
+    return {"ok": True}
+
+
+# =============================================================================
+# AUTOMATIONS — Scheduled recurring tasks
+# =============================================================================
+
+@app.get("/clones/{clone_id}/automations")
+async def list_automations(
+    clone_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    user_id = request.headers.get("X-User-Id")
+    await _verify_clone_owner_by_clone_id(clone_id, user_id, session)
+
+    rows = await session.execute(
+        sql_text("""
+            SELECT id, name, description, instruction, schedule, status,
+                   run_count, last_run_at, next_run_at, last_task_id, created_at
+            FROM clone_automations
+            WHERE clone_id = :cid
+            ORDER BY created_at DESC
+        """),
+        {"cid": clone_id},
+    )
+    automations = []
+    for r in rows.mappings().all():
+        a = dict(r)
+        for key in ("last_run_at", "next_run_at", "created_at"):
+            if a.get(key):
+                a[key] = a[key].isoformat()
+        a["id"] = str(a["id"])
+        if a.get("last_task_id"):
+            a["last_task_id"] = str(a["last_task_id"])
+        automations.append(a)
+    return {"automations": automations}
+
+
+@app.post("/clones/{clone_id}/automations", status_code=201)
+async def create_automation(
+    clone_id: str,
+    body: dict,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    user_id = request.headers.get("X-User-Id")
+    await _verify_clone_owner_by_clone_id(clone_id, user_id, session)
+
+    name = (body.get("name") or "").strip()
+    instruction = (body.get("instruction") or "").strip()
+    if not name or not instruction:
+        raise HTTPException(status_code=400, detail="name and instruction are required")
+
+    schedule = (body.get("schedule") or "daily:09:00").strip()
+    description = (body.get("description") or "").strip() or None
+
+    from doppel.brain.tasks.scheduler import compute_next_run
+    from datetime import datetime, timezone
+    next_run = compute_next_run(schedule)
+
+    auto_id = uuid4()
+    await session.execute(
+        sql_text("""
+            INSERT INTO clone_automations (id, clone_id, name, description, instruction, schedule, next_run_at)
+            VALUES (:aid, :cid, :name, :desc, :instr, :sched, :next_run)
+        """),
+        {
+            "aid": str(auto_id),
+            "cid": clone_id,
+            "name": name,
+            "desc": description,
+            "instr": instruction,
+            "sched": schedule,
+            "next_run": next_run,
+        },
+    )
+    await session.commit()
+    return {"automation_id": str(auto_id), "name": name, "schedule": schedule, "next_run_at": next_run.isoformat()}
+
+
+@app.patch("/clones/{clone_id}/automations/{auto_id}")
+async def update_automation(
+    clone_id: str,
+    auto_id: str,
+    body: dict,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    user_id = request.headers.get("X-User-Id")
+    await _verify_clone_owner_by_clone_id(clone_id, user_id, session)
+
+    row = await session.execute(
+        sql_text("SELECT id, schedule FROM clone_automations WHERE id = :aid AND clone_id = :cid"),
+        {"aid": auto_id, "cid": clone_id},
+    )
+    if not row.mappings().first():
+        raise HTTPException(status_code=404, detail="Automation not found")
+
+    allowed = {"name", "description", "instruction", "schedule", "status"}
+    updates: dict = {k: v for k, v in body.items() if k in allowed}
+    if not updates:
+        raise HTTPException(status_code=400, detail="No valid fields to update")
+
+    # Recompute next_run if schedule changed
+    if "schedule" in updates:
+        from doppel.brain.tasks.scheduler import compute_next_run
+        from datetime import datetime, timezone
+        updates["next_run_at"] = compute_next_run(updates["schedule"])
+
+    set_parts = ", ".join(f"{k} = :{k}" for k in updates)
+    updates["aid"] = auto_id
+    await session.execute(
+        sql_text(f"UPDATE clone_automations SET {set_parts}, updated_at = NOW() WHERE id = :aid"),
+        updates,
+    )
+    await session.commit()
+    return {"ok": True}
+
+
+@app.delete("/clones/{clone_id}/automations/{auto_id}", status_code=204)
+async def delete_automation(
+    clone_id: str,
+    auto_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    user_id = request.headers.get("X-User-Id")
+    await _verify_clone_owner_by_clone_id(clone_id, user_id, session)
+
+    await session.execute(
+        sql_text("DELETE FROM clone_automations WHERE id = :aid AND clone_id = :cid"),
+        {"aid": auto_id, "cid": clone_id},
+    )
+    await session.commit()
+
+
+@app.post("/clones/{clone_id}/automations/{auto_id}/run", status_code=202)
+async def run_automation_now(
+    clone_id: str,
+    auto_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Manually trigger an automation immediately."""
+    user_id = request.headers.get("X-User-Id")
+    await _verify_clone_owner_by_clone_id(clone_id, user_id, session)
+
+    row = await session.execute(
+        sql_text("SELECT name, instruction, schedule FROM clone_automations WHERE id = :aid AND clone_id = :cid"),
+        {"aid": auto_id, "cid": clone_id},
+    )
+    auto = row.mappings().first()
+    if not auto:
+        raise HTTPException(status_code=404, detail="Automation not found")
+
+    task_id = uuid4()
+    await session.execute(
+        sql_text("""
+            INSERT INTO clone_tasks (id, clone_id, title, instruction, status, automation_id)
+            VALUES (:tid, :cid, :title, :instr, 'pending', :auto_id)
+        """),
+        {
+            "tid": str(task_id),
+            "cid": clone_id,
+            "title": f"Manual: {auto['name']}",
+            "instr": auto["instruction"],
+            "auto_id": auto_id,
+        },
+    )
+    await session.commit()
+
+    from doppel.brain.tasks.runner import run_task as _run_task
+    asyncio.create_task(_run_task(task_id))
+    return {"task_id": str(task_id), "status": "started"}

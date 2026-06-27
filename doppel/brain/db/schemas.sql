@@ -897,3 +897,48 @@ CREATE TABLE IF NOT EXISTS clone_mcp_servers (
 );
 
 CREATE INDEX IF NOT EXISTS mcp_servers_clone_idx ON clone_mcp_servers (clone_id, enabled);
+
+
+-- ---------------------------------------------------------------------------
+-- CLONE AUTOMATIONS
+-- Scheduled or manually-triggered recurring tasks owned by a clone.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS clone_automations (
+    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    clone_id        UUID NOT NULL REFERENCES clone_identity(clone_id) ON DELETE CASCADE,
+    name            TEXT NOT NULL,
+    description     TEXT,
+    instruction     TEXT NOT NULL,
+    schedule        TEXT NOT NULL DEFAULT 'daily:09:00',
+    status          TEXT NOT NULL DEFAULT 'active',  -- active | paused | disabled
+    run_count       INT NOT NULL DEFAULT 0,
+    last_run_at     TIMESTAMPTZ,
+    next_run_at     TIMESTAMPTZ,
+    last_task_id    UUID,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS clone_automations_clone_idx ON clone_automations (clone_id, status);
+CREATE INDEX IF NOT EXISTS clone_automations_scheduled_idx ON clone_automations (next_run_at) WHERE status = 'active';
+
+
+-- ---------------------------------------------------------------------------
+-- CLONE TASKS
+-- Long-running multi-step tasks executed by the clone brain.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS clone_tasks (
+    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    clone_id        UUID NOT NULL REFERENCES clone_identity(clone_id) ON DELETE CASCADE,
+    title           TEXT NOT NULL,
+    instruction     TEXT NOT NULL,
+    status          TEXT NOT NULL DEFAULT 'pending',  -- pending | planning | running | waiting_approval | completed | failed | cancelled
+    plan_steps      JSONB NOT NULL DEFAULT '[]',
+    current_step    INT NOT NULL DEFAULT 0,
+    result          TEXT,
+    error           TEXT,
+    automation_id   UUID,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    completed_at    TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS clone_tasks_clone_idx ON clone_tasks (clone_id, status, created_at DESC);

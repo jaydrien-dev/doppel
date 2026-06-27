@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { UserButton, useUser, useClerk } from "@clerk/nextjs";
@@ -24,11 +24,24 @@ const CLONE: NavItem[] = [
     ),
   },
   {
-    href: "/dashboard/test",
-    label: "Approvals",
+    href: "/dashboard/tasks",
+    label: "Tasks",
     icon: (
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-        <path d="M2 8.5l3.5 3.5 8-8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.85"/>
+        <rect x="2" y="3" width="12" height="2" rx="1" fill="currentColor" opacity="0.7"/>
+        <rect x="2" y="7" width="8" height="2" rx="1" fill="currentColor" opacity="0.5"/>
+        <rect x="2" y="11" width="5" height="2" rx="1" fill="currentColor" opacity="0.35"/>
+        <path d="M12 9l1.5 1.5L15 9" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" opacity="0.65"/>
+      </svg>
+    ),
+  },
+  {
+    href: "/dashboard/automations",
+    label: "Automations",
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+        <path d="M8 2a6 6 0 100 12A6 6 0 008 2z" stroke="currentColor" strokeWidth="1.3" opacity="0.5"/>
+        <path d="M8 5v3l2 1.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" opacity="0.85"/>
       </svg>
     ),
   },
@@ -204,7 +217,6 @@ const ACCOUNT: NavItem[] = [
   {
     href: "/dashboard/credits",
     label: "Credits",
-    advancedOnly: true,
     icon: (
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
         <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.4" opacity="0.6"/>
@@ -375,14 +387,6 @@ function UserFooter() {
   const { advanced, toggle } = useAdvancedMode();
   const tier = clone?.subscription_tier ?? "free";
   const name = user?.firstName ?? user?.username ?? "Account";
-  const [credits, setCredits] = useState<{ plan: number; bought: number } | null>(null);
-
-  useEffect(() => {
-    fetch("/api/credits/balance")
-      .then((r) => r.json())
-      .then((d) => setCredits({ plan: d.plan_credits ?? 0, bought: d.bought_credits ?? 0 }))
-      .catch(() => {});
-  }, []);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "4px 4px 0" }}>
@@ -404,28 +408,6 @@ function UserFooter() {
               {TIER_LABEL[tier] ?? tier}
             </span>
           </div>
-          {/* Credits breakdown — plan · bought (advanced only) */}
-          {advanced && credits !== null && (
-            <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 4, flexWrap: "wrap" }}>
-              <span style={{
-                fontSize: 10, padding: "2px 6px", borderRadius: 999,
-                background: "rgba(96,165,250,0.08)", border: "1px solid rgba(96,165,250,0.15)",
-                color: credits.plan > 0 ? "rgba(96,165,250,0.70)" : "rgba(255,255,255,0.25)",
-                fontVariantNumeric: "tabular-nums",
-              }} title="Plan credits (weekly)">
-                {credits.plan.toLocaleString()} plan
-              </span>
-              <span style={{ fontSize: 9, color: "rgba(255,255,255,0.18)" }}>·</span>
-              <span style={{
-                fontSize: 10, padding: "2px 6px", borderRadius: 999,
-                background: "rgba(196,181,253,0.07)", border: "1px solid rgba(196,181,253,0.12)",
-                color: credits.bought > 0 ? "rgba(196,181,253,0.65)" : "rgba(255,255,255,0.25)",
-                fontVariantNumeric: "tabular-nums",
-              }} title="Bought credits (never expire)">
-                {credits.bought.toLocaleString()} bought
-              </span>
-            </div>
-          )}
         </div>
       </div>
 

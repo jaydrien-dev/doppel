@@ -19,7 +19,7 @@ type ConnectedTool = {
 };
 
 type AuthFlow = "oauth" | "webhook" | "credentials";
-type ConnectorSection = "communication" | "productivity" | "ai" | "finance";
+type ConnectorSection = "communication" | "productivity" | "finance";
 
 interface ConnectorDef {
   id: string;
@@ -75,11 +75,13 @@ const CONNECTORS: ConnectorDef[] = [
   },
   {
     id: "whatsapp",
-    name: "WhatsApp Business",
-    subtitle: "Messages · Broadcasts · Customer chats",
-    description: "Handle customer messages, manage broadcasts, respond to group chats — routed through your approval before sending.",
-    authFlow: "webhook",
-    skills: ["Customer support", "Order updates", "FAQ responses", "Broadcast management"],
+    name: "WhatsApp",
+    subtitle: "Messages · Replies · Customer chats",
+    description: "Your clone reads incoming WhatsApp messages and drafts replies — routed through your approval before sending. Uses the Meta WhatsApp Business API.",
+    authFlow: "credentials",
+    credentialLabel: "Meta API access token",
+    credentialHint: "EAAxxxxxxxxx…",
+    skills: ["Customer support", "Order updates", "FAQ replies", "Broadcast drafting"],
     section: "communication",
     toolNames: [],
   },
@@ -156,44 +158,6 @@ const CONNECTORS: ConnectorDef[] = [
     comingSoon: true,
   },
 
-  // ── AI Tools ──
-  {
-    id: "claude_ai",
-    name: "Claude",
-    subtitle: "Anthropic · claude.ai",
-    description: "Your delegate uses Claude to draft, reason, analyse and create — via your Anthropic API key, with full access to extended thinking and long context.",
-    authFlow: "credentials",
-    credentialLabel: "Anthropic API key",
-    credentialHint: "sk-ant-…",
-    skills: ["Long-form writing", "Document analysis", "Strategy", "Extended thinking", "Research synthesis"],
-    section: "ai",
-    toolNames: [],
-  },
-  {
-    id: "chatgpt",
-    name: "ChatGPT",
-    subtitle: "OpenAI · gpt-4o",
-    description: "Your delegate uses ChatGPT for code generation, structured output, and tasks where you'd normally open a GPT window — via your OpenAI API key.",
-    authFlow: "credentials",
-    credentialLabel: "OpenAI API key",
-    credentialHint: "sk-…",
-    skills: ["Code generation", "Structured output", "Data extraction", "Tool-heavy tasks"],
-    section: "ai",
-    toolNames: [],
-  },
-  {
-    id: "gemini",
-    name: "Gemini",
-    subtitle: "Google AI · gemini-2.0-flash",
-    description: "Your delegate uses Gemini to work natively with Google data, process long documents, and handle multimodal tasks like images and audio.",
-    authFlow: "credentials",
-    credentialLabel: "Google AI API key",
-    credentialHint: "AIza…",
-    skills: ["Google Workspace analysis", "Long document processing", "Multimodal tasks", "Image analysis"],
-    section: "ai",
-    toolNames: [],
-  },
-
   // ── Finance ──
   {
     id: "sql_accounting",
@@ -213,7 +177,6 @@ const CONNECTORS: ConnectorDef[] = [
 const SECTIONS: { id: ConnectorSection; label: string; desc: string }[] = [
   { id: "communication", label: "Communication",       desc: "Email, messaging, and meetings — where work actually happens." },
   { id: "productivity",  label: "Files & Productivity", desc: "The apps your delegate reads from and writes to." },
-  { id: "ai",            label: "AI Tools",             desc: "Connect your AI accounts. Your delegate uses them like you would — writing, reasoning, analysing." },
   { id: "finance",       label: "Finance",              desc: "Your accounting system, delegated." },
 ];
 
@@ -307,27 +270,6 @@ function ConnectorIcon({ id }: { id: string }) {
           <path d="M7.5 13.5V8l2.5 2.5L12.5 8v5.5" stroke={c} strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
         </svg>
       );
-    case "claude_ai":
-      return (
-        <svg {...p} viewBox="0 0 20 20">
-          <circle cx="10" cy="10" r="7.5" stroke={c} strokeWidth="1.3"/>
-          <path d="M7 13.5l3-7 3 7M8.5 11h3" stroke={c} strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
-        </svg>
-      );
-    case "chatgpt":
-      return (
-        <svg {...p} viewBox="0 0 20 20">
-          <path d="M16.5 8.5A6.5 6.5 0 0 0 5.2 5.5L3.5 8.5a6.5 6.5 0 0 0 0 3l1.7 3A6.5 6.5 0 0 0 16.5 11.5a6.5 6.5 0 0 0 0-3z" stroke={c} strokeWidth="1.3"/>
-          <circle cx="10" cy="10" r="2" fill={c} opacity=".6"/>
-        </svg>
-      );
-    case "gemini":
-      return (
-        <svg {...p} viewBox="0 0 20 20">
-          <path d="M10 2 C10 2, 14 7, 14 10 C14 13, 10 18, 10 18 C10 18, 6 13, 6 10 C6 7, 10 2, 10 2z" stroke={c} strokeWidth="1.3" fill="none"/>
-          <path d="M2 10 C2 10, 7 6, 10 6 C13 6, 18 10, 18 10 C18 10, 13 14, 10 14 C7 14, 2 10, 2 10z" stroke={c} strokeWidth="1.3" fill="none" opacity=".55"/>
-        </svg>
-      );
     case "sql_accounting":
       return (
         <svg {...p} viewBox="0 0 20 20">
@@ -348,11 +290,10 @@ function ConnectorIcon({ id }: { id: string }) {
 // ─── Credential input modal ───────────────────────────────────────────────────
 
 function CredentialsModal({
-  def, cloneId, userId, onClose, onSaved,
+  def, cloneId, onClose, onSaved,
 }: {
   def: ConnectorDef;
   cloneId: string;
-  userId: string;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -486,7 +427,7 @@ function ConnectorCard({
 
   async function handleDisconnect() {
     setDisconnecting(true);
-    await Promise.all(matchingTools.map((t) => fetch(`/api/tools/${t.id}`, { method: "DELETE" })));
+    await Promise.all(matchingTools.map((t) => fetch(`/api/tools/${t.id}?clone_id=${cloneId}`, { method: "DELETE" })));
     onRefresh();
     setDisconnecting(false);
   }
@@ -505,7 +446,6 @@ function ConnectorCard({
         <CredentialsModal
           def={def}
           cloneId={cloneId}
-          userId={userId}
           onClose={() => setShowModal(false)}
           onSaved={() => { onRefresh(); setShowModal(false); }}
         />

@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useUser } from "@clerk/nextjs";
 import { useClones } from "@/lib/hooks/useClones";
 import type { CloneOwnerInfo } from "@/lib/types";
+import { SchedulePicker } from "@/components/ui/SchedulePicker";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -270,6 +271,73 @@ function MessageBubble({ msg, cloneColor, cloneInitial, avatarUrl }: {
   );
 }
 
+// ─── Automate modal ───────────────────────────────────────────────────────────
+
+
+function AutomateModal({ cloneId, initialInstruction, onClose, onCreated }: {
+  cloneId: string;
+  initialInstruction: string;
+  onClose: () => void;
+  onCreated: (name: string, schedule: string) => void;
+}) {
+  const [name,        setName]        = useState(initialInstruction.slice(0, 40) || "");
+  const [instruction, setInstruction] = useState(initialInstruction);
+  const [schedule,    setSchedule]    = useState("daily:09:00");
+  const [loading,     setLoading]     = useState(false);
+  const [err,         setErr]         = useState<string | null>(null);
+
+  async function submit() {
+    if (!name.trim() || !instruction.trim()) return;
+    setLoading(true); setErr(null);
+    try {
+      const res = await fetch("/api/automations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clone_id: cloneId, name: name.trim(), instruction: instruction.trim(), schedule }),
+      });
+      if (!res.ok) { setErr("Failed to create automation."); return; }
+      onCreated(name.trim(), schedule);
+    } catch { setErr("Network error. Try again."); }
+    finally { setLoading(false); }
+  }
+
+  const inp: React.CSSProperties = {
+    width: "100%", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.09)",
+    borderRadius: 10, padding: "9px 12px", fontSize: 13, color: "rgba(255,255,255,0.8)",
+    fontFamily: "inherit", outline: "none", boxSizing: "border-box",
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", backdropFilter: "blur(8px)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={onClose}>
+      <div style={{ background: "#0f0f0f", border: "1px solid rgba(255,255,255,0.09)", borderRadius: 20, padding: 28, width: 480, maxWidth: "90vw" }} onClick={e => e.stopPropagation()}>
+        <h2 style={{ fontSize: 15, fontWeight: 500, color: "rgba(255,255,255,0.85)", marginBottom: 6 }}>Schedule automation</h2>
+        <p style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", marginBottom: 20 }}>Your clone will run this instruction on a schedule.</p>
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div>
+            <label style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", display: "block", marginBottom: 5 }}>Name</label>
+            <input value={name} onChange={e => setName(e.target.value)} placeholder="Weekly digest" style={inp} />
+          </div>
+          <div>
+            <label style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", display: "block", marginBottom: 5 }}>Instruction</label>
+            <textarea value={instruction} onChange={e => setInstruction(e.target.value)} style={{ ...inp, minHeight: 72, resize: "vertical" as const, lineHeight: 1.6 }} />
+          </div>
+          <div>
+            <label style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", display: "block", marginBottom: 8 }}>Schedule</label>
+            <SchedulePicker value={schedule} onChange={setSchedule} />
+          </div>
+          {err && <p style={{ fontSize: 11, color: "rgba(248,113,113,0.7)", margin: 0 }}>{err}</p>}
+        </div>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 18 }}>
+          <button onClick={onClose} style={{ fontSize: 13, padding: "7px 16px", borderRadius: 10, background: "transparent", border: "1px solid rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.4)", cursor: "pointer", fontFamily: "inherit" }}>Cancel</button>
+          <button onClick={submit} disabled={loading || !name.trim() || !instruction.trim()} style={{ fontSize: 13, padding: "7px 18px", borderRadius: 10, background: "rgba(255,255,255,0.09)", border: "1px solid rgba(255,255,255,0.14)", color: "rgba(255,255,255,0.85)", cursor: "pointer", fontFamily: "inherit", opacity: (loading || !name.trim() || !instruction.trim()) ? 0.4 : 1 }}>
+            {loading ? "Saving…" : "Create"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── CloneChat ────────────────────────────────────────────────────────────────
 
 function CloneChat({ clone, userId }: { clone: CloneOwnerInfo; userId: string }) {
@@ -277,9 +345,11 @@ function CloneChat({ clone, userId }: { clone: CloneOwnerInfo; userId: string })
   const [responseMode,    setResponseMode]    = useState<ResponseMode>("fast");
   const [input,           setInput]           = useState("");
   const [shareCopied,     setShareCopied]     = useState(false);
-  const [moreOpen,        setMoreOpen]        = useState(false);
-  const [consent,         setConsent]         = useState<"loading" | null | boolean>("loading");
-  const [profile,         setProfile]         = useState<{ exists: boolean; total_sessions?: number } | null>(null);
+  const [moreOpen,           setMoreOpen]           = useState(false);
+  const [consent,            setConsent]            = useState<"loading" | null | boolean>("loading");
+  const [profile,            setProfile]            = useState<{ exists: boolean; total_sessions?: number } | null>(null);
+  const [showAutomateModal,  setShowAutomateModal]  = useState(false);
+  const [automateInstruction, setAutomateInstruction] = useState("");
   const [knowledgeAreas,  setKnowledgeAreas]  = useState<{ area: string; depth: string }[]>([]);
   const [autoSuggestions, setAutoSuggestions] = useState<string[]>([]);
   const [autoLoading,     setAutoLoading]     = useState(false);
@@ -318,14 +388,14 @@ function CloneChat({ clone, userId }: { clone: CloneOwnerInfo; userId: string })
     agentScrollRef.current?.scrollTo({ top: agentScrollRef.current.scrollHeight, behavior: "smooth" });
   }, [agentEvents]);
 
-  // Resolve session from localStorage
+  // Resolve session from localStorage — scoped to user so different accounts don't share sessions
   useEffect(() => {
-    const key = `doppel_web_session:${clone.handle}`;
+    const key = `doppel_web_session:${userId}:${clone.handle}`;
     const existing = localStorage.getItem(key);
     if (existing) { setSessionId(existing); } else {
       const fresh = uuid(); localStorage.setItem(key, fresh); setSessionId(fresh);
     }
-  }, [clone.handle]);
+  }, [clone.handle, userId]);
 
   // Consent
   useEffect(() => {
@@ -416,7 +486,7 @@ function CloneChat({ clone, userId }: { clone: CloneOwnerInfo; userId: string })
 
   function startNewConversation() {
     const fresh = uuid();
-    localStorage.setItem(`doppel_web_session:${clone.handle}`, fresh);
+    localStorage.setItem(`doppel_web_session:${userId}:${clone.handle}`, fresh);
     localStorage.removeItem(`doppel_web_chat:${clone.clone_id}`);
     setSessionId(fresh);
     clearMessages();
@@ -424,11 +494,44 @@ function CloneChat({ clone, userId }: { clone: CloneOwnerInfo; userId: string })
     setAgentPanelOpen(false);
   }
 
+  async function handleCreateTask(instruction: string) {
+    const userMsgId = uuid();
+    const cloneMsgId = uuid();
+    setMessages(prev => [
+      ...prev,
+      { id: userMsgId,  role: "user",  content: `/task ${instruction}` },
+      { id: cloneMsgId, role: "clone", content: "", isStreaming: true },
+    ]);
+    try {
+      const res = await fetch("/api/tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clone_id: clone.clone_id, instruction }),
+      });
+      const data = await res.json();
+      const title = data.title || instruction.slice(0, 60);
+      const final = `Task started: **${title}**\n\nI'm handling this in the background. Track progress in [Tasks →](/dashboard/tasks)`;
+      setMessages(prev => prev.map(m => m.id === cloneMsgId ? { ...m, content: final, isStreaming: false } : m));
+    } catch {
+      setMessages(prev => prev.map(m => m.id === cloneMsgId ? { ...m, content: "Failed to create the task. Please try again.", isStreaming: false } : m));
+    }
+  }
+
   function handleSend() {
     if (!input.trim() || isLoading) return;
     const txt = input.trim();
     setInput("");
     if (textareaRef.current) textareaRef.current.style.height = "auto";
+
+    if (txt.toLowerCase().startsWith("/task ")) {
+      handleCreateTask(txt.slice(6).trim());
+      return;
+    }
+    if (txt.toLowerCase().startsWith("/automate ")) {
+      setAutomateInstruction(txt.slice(10).trim());
+      setShowAutomateModal(true);
+      return;
+    }
     sendMessage(txt);
   }
 
@@ -675,9 +778,32 @@ function CloneChat({ clone, userId }: { clone: CloneOwnerInfo; userId: string })
                 <IAgent />Running tool…
               </span>
             )}
+            <span style={{ marginLeft: "auto", fontSize: 10, color: "rgba(255,255,255,0.18)" }}>
+              <code style={{ fontSize: 10, color: "rgba(255,255,255,0.28)" }}>/task</code> to delegate ·{" "}
+              <code style={{ fontSize: 10, color: "rgba(255,255,255,0.28)" }}>/automate</code> to schedule
+            </span>
           </div>
         </div>
       </div>
+
+      {/* Automate modal */}
+      {showAutomateModal && (
+        <AutomateModal
+          cloneId={clone.clone_id}
+          initialInstruction={automateInstruction}
+          onClose={() => setShowAutomateModal(false)}
+          onCreated={(name, schedule) => {
+            setShowAutomateModal(false);
+            const id = uuid();
+            setMessages(prev => [...prev, {
+              id,
+              role: "clone" as const,
+              content: `Automation created: **${name}** — will run ${schedule.replace(/:/g, " at ").replace("daily", "every day").replace("weekly", "every week").replace("weekdays", "every weekday").replace("hourly", "every hour")}.`,
+              isStreaming: false,
+            }]);
+          }}
+        />
+      )}
 
       {/* MCP Agent panel */}
       {agentPanelOpen && agentEvents.length > 0 && (
