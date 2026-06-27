@@ -42,10 +42,15 @@ _MAX_EXEC_ITERATIONS = 6                    # tool iterations per step
 async def _plan_task(instruction: str, clone_name: str, tool_names: list[str]) -> list[dict]:
     """Call Claude to produce a structured step-by-step plan as JSON."""
     api_key = get_anthropic_key()
-    tools_hint = (
-        f"Available tools: {', '.join(tool_names)}" if tool_names
-        else "No external tools available — reason through the task using your knowledge."
-    )
+    if tool_names:
+        tools_hint = (
+            f"Available API tools (real REST connectors): {', '.join(tool_names)}\n"
+            f"Write step descriptions that name the specific tool to call — "
+            f"e.g. \"Call Google_Drive__search_files with query 'X'\" not \"access Google Drive\"."
+        )
+    else:
+        tools_hint = "No external tools available — reason through the task using knowledge."
+
     prompt = f"""\
 You are planning a task for {clone_name}, an AI clone.
 
@@ -56,6 +61,7 @@ Task: {instruction}
 Break this into 2–8 concrete steps. Each step must be independently executable.
 Mark requires_approval=true only for irreversible real-world actions (send email, post message, delete data, make purchase).
 Mark requires_approval=false for research, analysis, drafting, and reading.
+When a step uses a tool, name the tool explicitly in the description.
 
 Respond with ONLY valid JSON (no markdown, no commentary):
 {{
@@ -125,18 +131,24 @@ async def _execute_step(
     """Execute a single task step using the agentic tool loop. Returns step result text."""
     api_key = get_anthropic_key()
 
-    tool_list_hint = ""
+    tool_section = ""
     if mcp_tools:
-        names = ", ".join(t["name"] for t in mcp_tools)
-        tool_list_hint = f"\nYou have access to these tools: {names}\nUse them to complete the step — do not say you cannot access external services."
+        names = "\n".join(f"  - {t['name']}" for t in mcp_tools)
+        tool_section = f"""
+## Tools available
+You have LIVE API access to these tools — they are real REST connectors, NOT browser access:
+{names}
+
+CRITICAL rules:
+- When the step involves any of these services, CALL THE TOOL. Do not say you lack access.
+- These tools work via OAuth tokens already stored — you do NOT need a browser or internet.
+- Never write "I cannot access", "I don't have access", or "limitations" — just call the tool.
+- If a tool returns an error, report the error. Do not pretend the tool does not exist."""
 
     system = f"""\
-You are {clone_name}, an AI clone executing a specific step of a larger task.
-
-Your job: complete ONLY this one step. Be direct and efficient.
-If you need to call a tool, call it. If you need to reason, reason.
-After completing the step, report what was done in 1–3 sentences.
-{tool_list_hint}
+You are {clone_name}, an AI clone executing one step of a larger task.
+Complete ONLY this step. Be direct. After completing, report what was done in 1–3 sentences.
+{tool_section}
 {f"Context from previous steps:{chr(10)}{context_so_far}" if context_so_far else ""}"""
 
     messages: list[dict] = [{"role": "user", "content": step_description}]
@@ -150,6 +162,10 @@ After completing the step, report what was done in 1–3 sentences.
         }
         if mcp_tools:
             body["tools"] = mcp_tools
+            # Force tool use on the first call — prevents Claude from writing
+            # "I cannot access X" instead of calling the provided tool.
+            if iteration == 0:
+                body["tool_choice"] = {"type": "any"}
 
         try:
             async with httpx.AsyncClient(timeout=60.0) as client:
