@@ -343,7 +343,7 @@ async def run_task(task_id: UUID) -> None:
     for i, step in enumerate(plan_steps):
         if step.get("status") in ("completed", "skipped"):
             if step.get("result"):
-                context_parts.append(f"Step {i+1}: {step['result'][:300]}")
+                context_parts.append(f"Step {i+1}: {step['result'][:2000]}")
             continue
 
         if step.get("status") == "waiting_approval":
@@ -382,7 +382,7 @@ async def run_task(task_id: UUID) -> None:
             )
             plan_steps[i]["status"] = "completed"
             plan_steps[i]["result"] = result_text
-            context_parts.append(f"Step {i+1}: {result_text[:300]}")
+            context_parts.append(f"Step {i+1}: {result_text[:2000]}")
         except Exception as exc:
             _log.error("Task %s step %d failed: %s", task_id, i, exc)
             plan_steps[i]["status"] = "failed"
@@ -397,8 +397,8 @@ async def run_task(task_id: UUID) -> None:
 
         await _update_task(task_id, {"plan_steps": json.dumps(plan_steps)})
 
-    # ── Phase 3: Completion ──────────────────────────────────────────────────
-    final_result = "\n\n".join(context_parts) or "Task completed successfully."
+    # ── Phase 3: Synthesis ───────────────────────────────────────────────────
+    final_result = await _synthesize_result(instruction, context_parts, clone_name)
     await _update_task(task_id, {
         "status": "completed",
         "plan_steps": json.dumps(plan_steps),
@@ -406,6 +406,60 @@ async def run_task(task_id: UUID) -> None:
         "completed_at": datetime.now(timezone.utc),
     })
     _log.info("Task %s completed successfully", task_id)
+
+
+async def _synthesize_result(
+    instruction: str,
+    context_parts: list[str],
+    clone_name: str,
+) -> str:
+    """
+    Final Claude call to produce a clean, well-formatted result from all step outputs.
+    Returns markdown suitable for display to the user.
+    """
+    if not context_parts:
+        return "Task completed successfully."
+
+    api_key = get_anthropic_key()
+    steps_summary = "\n".join(context_parts)
+
+    prompt = f"""\
+You completed a task. Synthesize the results into a clean, concise final report.
+
+Original task: {instruction}
+
+What was done:
+{steps_summary}
+
+Write a clear, well-formatted summary of what was accomplished and what was found.
+Use markdown: headers, bullet points, tables where appropriate.
+Be specific — include actual data, file names, counts, or findings from the steps.
+Do NOT include meta-commentary like "here is a summary" or "I completed the task".
+Do NOT include Python code or implementation frameworks.
+Write as {clone_name} reporting directly to the user."""
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": api_key,
+                    "anthropic-version": "2023-06-01",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": _EXEC_MODEL,
+                    "max_tokens": 2048,
+                    "messages": [{"role": "user", "content": prompt}],
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        text_parts = [b["text"] for b in data.get("content", []) if b.get("type") == "text"]
+        return " ".join(text_parts).strip() or "\n".join(context_parts)
+    except Exception as exc:
+        _log.warning("Result synthesis failed: %s", exc)
+        return "\n".join(context_parts)
 
 
 async def resume_task(task_id: UUID) -> None:
