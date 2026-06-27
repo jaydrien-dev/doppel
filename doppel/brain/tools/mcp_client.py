@@ -171,11 +171,14 @@ async def refresh_google_token(server: MCPServer, session: AsyncSession) -> bool
         # Update in-memory
         server.api_key = new_token
 
-        # Persist to DB
+        # Persist to DB with updated expires_at
+        from datetime import datetime, timezone, timedelta
         enc = encrypt_field(new_token)
+        expires_in = token_data.get("expires_in", 3600)
+        new_expires = datetime.now(timezone.utc) + timedelta(seconds=int(expires_in))
         await session.execute(
-            text("UPDATE clone_mcp_servers SET api_key_enc = :enc WHERE id = :id"),
-            {"enc": enc, "id": str(server.id)},
+            text("UPDATE clone_mcp_servers SET api_key_enc = :enc, expires_at = :exp WHERE id = :id"),
+            {"enc": enc, "exp": new_expires, "id": str(server.id)},
         )
         await session.commit()
         _log.info("refresh_google_token: refreshed token for %s", server.name)
@@ -210,6 +213,58 @@ async def call_native_tool_with_refresh(
     return result
 
 
+async def _proactive_refresh_if_expired(
+    server: "MCPServer",
+    row_id: Any,
+    session: AsyncSession,
+) -> None:
+    """
+    If the token is within 5 minutes of expiry (or already expired), refresh it
+    now so callers always get a valid token. Mirrors gmail.py's _get_valid_token.
+    Only runs for Google services that have a refresh_token stored.
+    """
+    from datetime import datetime, timezone, timedelta
+    if server.name not in _GOOGLE_SERVICES:
+        return
+    if not server.refresh_token:
+        return
+
+    # Load expires_at from DB
+    try:
+        exp_row = await session.execute(
+            text("SELECT expires_at FROM clone_mcp_servers WHERE id = :id"),
+            {"id": str(row_id)},
+        )
+        expires_at = (exp_row.mappings().first() or {}).get("expires_at")
+    except Exception:
+        return
+
+    if expires_at is None:
+        return  # no expiry info — assume still valid
+
+    # Make timezone-aware for comparison
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+
+    if expires_at > datetime.now(timezone.utc) + timedelta(minutes=5):
+        return  # still valid
+
+    _log.info("load_clone_tools: proactively refreshing expired token for %s", server.name)
+    refreshed = await refresh_google_token(server, session)
+    if not refreshed:
+        _log.warning("load_clone_tools: token refresh failed for %s — using stale token", server.name)
+    else:
+        # Update expires_at to now + 1 hour
+        try:
+            await session.execute(
+                text("UPDATE clone_mcp_servers SET expires_at = :exp WHERE id = :id"),
+                {"exp": datetime.now(timezone.utc) + timedelta(hours=1), "id": str(row_id)},
+            )
+            await session.commit()
+        except Exception:
+            pass
+
+
 async def load_clone_tools(
     session: AsyncSession,
     clone_id: UUID,
@@ -226,7 +281,7 @@ async def load_clone_tools(
     try:
         rows = await session.execute(
             text(
-                "SELECT id, name, server_url, transport, api_key_enc, headers_enc "
+                "SELECT id, name, server_url, transport, api_key_enc, headers_enc, expires_at "
                 "FROM clone_mcp_servers "
                 "WHERE clone_id = :cid AND enabled = TRUE"
             ),
@@ -266,6 +321,9 @@ async def load_clone_tools(
             extra_headers=extra_headers,
             refresh_token=extra_headers.get("refresh_token"),
         )
+
+        # Proactively refresh Google tokens that are near expiry — same as gmail.py
+        await _proactive_refresh_if_expired(server, row[0], session)
 
         # Prefer native REST connector over placeholder MCP proxy URL
         native_tools = get_native_tools(server.name)

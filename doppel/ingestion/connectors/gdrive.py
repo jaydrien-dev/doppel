@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import AsyncIterator
 from uuid import UUID
 
@@ -108,20 +108,43 @@ async def _refresh_access_token(
         data = resp.json()
 
     new_access = data["access_token"]
+    expires_in = data.get("expires_in", 3600)
+    new_expires = datetime.now(timezone.utc) + timedelta(seconds=int(expires_in))
     await session.execute(
-        text("UPDATE clone_mcp_servers SET api_key_enc = :tok WHERE id = :id"),
-        {"tok": encrypt_field(new_access), "id": row_id},
+        text("UPDATE clone_mcp_servers SET api_key_enc = :tok, expires_at = :exp WHERE id = :id"),
+        {"tok": encrypt_field(new_access), "exp": new_expires, "id": row_id},
     )
     await session.commit()
     return new_access
 
 
 async def get_valid_token(clone_id: UUID, session: AsyncSession) -> str:
-    """Return a valid access token, refreshing if needed."""
+    """
+    Return a valid access token, proactively refreshing if within 5 minutes
+    of expiry. Mirrors gmail.py's _get_valid_token pattern exactly.
+    """
+    from sqlalchemy import text as _text
+    from datetime import timedelta
+
     access_token, refresh_token, row_id = await _get_tokens(clone_id, session)
 
-    # Try token as-is; if it fails the caller catches 401 and calls this again
-    # after refresh. We do a lightweight probe only if we have a refresh token.
+    # Check if the token is expired or near expiry
+    if refresh_token and row_id:
+        try:
+            exp_row = (await session.execute(
+                _text("SELECT expires_at FROM clone_mcp_servers WHERE id = :id"),
+                {"id": row_id},
+            )).mappings().first()
+            expires_at = exp_row["expires_at"] if exp_row else None
+            if expires_at is not None:
+                if expires_at.tzinfo is None:
+                    expires_at = expires_at.replace(tzinfo=timezone.utc)
+                if expires_at <= datetime.now(timezone.utc) + timedelta(minutes=5):
+                    access_token = await _refresh_access_token(clone_id, refresh_token, row_id, session)
+        except Exception:
+            pass
+
+    # Fallback: refresh if token is missing
     if not access_token and refresh_token:
         access_token = await _refresh_access_token(clone_id, refresh_token, row_id, session)
 

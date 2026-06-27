@@ -890,11 +890,13 @@ CREATE TABLE IF NOT EXISTS clone_mcp_servers (
     server_url   TEXT NOT NULL,                        -- MCP server base URL
     transport    TEXT NOT NULL DEFAULT 'streamablehttp', -- 'sse' | 'streamablehttp'
     api_key_enc  TEXT,                                 -- encrypted bearer token / API key
-    headers_enc  TEXT,                                 -- encrypted JSON of extra headers
+    headers_enc  TEXT,                                 -- encrypted JSON of extra headers (refresh_token etc.)
     tool_names   TEXT[] DEFAULT '{}',                  -- cached from /tools/list at connect time
     enabled      BOOLEAN NOT NULL DEFAULT TRUE,
+    expires_at   TIMESTAMPTZ,                          -- when the access token expires (NULL = no expiry tracking)
     created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+ALTER TABLE clone_mcp_servers ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;
 
 CREATE INDEX IF NOT EXISTS mcp_servers_clone_idx ON clone_mcp_servers (clone_id, enabled);
 

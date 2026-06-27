@@ -11138,30 +11138,42 @@ async def oauth_callback(
 
     # Store refresh token in headers_enc (Google services provide one)
     import json as _json
+    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
     refresh_token = token_json.get("refresh_token")
     headers_enc = encrypt_field(_json.dumps({"refresh_token": refresh_token})) if refresh_token else None
 
+    # Calculate token expiry (Google returns expires_in seconds, default 3600)
+    expires_in = token_json.get("expires_in")
+    expires_at = (
+        _dt.now(_tz.utc) + _td(seconds=int(expires_in))
+        if expires_in else None
+    )
+
     # Upsert: update existing record for this clone+service, or insert new one
     existing = await session.execute(
-        sql_text("SELECT id FROM clone_mcp_servers WHERE clone_id = :cid AND name = :name"),
+        sql_text("SELECT id, headers_enc FROM clone_mcp_servers WHERE clone_id = :cid AND name = :name"),
         {"cid": clone_id_str, "name": cfg["name"]},
     )
     existing_row = existing.mappings().first()
 
     if existing_row:
+        # Preserve existing refresh_token if the new response didn't include one
+        # (Google omits refresh_token on re-auth if the user didn't revoke access)
+        if not refresh_token and existing_row["headers_enc"]:
+            headers_enc = existing_row["headers_enc"]
         await session.execute(
             sql_text(
-                "UPDATE clone_mcp_servers SET api_key_enc = :token, headers_enc = :henc "
+                "UPDATE clone_mcp_servers SET api_key_enc = :token, headers_enc = :henc, expires_at = :exp "
                 "WHERE id = :id"
             ),
-            {"token": enc_token, "henc": headers_enc, "id": str(existing_row["id"])},
+            {"token": enc_token, "henc": headers_enc, "exp": expires_at, "id": str(existing_row["id"])},
         )
     else:
         await session.execute(
             sql_text(
                 "INSERT INTO clone_mcp_servers "
-                "(clone_id, name, server_url, transport, api_key_enc, headers_enc) "
-                "VALUES (:cid, :name, :url, 'streamablehttp', :token, :henc)"
+                "(clone_id, name, server_url, transport, api_key_enc, headers_enc, expires_at) "
+                "VALUES (:cid, :name, :url, 'streamablehttp', :token, :henc, :exp)"
             ),
             {
                 "cid":   clone_id_str,
@@ -11169,6 +11181,7 @@ async def oauth_callback(
                 "url":   cfg["server_url"],
                 "token": enc_token,
                 "henc":  headers_enc,
+                "exp":   expires_at,
             },
         )
     await session.commit()
