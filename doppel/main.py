@@ -5628,10 +5628,20 @@ async def _run_notion_ingestion(clone_id: UUID, job_id: UUID) -> None:
     from doppel.brain.db.vector import embed_batch
     from doppel.ingestion.pii_redactor import redact_pii
     from doppel.ingestion.status import start_job, update_job, complete_job, fail_job
+    from doppel.brain.security.encryption import decrypt_field as _df
 
     async with AsyncSessionLocal() as session:
         await load_clone_keys(session, clone_id)
+
+        # Try oauth_tokens first (old flow), then clone_mcp_servers (generic OAuth flow)
         token = await get_access_token(session, clone_id)
+        if not token:
+            row = (await session.execute(
+                sql_text("SELECT api_key_enc FROM clone_mcp_servers WHERE clone_id = :cid AND name = 'Notion' LIMIT 1"),
+                {"cid": str(clone_id)},
+            )).mappings().first()
+            token = _df(row["api_key_enc"]) if row else None
+
         if not token:
             await fail_job(job_id, "Notion not connected", session)
             return
@@ -5648,6 +5658,84 @@ async def _run_notion_ingestion(clone_id: UUID, job_id: UUID) -> None:
 
         for i in range(0, len(items), batch_size):
             batch = items[i : i + batch_size]
+            texts = [redact_pii(it.content) for it in batch]
+            try:
+                embeddings = await embed_batch(texts)
+                for item, text, embedding in zip(batch, texts, embeddings):
+                    await _store_chunk_with_embedding(
+                        session=session,
+                        clone_id=clone_id,
+                        content=text,
+                        embedding=embedding,
+                        item=item,
+                        formality=0.5,
+                    )
+                processed += len(batch)
+            except Exception:
+                failed += len(batch)
+            await update_job(job_id, processed, failed, session)
+
+        await complete_job(job_id, session)
+
+
+# ---------------------------------------------------------------------------
+# Ingestion — Google Drive sync
+# ---------------------------------------------------------------------------
+
+class GDriveSyncRequest(BaseModel):
+    clone_id: UUID
+
+
+@app.post("/ingestion/gdrive/sync", status_code=202)
+async def gdrive_sync(
+    body: GDriveSyncRequest,
+    background_tasks: BackgroundTasks,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Trigger a background Google Drive ingestion job."""
+    job_id = await create_job(body.clone_id, "gdrive", session)
+    background_tasks.add_task(_run_gdrive_ingestion, clone_id=body.clone_id, job_id=job_id)
+    return {"job_id": str(job_id), "status": "queued", "poll": f"GET /ingestion/jobs/{job_id}"}
+
+
+async def _run_gdrive_ingestion(clone_id: UUID, job_id: UUID) -> None:
+    from doppel.brain.db.connection import AsyncSessionLocal
+    from doppel.ingestion.connectors.gdrive import fetch_items, _get_tokens
+    from doppel.ingestion.pipeline import _store_chunk_with_embedding
+    from doppel.brain.db.vector import embed_batch
+    from doppel.ingestion.pii_redactor import redact_pii
+    from doppel.ingestion.status import start_job, update_job, complete_job, fail_job
+
+    async with AsyncSessionLocal() as session:
+        await load_clone_keys(session, clone_id)
+        try:
+            access_token, refresh_token, row_id = await _get_tokens(clone_id, session)
+        except ValueError as e:
+            await fail_job(job_id, str(e), session)
+            return
+
+        items = []
+        try:
+            async for item in fetch_items(
+                clone_id=clone_id,
+                access_token=access_token,
+                refresh_token=refresh_token,
+                row_id=row_id,
+                session=session,
+            ):
+                items.append(item)
+        except Exception as e:
+            await fail_job(job_id, f"Drive fetch failed: {e}", session)
+            return
+
+        await start_job(job_id, len(items), session)
+
+        processed = 0
+        failed = 0
+        batch_size = settings.ingestion_batch_size
+
+        for i in range(0, len(items), batch_size):
+            batch = items[i: i + batch_size]
             texts = [redact_pii(it.content) for it in batch]
             try:
                 embeddings = await embed_batch(texts)
@@ -11084,6 +11172,19 @@ async def oauth_callback(
             },
         )
     await session.commit()
+
+    # Auto-trigger ingestion for knowledge-bearing services
+    clone_uuid = UUID(clone_id_str)
+    if service in ("gdrive", "notion"):
+        async def _ingest_bg(svc: str = service, cid: UUID = clone_uuid) -> None:
+            from doppel.brain.db.connection import AsyncSessionLocal as _ASL
+            async with _ASL() as _s:
+                jid = await create_job(cid, svc, _s)
+            if svc == "gdrive":
+                await _run_gdrive_ingestion(cid, jid)
+            else:
+                await _run_notion_ingestion(cid, jid)
+        asyncio.create_task(_ingest_bg())
 
     return _HTMLResponse(content=_OAUTH_SUCCESS_HTML.format())
 

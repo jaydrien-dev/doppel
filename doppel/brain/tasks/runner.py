@@ -24,9 +24,8 @@ from uuid import UUID
 import httpx
 
 from doppel.brain.db.connection import AsyncSessionLocal
-from doppel.brain.context import get_anthropic_key
-from doppel.brain.tools.mcp_client import load_clone_tools, MCPServer
-from doppel.brain.tools.connectors import call_native_tool
+from doppel.brain.context import get_anthropic_key, load_clone_keys
+from doppel.brain.tools.mcp_client import load_clone_tools, call_tool, call_native_tool_with_refresh, MCPServer
 
 _log = logging.getLogger(__name__)
 
@@ -126,14 +125,19 @@ async def _execute_step(
     """Execute a single task step using the agentic tool loop. Returns step result text."""
     api_key = get_anthropic_key()
 
+    tool_list_hint = ""
+    if mcp_tools:
+        names = ", ".join(t["name"] for t in mcp_tools)
+        tool_list_hint = f"\nYou have access to these tools: {names}\nUse them to complete the step — do not say you cannot access external services."
+
     system = f"""\
 You are {clone_name}, an AI clone executing a specific step of a larger task.
 
 Your job: complete ONLY this one step. Be direct and efficient.
 If you need to call a tool, call it. If you need to reason, reason.
 After completing the step, report what was done in 1–3 sentences.
-
-{f"Context from previous steps:\n{context_so_far}" if context_so_far else ""}"""
+{tool_list_hint}
+{f"Context from previous steps:{chr(10)}{context_so_far}" if context_so_far else ""}"""
 
     messages: list[dict] = [{"role": "user", "content": step_description}]
 
@@ -178,8 +182,6 @@ After completing the step, report what was done in 1–3 sentences.
 
         # Execute tool calls
         tool_results: list[dict] = []
-        from doppel.brain.tools.mcp_client import call_tool, call_native_tool_with_refresh
-        from doppel.brain.tools.connectors import call_native_tool
 
         for block in content_blocks:
             if block.get("type") != "tool_use":
@@ -190,9 +192,14 @@ After completing the step, report what was done in 1–3 sentences.
 
             server = servers_by_name.get(tool_name)
             if server is None:
-                result_text = f"[No server for tool: {tool_name}]"
+                result_text = f"[Tool '{tool_name}' not found — available tools: {list(servers_by_name.keys())}]"
             elif server.native:
-                result_text = await call_native_tool(server.name, tool_name, tool_args, server.api_key or "")
+                # Use a fresh session so token refresh can be persisted
+                async with AsyncSessionLocal() as tool_session:
+                    await load_clone_keys(tool_session, clone_id)
+                    result_text = await call_native_tool_with_refresh(
+                        server, tool_name, tool_args, tool_session
+                    )
             else:
                 result_text = await call_tool(server, tool_name, tool_args)
 
@@ -280,7 +287,8 @@ async def run_task(task_id: UUID) -> None:
         plan_steps: list = task["plan_steps"] or []
         current_step: int = task["current_step"] or 0
 
-        # Load MCP tools
+        # Load encryption keys then MCP tools
+        await load_clone_keys(session, clone_id)
         mcp_tools, servers_by_name = await load_clone_tools(session, clone_id)
 
         # Load clone name
