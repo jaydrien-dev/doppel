@@ -24,28 +24,6 @@ const CLONE: NavItem[] = [
     ),
   },
   {
-    href: "/dashboard/tasks",
-    label: "Tasks",
-    icon: (
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-        <rect x="2" y="3" width="12" height="2" rx="1" fill="currentColor" opacity="0.7"/>
-        <rect x="2" y="7" width="8" height="2" rx="1" fill="currentColor" opacity="0.5"/>
-        <rect x="2" y="11" width="5" height="2" rx="1" fill="currentColor" opacity="0.35"/>
-        <path d="M12 9l1.5 1.5L15 9" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" opacity="0.65"/>
-      </svg>
-    ),
-  },
-  {
-    href: "/dashboard/automations",
-    label: "Automations",
-    icon: (
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-        <path d="M8 2a6 6 0 100 12A6 6 0 008 2z" stroke="currentColor" strokeWidth="1.3" opacity="0.5"/>
-        <path d="M8 5v3l2 1.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" opacity="0.85"/>
-      </svg>
-    ),
-  },
-  {
     href: "/dashboard/clones",
     label: "Clones",
     icon: (
