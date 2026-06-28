@@ -2,7 +2,6 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useUser } from "@clerk/nextjs";
-import useSWR from "swr";
 import { useClones } from "@/lib/hooks/useClones";
 import type { CloneOwnerInfo } from "@/lib/types";
 import { SchedulePicker } from "@/components/ui/SchedulePicker";
@@ -849,266 +848,6 @@ const hdrBtnStyle: React.CSSProperties = {
   transition: "all 240ms",
 };
 
-// ─── Tasks panel ──────────────────────────────────────────────────────────────
-
-const swrFetcher = (url: string) => fetch(url).then(r => r.json());
-
-interface TaskStep { step: number; description: string; requires_approval: boolean; status: string; result?: string }
-interface Task { id: string; title: string; instruction: string; status: string; plan_steps: TaskStep[]; current_step: number; result?: string; error?: string; created_at: string }
-
-const TASK_COLOR: Record<string, string> = { pending: "rgba(255,255,255,0.3)", planning: "rgba(255,255,255,0.5)", running: "#6BAEFF", waiting_approval: "#FCD34D", completed: "#34D399", failed: "#F87171", cancelled: "rgba(255,255,255,0.2)" };
-const TASK_LABEL: Record<string, string> = { pending: "Queued", planning: "Planning", running: "Running", waiting_approval: "Needs approval", completed: "Done", failed: "Failed", cancelled: "Cancelled" };
-
-function TaskStepIcon({ status }: { status: string }) {
-  if (status === "completed") return <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="6.5" fill="rgba(52,211,153,0.15)" stroke="rgba(52,211,153,0.4)"/><path d="M4 7l2 2 4-4" stroke="#34D399" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>;
-  if (status === "running") return <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="6.5" fill="rgba(107,174,255,0.15)" stroke="rgba(107,174,255,0.4)"/><circle cx="7" cy="7" r="2.5" fill="#6BAEFF" opacity="0.8"/></svg>;
-  if (status === "waiting_approval") return <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="6.5" fill="rgba(252,211,77,0.12)" stroke="rgba(252,211,77,0.35)"/><path d="M7 4v3M7 9.5v.5" stroke="#FCD34D" strokeWidth="1.4" strokeLinecap="round"/></svg>;
-  if (status === "failed") return <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="6.5" fill="rgba(248,113,113,0.12)" stroke="rgba(248,113,113,0.3)"/><path d="M5 5l4 4M9 5l-4 4" stroke="#F87171" strokeWidth="1.4" strokeLinecap="round"/></svg>;
-  return <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="6.5" stroke="rgba(255,255,255,0.12)"/></svg>;
-}
-
-function TaskCard({ task, cloneId, onRefresh }: { task: Task; cloneId: string; onRefresh: () => void }) {
-  const [expanded, setExpanded] = useState(task.status === "waiting_approval");
-  const [resuming, setResuming] = useState(false);
-  const [cancelling, setCancelling] = useState(false);
-  const completed = task.plan_steps.filter(s => s.status === "completed").length;
-  const total = task.plan_steps.length;
-  const progress = total > 0 ? completed / total : 0;
-  const statusColor = TASK_COLOR[task.status] || "rgba(255,255,255,0.3)";
-  const isActive = ["pending", "planning", "running", "waiting_approval"].includes(task.status);
-
-  async function approveStep() {
-    setResuming(true);
-    try { await fetch(`/api/tasks/${task.id}?clone_id=${cloneId}&action=resume`, { method: "POST" }); onRefresh(); }
-    finally { setResuming(false); }
-  }
-  async function cancelTask() {
-    setCancelling(true);
-    try { await fetch(`/api/tasks/${task.id}?clone_id=${cloneId}`, { method: "DELETE" }); onRefresh(); }
-    finally { setCancelling(false); }
-  }
-
-  return (
-    <div style={{ background: "rgba(255,255,255,0.04)", border: `1px solid ${task.status === "waiting_approval" ? "rgba(252,211,77,0.2)" : "rgba(255,255,255,0.07)"}`, borderRadius: 14, padding: "14px 16px", marginBottom: 8 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }} onClick={() => setExpanded(e => !e)}>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 13, fontWeight: 500, color: "rgba(255,255,255,0.85)", marginBottom: 4 }}>{task.title || task.instruction.slice(0, 80)}</div>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 999, background: `${statusColor}18`, border: `1px solid ${statusColor}35`, color: statusColor }}>{TASK_LABEL[task.status] || task.status}</span>
-            {total > 0 && <span style={{ fontSize: 11, color: "rgba(255,255,255,0.3)" }}>{completed}/{total} steps</span>}
-            <span style={{ fontSize: 11, color: "rgba(255,255,255,0.22)" }}>{new Date(task.created_at).toLocaleDateString()}</span>
-          </div>
-        </div>
-        {total > 0 && <div style={{ width: 60, height: 3, background: "rgba(255,255,255,0.06)", borderRadius: 999, flexShrink: 0 }}><div style={{ width: `${progress * 100}%`, height: "100%", background: task.status === "completed" ? "#34D399" : "#6BAEFF", borderRadius: 999, transition: "width 0.4s ease" }} /></div>}
-        <svg width="13" height="13" viewBox="0 0 14 14" fill="none" style={{ transform: expanded ? "rotate(180deg)" : "none", transition: "transform 0.2s", flexShrink: 0, opacity: 0.35 }}><path d="M3 5l4 4 4-4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>
-      </div>
-      {expanded && (
-        <div style={{ marginTop: 12 }}>
-          {task.plan_steps.length > 0 ? (
-            <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 10 }}>
-              {task.plan_steps.map((step, i) => (
-                <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "7px 9px", background: step.status === "running" ? "rgba(107,174,255,0.04)" : step.status === "waiting_approval" ? "rgba(252,211,77,0.04)" : "transparent", border: `1px solid ${step.status === "running" ? "rgba(107,174,255,0.12)" : step.status === "waiting_approval" ? "rgba(252,211,77,0.12)" : "transparent"}`, borderRadius: 8 }}>
-                  <div style={{ marginTop: 1, flexShrink: 0 }}><TaskStepIcon status={step.status} /></div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 12, color: "rgba(255,255,255,0.72)" }}>{step.description}</div>
-                    {step.result && <div style={{ fontSize: 11, color: "rgba(255,255,255,0.38)", marginTop: 3 }}>{step.result.slice(0, 200)}{step.result.length > 200 ? "…" : ""}</div>}
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : <p style={{ fontSize: 12, color: "rgba(255,255,255,0.28)", marginBottom: 10 }}>{task.status === "planning" ? "Planning…" : task.instruction}</p>}
-          {task.result && (
-            <div style={{ background: "rgba(52,211,153,0.05)", border: "1px solid rgba(52,211,153,0.12)", borderRadius: 10, padding: "10px 12px", marginBottom: 8 }}>
-              <p style={{ fontSize: 10, color: "rgba(255,255,255,0.28)", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.07em" }}>Result</p>
-              <MarkdownRenderer content={task.result} />
-            </div>
-          )}
-          {task.error && <div style={{ background: "rgba(248,113,113,0.06)", border: "1px solid rgba(248,113,113,0.15)", borderRadius: 10, padding: "10px 12px", marginBottom: 8 }}><p style={{ fontSize: 12, color: "#F87171" }}>{task.error}</p></div>}
-          <div style={{ display: "flex", gap: 8 }}>
-            {task.status === "waiting_approval" && <button onClick={approveStep} disabled={resuming} style={{ fontSize: 12, padding: "6px 14px", borderRadius: 9, background: "rgba(252,211,77,0.12)", border: "1px solid rgba(252,211,77,0.25)", color: "#FCD34D", cursor: "pointer", fontFamily: "inherit", opacity: resuming ? 0.5 : 1 }}>{resuming ? "Approving…" : "Approve & continue"}</button>}
-            {isActive && <button onClick={cancelTask} disabled={cancelling} style={{ fontSize: 12, padding: "6px 12px", borderRadius: 9, background: "transparent", border: "1px solid rgba(248,113,113,0.15)", color: "rgba(248,113,113,0.6)", cursor: "pointer", fontFamily: "inherit", opacity: cancelling ? 0.5 : 1 }}>Cancel</button>}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function NewTaskModal({ cloneId, onCreated, onClose }: { cloneId: string; onCreated: () => void; onClose: () => void }) {
-  const [instruction, setInstruction] = useState("");
-  const [loading, setLoading] = useState(false);
-  async function submit() {
-    if (!instruction.trim()) return;
-    setLoading(true);
-    try { await fetch("/api/tasks", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clone_id: cloneId, instruction: instruction.trim() }) }); onCreated(); onClose(); }
-    finally { setLoading(false); }
-  }
-  return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", backdropFilter: "blur(8px)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={onClose}>
-      <div style={{ background: "#0f0f0f", border: "1px solid rgba(255,255,255,0.09)", borderRadius: 20, padding: 28, width: 520, maxWidth: "90vw" }} onClick={e => e.stopPropagation()}>
-        <h2 style={{ fontSize: 16, fontWeight: 500, color: "rgba(255,255,255,0.85)", marginBottom: 6 }}>New task</h2>
-        <p style={{ fontSize: 13, color: "rgba(255,255,255,0.35)", marginBottom: 20 }}>Describe what your clone should do. It will plan and execute step-by-step.</p>
-        <textarea autoFocus value={instruction} onChange={e => setInstruction(e.target.value)} placeholder="e.g. Search my Gmail for investor emails this week and summarise the key asks." style={{ width: "100%", minHeight: 100, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: "12px 14px", fontSize: 13, color: "rgba(255,255,255,0.8)", resize: "vertical" as const, fontFamily: "inherit", lineHeight: 1.6, outline: "none", boxSizing: "border-box" as const }} onFocus={e => { e.target.style.borderColor = "rgba(255,255,255,0.22)"; }} onBlur={e => { e.target.style.borderColor = "rgba(255,255,255,0.10)"; }} />
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 16 }}>
-          <button onClick={onClose} style={{ fontSize: 13, padding: "8px 18px", borderRadius: 10, background: "transparent", border: "1px solid rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.45)", cursor: "pointer", fontFamily: "inherit" }}>Cancel</button>
-          <button onClick={submit} disabled={loading || !instruction.trim()} style={{ fontSize: 13, padding: "8px 20px", borderRadius: 10, background: "rgba(255,255,255,0.09)", border: "1px solid rgba(255,255,255,0.14)", color: "rgba(255,255,255,0.85)", cursor: "pointer", fontFamily: "inherit", opacity: (!instruction.trim() || loading) ? 0.4 : 1 }}>{loading ? "Starting…" : "Start task"}</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function TasksPanel({ cloneId }: { cloneId: string }) {
-  const [showModal, setShowModal] = useState(false);
-  const { data, mutate, isLoading } = useSWR<{ tasks: Task[] }>(`/api/tasks?clone_id=${cloneId}`, swrFetcher, { refreshInterval: 5000 });
-  const tasks = data?.tasks ?? [];
-  const active = tasks.filter(t => ["pending", "planning", "running", "waiting_approval"].includes(t.status));
-  return (
-    <div style={{ flex: 1, overflowY: "auto", padding: "24px 20px" }}>
-      <div style={{ maxWidth: 680, margin: "0 auto" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
-          <div>
-            <h2 style={{ fontSize: 20, fontWeight: 300, color: "rgba(255,255,255,0.85)", margin: 0 }}>Tasks</h2>
-            <p style={{ fontSize: 12, color: "rgba(255,255,255,0.32)", marginTop: 4 }}>Long-running work your clone handles end-to-end.</p>
-          </div>
-          <button onClick={() => setShowModal(true)} style={{ fontSize: 12, padding: "8px 16px", borderRadius: 10, background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.11)", color: "rgba(255,255,255,0.75)", cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", gap: 6 }}>
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1v10M1 6h10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/></svg>
-            New task
-          </button>
-        </div>
-        {active.length > 0 && (
-          <div style={{ background: "rgba(107,174,255,0.06)", border: "1px solid rgba(107,174,255,0.14)", borderRadius: 10, padding: "8px 12px", marginBottom: 14, display: "flex", alignItems: "center", gap: 7 }}>
-            <div style={{ width: 6, height: 6, borderRadius: 999, background: "#6BAEFF" }} />
-            <span style={{ fontSize: 12, color: "rgba(107,174,255,0.8)" }}>{active.length} task{active.length !== 1 ? "s" : ""} running</span>
-          </div>
-        )}
-        {isLoading ? <p style={{ fontSize: 13, color: "rgba(255,255,255,0.25)" }}>Loading…</p>
-          : tasks.length === 0 ? (
-            <div style={{ textAlign: "center", padding: "50px 20px", background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.05)", borderRadius: 14 }}>
-              <p style={{ fontSize: 13, color: "rgba(255,255,255,0.28)", marginBottom: 12 }}>No tasks yet. Give your clone something to do.</p>
-              <button onClick={() => setShowModal(true)} style={{ fontSize: 13, padding: "8px 18px", borderRadius: 10, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.09)", color: "rgba(255,255,255,0.55)", cursor: "pointer", fontFamily: "inherit" }}>Start first task</button>
-            </div>
-          ) : tasks.map(task => <TaskCard key={task.id} task={task} cloneId={cloneId} onRefresh={() => mutate()} />)
-        }
-      </div>
-      {showModal && <NewTaskModal cloneId={cloneId} onCreated={() => mutate()} onClose={() => setShowModal(false)} />}
-    </div>
-  );
-}
-
-// ─── Automations panel ────────────────────────────────────────────────────────
-
-interface Automation { id: string; name: string; description?: string; instruction: string; schedule: string; status: "active" | "paused" | "disabled"; run_count: number; last_run_at?: string; next_run_at?: string; created_at: string }
-
-function scheduleLabel(value: string): string {
-  if (value === "hourly") return "Every hour";
-  const p = value.split(":");
-  const pad = (v: string) => v.padStart(2, "0");
-  const fmtTime = (h: string, m: string) => { const hh = parseInt(h, 10); return `${hh === 0 ? 12 : hh > 12 ? hh - 12 : hh}:${pad(m)} ${hh >= 12 ? "PM" : "AM"}`; };
-  const DAY: Record<string, string> = { mon: "Mon", tue: "Tue", wed: "Wed", thu: "Thu", fri: "Fri", sat: "Sat", sun: "Sun" };
-  if (p[0] === "daily")    return `Every day at ${fmtTime(p[1], p[2])}`;
-  if (p[0] === "weekdays") return `Every weekday at ${fmtTime(p[1], p[2])}`;
-  if (p[0] === "weekly")   return `Every ${DAY[p[1]] ?? p[1]} at ${fmtTime(p[2], p[3])}`;
-  if (p[0] === "monthly") { const d = parseInt(p[1], 10); return `${d}${d === 1 ? "st" : d === 2 ? "nd" : d === 3 ? "rd" : "th"} of each month at ${fmtTime(p[2], p[3])}`; }
-  return value;
-}
-
-function AutomationRow({ auto, cloneId, onRefresh }: { auto: Automation; cloneId: string; onRefresh: () => void }) {
-  const [running, setRunning] = useState(false);
-  const [toggling, setToggling] = useState(false);
-  const [deleting, setDeleting] = useState(false);
-  const isActive = auto.status === "active";
-  async function toggleStatus() { setToggling(true); try { await fetch(`/api/automations/${auto.id}?clone_id=${cloneId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: isActive ? "paused" : "active" }) }); onRefresh(); } finally { setToggling(false); } }
-  async function runNow() { setRunning(true); try { await fetch(`/api/automations/${auto.id}?clone_id=${cloneId}`, { method: "POST" }); onRefresh(); } finally { setRunning(false); } }
-  async function deleteAuto() { if (!confirm(`Delete "${auto.name}"?`)) return; setDeleting(true); try { await fetch(`/api/automations/${auto.id}?clone_id=${cloneId}`, { method: "DELETE" }); onRefresh(); } finally { setDeleting(false); } }
-  const diff = (iso: string) => { const m = Math.floor((Date.now() - new Date(iso).getTime()) / 60000); return m < 2 ? "just now" : m < 60 ? `${m}m ago` : m < 1440 ? `${Math.floor(m/60)}h ago` : `${Math.floor(m/1440)}d ago`; };
-  return (
-    <div style={{ background: "rgba(255,255,255,0.03)", border: `1px solid ${isActive ? "rgba(255,255,255,0.07)" : "rgba(255,255,255,0.04)"}`, borderRadius: 12, padding: "12px 14px", marginBottom: 7, display: "flex", alignItems: "flex-start", gap: 12, opacity: auto.status === "paused" ? 0.65 : 1 }}>
-      <div style={{ marginTop: 4, flexShrink: 0 }}><div style={{ width: 7, height: 7, borderRadius: 999, background: isActive ? "#34D399" : "rgba(255,255,255,0.2)" }} /></div>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: "flex", alignItems: "baseline", gap: 9, flexWrap: "wrap" as const }}>
-          <span style={{ fontSize: 13, fontWeight: 500, color: "rgba(255,255,255,0.82)" }}>{auto.name}</span>
-          <span style={{ fontSize: 11, color: "rgba(255,255,255,0.28)" }}>{scheduleLabel(auto.schedule)}</span>
-        </div>
-        <p style={{ fontSize: 12, color: "rgba(255,255,255,0.38)", marginTop: 3, lineHeight: 1.5 }}>{auto.instruction.slice(0, 100)}{auto.instruction.length > 100 ? "…" : ""}</p>
-        <div style={{ display: "flex", gap: 12, marginTop: 6 }}>
-          {auto.last_run_at && <span style={{ fontSize: 11, color: "rgba(255,255,255,0.22)" }}>Last: {diff(auto.last_run_at)}</span>}
-          <span style={{ fontSize: 11, color: "rgba(255,255,255,0.18)" }}>{auto.run_count} run{auto.run_count !== 1 ? "s" : ""}</span>
-        </div>
-      </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }}>
-        <button onClick={runNow} disabled={running} title="Run now" style={{ width: 28, height: 28, borderRadius: 7, display: "flex", alignItems: "center", justifyContent: "center", background: "transparent", border: "1px solid rgba(255,255,255,0.07)", cursor: "pointer", color: "rgba(255,255,255,0.42)", opacity: running ? 0.4 : 1 }}><svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M2 2l8 4-8 4V2z" fill="currentColor"/></svg></button>
-        <button onClick={toggleStatus} disabled={toggling} title={isActive ? "Pause" : "Resume"} style={{ width: 28, height: 28, borderRadius: 7, display: "flex", alignItems: "center", justifyContent: "center", background: "transparent", border: "1px solid rgba(255,255,255,0.07)", cursor: "pointer", color: "rgba(255,255,255,0.42)", opacity: toggling ? 0.4 : 1 }}>
-          {isActive ? <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><rect x="2" y="2" width="3" height="8" rx="1" fill="currentColor"/><rect x="7" y="2" width="3" height="8" rx="1" fill="currentColor"/></svg> : <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M2 2l8 4-8 4V2z" fill="currentColor" opacity="0.5"/></svg>}
-        </button>
-        <button onClick={deleteAuto} disabled={deleting} title="Delete" style={{ width: 28, height: 28, borderRadius: 7, display: "flex", alignItems: "center", justifyContent: "center", background: "transparent", border: "1px solid rgba(248,113,113,0.1)", cursor: "pointer", color: "rgba(248,113,113,0.45)", opacity: deleting ? 0.4 : 1 }}><svg width="10" height="10" viewBox="0 0 11 11" fill="none"><path d="M2 2l7 7M9 2L2 9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/></svg></button>
-      </div>
-    </div>
-  );
-}
-
-function NewAutomationModal({ cloneId, onCreated, onClose }: { cloneId: string; onCreated: () => void; onClose: () => void }) {
-  const [name, setName] = useState("");
-  const [instruction, setInstruction] = useState("");
-  const [schedule, setSchedule] = useState("daily:09:00");
-  const [loading, setLoading] = useState(false);
-  const inp: React.CSSProperties = { width: "100%", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.09)", borderRadius: 10, padding: "9px 12px", fontSize: 13, color: "rgba(255,255,255,0.8)", fontFamily: "inherit", outline: "none", boxSizing: "border-box" };
-  async function submit() {
-    if (!name.trim() || !instruction.trim()) return;
-    setLoading(true);
-    try { await fetch("/api/automations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clone_id: cloneId, name: name.trim(), instruction: instruction.trim(), schedule }) }); onCreated(); onClose(); }
-    finally { setLoading(false); }
-  }
-  return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", backdropFilter: "blur(8px)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={onClose}>
-      <div style={{ background: "#0f0f0f", border: "1px solid rgba(255,255,255,0.09)", borderRadius: 20, padding: 28, width: 520, maxWidth: "90vw" }} onClick={e => e.stopPropagation()}>
-        <h2 style={{ fontSize: 16, fontWeight: 500, color: "rgba(255,255,255,0.85)", marginBottom: 6 }}>New automation</h2>
-        <p style={{ fontSize: 13, color: "rgba(255,255,255,0.35)", marginBottom: 20 }}>Schedule a recurring task your clone runs automatically.</p>
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          <div><label style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", display: "block", marginBottom: 5 }}>Name</label><input value={name} onChange={e => setName(e.target.value)} placeholder="Weekly digest" style={inp} /></div>
-          <div><label style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", display: "block", marginBottom: 5 }}>Instruction</label><textarea value={instruction} onChange={e => setInstruction(e.target.value)} placeholder="Summarise emails received this week and identify any action items." style={{ ...inp, minHeight: 80, resize: "vertical" as const, lineHeight: 1.6 }} /></div>
-          <div><label style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", display: "block", marginBottom: 8 }}>Schedule</label><SchedulePicker value={schedule} onChange={setSchedule} /></div>
-        </div>
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 20 }}>
-          <button onClick={onClose} style={{ fontSize: 13, padding: "8px 18px", borderRadius: 10, background: "transparent", border: "1px solid rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.45)", cursor: "pointer", fontFamily: "inherit" }}>Cancel</button>
-          <button onClick={submit} disabled={loading || !name.trim() || !instruction.trim()} style={{ fontSize: 13, padding: "8px 20px", borderRadius: 10, background: "rgba(255,255,255,0.09)", border: "1px solid rgba(255,255,255,0.14)", color: "rgba(255,255,255,0.85)", cursor: "pointer", fontFamily: "inherit", opacity: (!name.trim() || !instruction.trim() || loading) ? 0.4 : 1 }}>{loading ? "Saving…" : "Create automation"}</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function AutomationsPanel({ cloneId }: { cloneId: string }) {
-  const [showModal, setShowModal] = useState(false);
-  const { data, mutate, isLoading } = useSWR<{ automations: Automation[] }>(`/api/automations?clone_id=${cloneId}`, swrFetcher, { revalidateOnFocus: false });
-  const automations = data?.automations ?? [];
-  return (
-    <div style={{ flex: 1, overflowY: "auto", padding: "24px 20px" }}>
-      <div style={{ maxWidth: 680, margin: "0 auto" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
-          <div>
-            <h2 style={{ fontSize: 20, fontWeight: 300, color: "rgba(255,255,255,0.85)", margin: 0 }}>Automations</h2>
-            <p style={{ fontSize: 12, color: "rgba(255,255,255,0.32)", marginTop: 4 }}>Recurring tasks your clone runs on a schedule.</p>
-          </div>
-          <button onClick={() => setShowModal(true)} style={{ fontSize: 12, padding: "8px 16px", borderRadius: 10, background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.11)", color: "rgba(255,255,255,0.75)", cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", gap: 6 }}>
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1v10M1 6h10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/></svg>
-            New automation
-          </button>
-        </div>
-        {isLoading ? <p style={{ fontSize: 13, color: "rgba(255,255,255,0.25)" }}>Loading…</p>
-          : automations.length === 0 ? (
-            <div style={{ textAlign: "center", padding: "50px 20px", background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.05)", borderRadius: 14 }}>
-              <p style={{ fontSize: 13, color: "rgba(255,255,255,0.28)", marginBottom: 12 }}>No automations yet. Set your clone to work on a schedule.</p>
-              <button onClick={() => setShowModal(true)} style={{ fontSize: 13, padding: "8px 18px", borderRadius: 10, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.09)", color: "rgba(255,255,255,0.55)", cursor: "pointer", fontFamily: "inherit" }}>Create first automation</button>
-            </div>
-          ) : automations.map(auto => <AutomationRow key={auto.id} auto={auto} cloneId={cloneId} onRefresh={() => mutate()} />)
-        }
-      </div>
-      {showModal && <NewAutomationModal cloneId={cloneId} onCreated={() => mutate()} onClose={() => setShowModal(false)} />}
-    </div>
-  );
-}
-
 // ─── Clone list sidebar ────────────────────────────────────────────────────────
 
 const PALETTE_LIST = ["#7C3AED","#2563EB","#0891B2","#059669","#D97706","#DC2626","#BE185D","#0E7490"];
@@ -1159,19 +898,10 @@ function CloneList({ clones, selectedId, onSelect }: { clones: CloneOwnerInfo[];
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
-type HomeTab = "chat" | "tasks" | "automations";
-
-const TAB_ITEMS: { value: HomeTab; label: string }[] = [
-  { value: "chat",        label: "Chat" },
-  { value: "tasks",       label: "Tasks" },
-  { value: "automations", label: "Automations" },
-];
-
 export default function ChatPage() {
   const { user } = useUser();
   const { clones, isLoading } = useClones();
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<HomeTab>("chat");
 
   const userId = user?.id ?? "";
   const clone  = clones.find(c => c.clone_id === selectedId) ?? clones[0] ?? null;
@@ -1180,11 +910,6 @@ export default function ChatPage() {
   useEffect(() => {
     if (!selectedId && clones.length > 0) setSelectedId(clones[0].clone_id);
   }, [clones, selectedId]);
-
-  // Reset tab to chat when switching clones
-  useEffect(() => {
-    setActiveTab("chat");
-  }, [selectedId]);
 
   if (isLoading) {
     return <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "rgba(255,255,255,0.30)", fontSize: 13 }}>Loading…</div>;
@@ -1203,47 +928,10 @@ export default function ChatPage() {
   return (
     <div style={{ display: "flex", height: "100%", overflow: "hidden" }}>
       <CloneList clones={clones} selectedId={clone?.clone_id ?? null} onSelect={setSelectedId} />
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-        {/* Tab bar */}
-        {clone && (
-          <div style={{ flexShrink: 0, borderBottom: "1px solid rgba(255,255,255,0.07)", display: "flex", alignItems: "center", gap: 0, padding: "0 16px" }}>
-            {TAB_ITEMS.map(tab => {
-              const active = activeTab === tab.value;
-              return (
-                <button
-                  key={tab.value}
-                  onClick={() => setActiveTab(tab.value)}
-                  style={{
-                    fontSize: 13, fontWeight: active ? 500 : 400,
-                    color: active ? "rgba(255,255,255,0.85)" : "rgba(255,255,255,0.35)",
-                    background: "none", border: "none", cursor: "pointer",
-                    padding: "12px 14px", fontFamily: "inherit",
-                    borderBottom: `2px solid ${active ? "rgba(255,255,255,0.50)" : "transparent"}`,
-                    marginBottom: -1,
-                    transition: "all 200ms",
-                  }}
-                  onMouseEnter={e => { if (!active) e.currentTarget.style.color = "rgba(255,255,255,0.55)"; }}
-                  onMouseLeave={e => { if (!active) e.currentTarget.style.color = "rgba(255,255,255,0.35)"; }}
-                >
-                  {tab.label}
-                </button>
-              );
-            })}
-          </div>
-        )}
-
-        {/* Content */}
-        <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
-          {!clone ? (
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "rgba(255,255,255,0.22)", fontSize: 13 }}>Select a clone to start.</div>
-          ) : activeTab === "chat" ? (
-            <CloneChat clone={clone} userId={userId} />
-          ) : activeTab === "tasks" ? (
-            <TasksPanel cloneId={clone.clone_id} />
-          ) : (
-            <AutomationsPanel cloneId={clone.clone_id} />
-          )}
-        </div>
+      <div style={{ flex: 1, overflow: "hidden" }}>
+        {clone
+          ? <CloneChat clone={clone} userId={userId} />
+          : <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "rgba(255,255,255,0.22)", fontSize: 13 }}>Select a clone to start.</div>}
       </div>
     </div>
   );
