@@ -36,18 +36,6 @@ const CLONE: NavItem[] = [
     ),
   },
   {
-    href: "/dashboard/channels",
-    label: "Connectors",
-    icon: (
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-        <circle cx="3.5" cy="8" r="1.8" fill="currentColor" opacity="0.7"/>
-        <circle cx="12.5" cy="4" r="1.8" fill="currentColor" opacity="0.7"/>
-        <circle cx="12.5" cy="12" r="1.8" fill="currentColor" opacity="0.7"/>
-        <path d="M5.2 7.3L10.8 4.7M5.2 8.7L10.8 11.3" stroke="currentColor" strokeWidth="1.3" opacity="0.4"/>
-      </svg>
-    ),
-  },
-  {
     href: "/dashboard/train",
     label: "Feed Data",
     icon: (
