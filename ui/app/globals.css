@@ -30,10 +30,10 @@
   --bg-dark-elev-3:    rgba(255, 255, 255, 0.11);   /* glass-hi */
   --border-dark:       rgba(255, 255, 255, 0.09);
   --border-dark-hover: rgba(255, 255, 255, 0.16);
-  --fg-dark-1:         rgba(255, 255, 255, 0.93);
-  --fg-dark-2:         rgba(255, 255, 255, 0.72);
-  --fg-dark-3:         rgba(255, 255, 255, 0.50);
-  --fg-dark-4:         rgba(255, 255, 255, 0.34);
+  --fg-dark-1:         rgba(255, 255, 255, 1.00);
+  --fg-dark-2:         rgba(255, 255, 255, 0.85);
+  --fg-dark-3:         rgba(255, 255, 255, 0.65);
+  --fg-dark-4:         rgba(255, 255, 255, 0.50);
 
   /* Light surface fills (used on marketplace pages via inline styles) */
   --bg-light:           #F8F9FA;
@@ -137,7 +137,7 @@ body {
    =========================================================================== */
 input, textarea {
   background-color: transparent;
-  color: rgba(255, 255, 255, 0.85);
+  color: rgba(255, 255, 255, 0.95);
   color-scheme: dark;
 }
 
@@ -147,13 +147,13 @@ textarea::placeholder {
 }
 
 select {
-  color: rgba(255, 255, 255, 0.85);
+  color: rgba(255, 255, 255, 0.95);
   color-scheme: dark;
 }
 
 option, optgroup {
   background: #1a1a1a;
-  color: rgba(255, 255, 255, 0.85);
+  color: rgba(255, 255, 255, 0.95);
 }
 
 /* ============================================================================
@@ -268,7 +268,7 @@ option, optgroup {
 .chat-hdr__av {
   width: 36px; height: 36px; border-radius: var(--radius-md);
   display: flex; align-items: center; justify-content: center;
-  color: rgba(255,255,255,0.55); font-size: 15px; font-weight: 500;
+  color: rgba(255,255,255,0.75); font-size: 15px; font-weight: 500;
   flex-shrink: 0;
 }
 .chat-hdr__id { flex: 1; min-width: 0; }
@@ -515,8 +515,8 @@ option, optgroup {
   -webkit-backdrop-filter: blur(20px) saturate(140%);
 }
 .stat-tile__value { font-size: 26px; font-weight: 300; color: rgba(255,255,255,0.90); font-variant-numeric: tabular-nums; letter-spacing: -0.01em; line-height: 1.1; }
-.stat-tile__label { font-size: 12px; color: rgba(255,255,255,0.45); margin-top: 4px; }
-.stat-tile__sub   { font-size: 11px; color: rgba(255,255,255,0.25); margin-top: 2px; }
+.stat-tile__label { font-size: 12px; color: rgba(255,255,255,0.65); margin-top: 4px; }
+.stat-tile__sub   { font-size: 11px; color: rgba(255,255,255,0.45); margin-top: 2px; }
 
 /* Activity row */
 .act-row {
@@ -539,7 +539,7 @@ option, optgroup {
   -webkit-backdrop-filter: blur(20px) saturate(140%);
   padding: 20px;
 }
-.db-card-title { font-size: 12px; font-weight: 500; color: rgba(255,255,255,0.45); margin: 0 0 14px; }
+.db-card-title { font-size: 12px; font-weight: 500; color: rgba(255,255,255,0.65); margin: 0 0 14px; }
 
 /* Status badges */
 .db-badge {
@@ -576,8 +576,8 @@ option, optgroup {
   box-shadow: 0 2px 10px rgba(26,115,232,0.30);
 }
 .btn--primary:hover { background: #1765C9; box-shadow: 0 2px 14px rgba(26,115,232,0.40); }
-.btn--ghost { background: transparent; border-color: transparent; color: rgba(255,255,255,0.50); }
-.btn--ghost:hover { color: rgba(255,255,255,0.85); background: rgba(255,255,255,0.04); }
+.btn--ghost { background: transparent; border-color: transparent; color: rgba(255,255,255,0.68); }
+.btn--ghost:hover { color: rgba(255,255,255,0.95); background: rgba(255,255,255,0.04); }
 .btn--sm { padding: 6px 12px; font-size: 12px; border-radius: 10px; }
 .btn:disabled, .btn[disabled] { opacity: 0.40; cursor: not-allowed; }
 
@@ -589,10 +589,10 @@ option, optgroup {
   padding: 9px 0;
 }
 .src-row + .src-row { border-top: 1px solid rgba(255,255,255,0.04); }
-.src-row__name { font-size: 13px; color: rgba(255,255,255,0.60); }
+.src-row__name { font-size: 13px; color: rgba(255,255,255,0.80); }
 .src-row__status { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; }
 .src-row__status--on  { color: #34D399; }
-.src-row__status--off { color: rgba(255,255,255,0.30); }
+.src-row__status--off { color: rgba(255,255,255,0.50); }
 
 /* ============================================================================
    Dashboard — Form input
@@ -608,7 +608,7 @@ option, optgroup {
   transition: border-color var(--dur-fast) var(--ease-ios);
 }
 .input:focus { border-color: rgba(26,115,232,0.60); }
-.input::placeholder { color: rgba(255,255,255,0.25); }
+.input::placeholder { color: rgba(255,255,255,0.42); }
 
 /* Act-row confidence label */
 .act-row__conf { font-family: ui-monospace, Menlo, monospace; }
@@ -703,22 +703,22 @@ option, optgroup {
   display: flex; align-items: center; gap: 10px;
   padding: 8px 12px; border-radius: 12px;
   font-size: 13px; font-weight: 500;
-  color: rgba(255,255,255,0.55);
+  color: rgba(255,255,255,0.72);
   cursor: pointer; text-decoration: none;
   transition: all 240ms cubic-bezier(0.25, 0.46, 0.45, 0.94);
   user-select: none; border: none; background: transparent; width: 100%; text-align: left;
   font-family: inherit;
 }
 .sb__item:hover {
-  background: rgba(255,255,255,0.04);
-  color: rgba(255,255,255,0.85);
+  background: rgba(255,255,255,0.05);
+  color: rgba(255,255,255,0.95);
 }
 .sb__item--active {
   color: #fff !important;
   background: var(--active-color, #1A73E8) !important;
   box-shadow: 0 2px 8px color-mix(in srgb, var(--active-color, #1A73E8) 25%, transparent);
 }
-.sb__item-icon { color: rgba(255,255,255,0.4); flex-shrink: 0; }
+.sb__item-icon { color: rgba(255,255,255,0.55); flex-shrink: 0; }
 .sb__item--active .sb__item-icon { color: #fff; }
 .sb__footer {
   margin-top: auto; padding-top: 12px;
@@ -736,7 +736,7 @@ option, optgroup {
   flex-shrink: 0;
 }
 .sb__user-name {
-  font-size: 12px; font-weight: 500; color: rgba(255,255,255,0.7);
+  font-size: 12px; font-weight: 500; color: rgba(255,255,255,0.88);
   line-height: 1.2;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
@@ -748,11 +748,11 @@ option, optgroup {
 .sb__util {
   display: flex; align-items: center; gap: 8px;
   padding: 7px 12px; border-radius: 12px;
-  font-size: 12px; color: rgba(255,255,255,0.30);
+  font-size: 12px; color: rgba(255,255,255,0.50);
   cursor: pointer; text-decoration: none;
   transition: all 200ms; border: none; background: transparent;
   font-family: inherit; width: 100%; text-align: left;
 }
-.sb__util:hover { color: rgba(255,255,255,0.60); background: rgba(255,255,255,0.04); }
+.sb__util:hover { color: rgba(255,255,255,0.80); background: rgba(255,255,255,0.04); }
 .sb__util--ent { color: rgba(167,139,250,0.60); }
 .sb__util--ent:hover { color: rgba(167,139,250,0.90); background: rgba(167,139,250,0.07); }

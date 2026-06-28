@@ -957,7 +957,7 @@ function ConvChatView({
       animate={{ opacity: 1, x: 0 }}
       exit={{ opacity: 0, x: 20 }}
       transition={{ type: "spring", stiffness: 320, damping: 36 }}
-      style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, height: "100%" }}
+      style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, overflow: "hidden" }}
     >
       {/* Header */}
       <div style={{
@@ -1046,9 +1046,9 @@ function ConvChatView({
       </div>
 
       {/* Content */}
-      <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+      <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
         {activeTab === "chat" ? (
-          <div style={{ flex: 1, minHeight: 0 }}>
+          <div style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
             <ChatInterface
               key={conv.session_id}
               cloneId={conv.clone_id}
@@ -1203,7 +1203,7 @@ function HomeContent() {
       />
 
       {/* Main panel */}
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, position: "relative" }}>
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, position: "relative", overflow: "hidden" }}>
         <AnimatePresence mode="wait">
           {selected ? (
             <ConvChatView
