@@ -21,17 +21,21 @@ logger = logging.getLogger(__name__)
 
 # How many synonym variants to generate per query.
 # More = better recall, slightly more latency.
-_EXPANSION_COUNT = 3
+_EXPANSION_COUNT = 5
 
 
 async def _normalize_and_expand(query: str) -> tuple[str, list[str]]:
     """
-    Two-in-one Haiku call:
-    1. Normalize — convert informal/broken/non-native English to standard English
-       so the embedding vector lands in the right neighbourhood of the vector space.
-    2. Expand — generate _EXPANSION_COUNT rephrasing variants for wider recall net.
+    Single Haiku call that does three things:
+    1. Normalize — convert informal/broken/non-native English to standard English.
+    2. Expand — generate _EXPANSION_COUNT rephrasing variants for wider recall.
+    3. HyDE — generate a short hypothetical answer as if it came from a document.
+       Embedding the hypothetical *answer* instead of the *question* puts the search
+       vector in the same embedding space as stored document chunks, which dramatically
+       improves retrieval recall when the stored content uses different vocabulary than
+       the user's question (the most common failure mode with uploaded files).
 
-    Returns (normalized_query, variants).
+    Returns (normalized_query, variants_including_hyde).
     Falls back to (original_query, []) on any failure — always safe to call.
     """
     from doppel.brain.context import get_anthropic_client
@@ -39,16 +43,22 @@ async def _normalize_and_expand(query: str) -> tuple[str, list[str]]:
         client = get_anthropic_client()
         msg = await client.messages.create(
             model=settings.classification_model,
-            max_tokens=220,
+            max_tokens=500,
             system=(
-                "You are a language normalizer and query expander. "
+                "You are a language normalizer, query expander, and document retrieval assistant. "
                 "The input may be informal, broken, abbreviated, or non-native English. "
-                "Return a JSON object with exactly two fields:\n"
-                '  "normalized": a clean standard-English version of the same request/question '
-                "(same meaning, different phrasing only if needed). "
-                "If already well-formed, return it verbatim.\n"
+                "Return a JSON object with exactly three fields:\n"
+                '  "normalized": a clean standard-English version of the input question/request '
+                "(same meaning, different phrasing only if needed). If already well-formed, return verbatim.\n"
                 f'  "variants": a JSON array of exactly {_EXPANSION_COUNT} short alternative phrasings '
                 "of the normalized version using synonyms and related concepts (max 12 words each).\n"
+                '  "hypothetical_answer": a 1-3 sentence passage written as if it were an excerpt from '
+                "a document, report, or notes that directly answers the question. "
+                "Write it in declarative third-person document style (not conversational). "
+                "This passage will be used to find matching documents via semantic similarity — "
+                "write it in the vocabulary and style that would appear in the actual source material. "
+                "Example: for 'what was our revenue last year', write something like "
+                "'The annual revenue for the year totalled X. Revenue grew by Y% compared to the prior period.'\n"
                 "Return ONLY the JSON object — no explanation, no markdown."
             ),
             messages=[{"role": "user", "content": query}],
@@ -57,6 +67,12 @@ async def _normalize_and_expand(query: str) -> tuple[str, list[str]]:
         data = json.loads(raw)
         normalized = str(data.get("normalized") or query).strip() or query
         variants = [str(v) for v in (data.get("variants") or [])[:_EXPANSION_COUNT] if v]
+        # Append the hypothetical answer as an additional search embedding.
+        # It gets embedded and searched alongside the variants — any chunk that
+        # matches the hypothetical answer will almost certainly be the right one.
+        hyde = str(data.get("hypothetical_answer") or "").strip()
+        if hyde:
+            variants.append(hyde)
         return normalized, variants
     except Exception as exc:
         logger.debug("Query normalization/expansion failed (non-fatal): %s", exc)
@@ -141,7 +157,7 @@ class MemorySystem:
         async def _episodic_for(emb: list[float]) -> list[MemoryChunk]:
             async with AsyncSessionLocal() as s:
                 return await episodic.retrieve(
-                    s, self._clone_id, query, limit=20,
+                    s, self._clone_id, query, limit=25,
                     authored_by_user_only=False, query_embedding=emb,
                 )
 
@@ -184,7 +200,7 @@ class MemorySystem:
         contact_memory      = results[2 * n + 1]
 
         # ── 4. Merge + dedup ──────────────────────────────────────────────────
-        episodic_chunks = _merge_chunks(all_episodic_lists, limit=20)
+        episodic_chunks = _merge_chunks(all_episodic_lists, limit=25)
         semantic_facts  = _merge_facts(all_semantic_lists,  limit=8)
 
         return MemoryContext(

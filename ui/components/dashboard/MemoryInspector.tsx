@@ -12,9 +12,14 @@ type Tab = "pinned" | "all" | "semantic" | "files";
 const SOURCE_LABEL: Record<string, string> = {
   gmail: "Gmail",
   upload: "Upload",
+  voice: "Voice",
+  interview: "Interview",
   seed_qa: "Q&A",
   chat: "Chat",
   slack: "Slack",
+  notion: "Notion",
+  gdrive: "Drive",
+  github: "GitHub",
 };
 
 // ---------------------------------------------------------------------------
@@ -38,6 +43,7 @@ function MemoryRow({
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState(chunk.content);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [expanded, setExpanded] = useState(false);
 
   async function toggle(field: "is_pinned" | "is_excluded", value: boolean) {
     setSaving(true);
@@ -162,13 +168,21 @@ function MemoryRow({
 
           {/* Content */}
           <div style={{ flex: 1, minWidth: 0 }}>
-            <p style={{
-              fontSize: 13, color: "rgba(255,255,255,0.70)", lineHeight: 1.55,
-              display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical",
-              overflow: "hidden", margin: 0,
-            }}>
+            <p
+              onClick={() => setExpanded(e => !e)}
+              style={{
+                fontSize: 13, color: "rgba(255,255,255,0.70)", lineHeight: 1.55,
+                ...(expanded ? {} : { display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }),
+                margin: 0, cursor: "pointer",
+              }}
+            >
               {chunk.content}
             </p>
+            {!expanded && chunk.content.length > 180 && (
+              <button onClick={() => setExpanded(true)} style={{ fontSize: 10, color: "rgba(255,255,255,0.25)", background: "none", border: "none", cursor: "pointer", padding: "2px 0 0", marginTop: 1 }}>
+                expand
+              </button>
+            )}
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6 }}>
               <span style={{ fontSize: 10, color: "rgba(255,255,255,0.25)", background: "rgba(255,255,255,0.04)", borderRadius: 4, padding: "2px 6px" }}>
                 {SOURCE_LABEL[chunk.source] ?? chunk.source}
@@ -541,11 +555,15 @@ function FilesList({ cloneId }: { cloneId: string }) {
 // ---------------------------------------------------------------------------
 // Main export
 // ---------------------------------------------------------------------------
+const SOURCES = ["gmail", "upload", "voice", "interview", "chat", "notion", "gdrive", "github"] as const;
+type SourceFilter = typeof SOURCES[number] | "";
+
 export function MemoryInspector({ cloneId }: { cloneId: string }) {
   const [tab, setTab] = useState<Tab>("pinned");
   const [page, setPage] = useState(0);
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>("");
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const LIMIT = 20;
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -561,6 +579,7 @@ export function MemoryInspector({ cloneId }: { cloneId: string }) {
   if (tab === "pinned") params.set("pinned_only", "true");
   if (tab === "all") params.set("include_excluded", "true");
   if (search && tab !== "semantic") params.set("search", search);
+  if (sourceFilter && tab !== "semantic" && tab !== "files") params.set("source", sourceFilter);
 
   const url = (tab === "semantic" || tab === "files") ? null : `/api/brain/memories?${params}`;
 
@@ -659,22 +678,35 @@ export function MemoryInspector({ cloneId }: { cloneId: string }) {
           </div>
         )}
 
-        {/* Search — only for episodic tabs */}
+        {/* Search + source filter — only for episodic tabs */}
         {tab !== "semantic" && tab !== "files" && (
-          <div style={{ position: "relative" }}>
-            <svg style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "rgba(255,255,255,0.25)", pointerEvents: "none" }}
-              width="12" height="12" viewBox="0 0 12 12" fill="none">
-              <circle cx="5" cy="5" r="3.5" stroke="currentColor" strokeWidth="1.3"/>
-              <path d="M8 8l2.5 2.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
-            </svg>
-            <input type="text" value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
-              placeholder="Search memories…" className="input" style={{ paddingLeft: 32, fontSize: 12 }} />
-            {searchInput && (
-              <button onClick={() => setSearchInput("")}
-                style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", color: "rgba(255,255,255,0.25)", background: "none", border: "none", cursor: "pointer", fontSize: 16, lineHeight: 1, padding: 0 }}>
-                &times;
-              </button>
-            )}
+          <div style={{ display: "flex", gap: 8 }}>
+            <div style={{ position: "relative", flex: 1 }}>
+              <svg style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "rgba(255,255,255,0.25)", pointerEvents: "none" }}
+                width="12" height="12" viewBox="0 0 12 12" fill="none">
+                <circle cx="5" cy="5" r="3.5" stroke="currentColor" strokeWidth="1.3"/>
+                <path d="M8 8l2.5 2.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+              </svg>
+              <input type="text" value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
+                placeholder="Search memories…" className="input" style={{ paddingLeft: 32, fontSize: 12 }} />
+              {searchInput && (
+                <button onClick={() => setSearchInput("")}
+                  style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", color: "rgba(255,255,255,0.25)", background: "none", border: "none", cursor: "pointer", fontSize: 16, lineHeight: 1, padding: 0 }}>
+                  &times;
+                </button>
+              )}
+            </div>
+            <select
+              value={sourceFilter}
+              onChange={(e) => { setSourceFilter(e.target.value as SourceFilter); setPage(0); setSelected(new Set()); }}
+              className="input"
+              style={{ fontSize: 12, width: "auto", minWidth: 110, paddingRight: 28, cursor: "pointer" }}
+            >
+              <option value="">All sources</option>
+              {SOURCES.map(s => (
+                <option key={s} value={s}>{SOURCE_LABEL[s] ?? s.charAt(0).toUpperCase() + s.slice(1)}</option>
+              ))}
+            </select>
           </div>
         )}
       </div>

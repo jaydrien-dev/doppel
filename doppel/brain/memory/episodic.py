@@ -95,7 +95,8 @@ async def retrieve(
     )
     pinned_rows = [dict(r) for r in pinned_result.mappings().all()]
 
-    # Similarity search — cast a wide net; query expansion + LLM judgment filters relevance downstream
+    # Similarity search — with 5-variant query expansion + chunk overlap, we can afford
+    # a tighter threshold (0.40) that gives the LLM cleaner, less noisy context.
     similar_rows = await similarity_search(
         session,
         table="episodic_memory",
@@ -103,7 +104,7 @@ async def retrieve(
         query_embedding=query_embedding,
         limit=limit,
         extra_where=extra_where + " AND is_pinned = false",
-        min_similarity=0.30,
+        min_similarity=0.40,
     )
 
     # Merge: pinned first, then similar (dedup by id)

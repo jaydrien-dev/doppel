@@ -22,6 +22,7 @@ from doppel.brain.memory.episodic import store_chunk
 from doppel.config import settings
 from doppel.ingestion.chunker import chunk_text
 from doppel.ingestion.connectors.base import BaseConnector, RawItem
+from doppel.ingestion.enricher import enrich_chunks_for_embedding
 from doppel.ingestion.pii_redactor import redact_pii
 from doppel.ingestion.preprocessor import estimate_formality, preprocess_email
 from doppel.ingestion.status import (
@@ -119,15 +120,28 @@ class IngestionPipeline:
         if not all_chunks:
             return 0, len(items)
 
-        # Step 2: batch embed all chunks in one OpenAI call
-        texts = [c[0] for c in all_chunks]
+        # Step 2: enrich document chunks with question-augmented embedding text.
+        # Document chunks (uploads, gdrive, notion) get questions + key terms prepended
+        # so their embeddings capture query-space vocabulary — not just document vocabulary.
+        # This bridges the gap between "Q1 revenue was £4.2M" and "what was revenue last quarter".
+        # Email chunks are skipped (they already have subject + context signal).
+        raw_texts = [c[0] for c in all_chunks]
+        chunk_sources = [c[1].source for c in all_chunks]
+        chunk_ctx_types = [c[1].context_type for c in all_chunks]
         try:
-            embeddings = await embed_batch(texts)
+            embed_texts = await enrich_chunks_for_embedding(raw_texts, chunk_sources, chunk_ctx_types)
+        except Exception as e:
+            print(f"[pipeline] Enrichment failed, falling back to raw text: {e}")
+            embed_texts = raw_texts
+
+        # Step 3: batch embed enriched texts in one OpenAI call
+        try:
+            embeddings = await embed_batch(embed_texts)
         except Exception as e:
             print(f"[pipeline] embed_batch failed: {e}")
             return 0, len(items)
 
-        # Step 3: store each chunk with its embedding
+        # Step 4: store each chunk with its embedding (original text, enriched embedding)
         processed = 0
         failed = 0
         for (chunk_text_val, item, formality), embedding in zip(all_chunks, embeddings):

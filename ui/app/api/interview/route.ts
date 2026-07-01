@@ -7,7 +7,7 @@ export async function POST(req: NextRequest) {
   if (!userId) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
   const body = await req.json();
-  const res = await backendFetch("/ingestion/text", {
+  const res = await backendFetch("/interview/followup", {
     method: "POST",
     headers: { "Content-Type": "application/json", "X-User-Id": userId },
     body: JSON.stringify(body),

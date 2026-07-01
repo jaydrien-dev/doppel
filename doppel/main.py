@@ -5820,6 +5820,103 @@ async def ingest_text(
 
 
 # ---------------------------------------------------------------------------
+# Interview — knowledge extraction (no brain, raw LLM)
+# ---------------------------------------------------------------------------
+
+class InterviewMessage(BaseModel):
+    role: str   # "clone" | "user"
+    text: str
+
+class InterviewRequest(BaseModel):
+    topic: str
+    messages: list[InterviewMessage]
+    action: str = "followup"   # "followup" | "format"
+
+
+@app.post("/interview/followup")
+async def interview_followup(body: InterviewRequest) -> dict:
+    """
+    Drives the Train by Talking interview.
+    action="followup": given the conversation so far, return the next question.
+    action="format":   given the full conversation, return a list of clean knowledge chunks.
+    """
+    from doppel.brain.context import get_anthropic_client
+    import json as _json
+
+    client = get_anthropic_client()
+
+    if body.action == "format":
+        convo_text = "\n\n".join(
+            f"{'Question' if m.role == 'clone' else 'Answer'}: {m.text}"
+            for m in body.messages
+        )
+        system = (
+            "You are a knowledge extraction assistant. "
+            "Given a Q&A interview conversation, extract all factual knowledge, "
+            "opinions, frameworks, processes, and insights the person shared.\n\n"
+            "Format your output as a JSON array of strings. Each string is a "
+            "self-contained, well-written knowledge chunk (2-5 sentences).\n"
+            "Rules:\n"
+            "- Each chunk must be independently meaningful without the surrounding question\n"
+            "- Write in first person as the interviewee (preserve their voice and personality)\n"
+            "- Fix grammar, spelling, and awkward phrasing — this was spoken, so clean it up naturally\n"
+            "- Remove filler words (um, uh, like, you know), false starts, and repetition\n"
+            "- Combine related points from multiple answers if they belong together\n"
+            "- Omit meta-commentary (e.g. 'that's a great question', 'I guess', 'sort of')\n"
+            "- Aim for 3-8 chunks\n\n"
+            'Respond with ONLY a valid JSON array: ["chunk1", "chunk2", ...]'
+        )
+        resp = await client.messages.create(
+            model=settings.classification_model,
+            max_tokens=2000,
+            system=system,
+            messages=[{
+                "role": "user",
+                "content": f"Interview topic: {body.topic}\n\nConversation:\n{convo_text}",
+            }],
+        )
+        raw = resp.content[0].text.strip()
+        try:
+            chunks = _json.loads(raw)
+            if not isinstance(chunks, list):
+                chunks = [raw]
+        except Exception:
+            chunks = [raw]
+        return {"chunks": chunks}
+
+    else:
+        system = (
+            f'You are a curious student who knows absolutely NOTHING about "{body.topic}" — or anything related to it.\n'
+            "You have no prior knowledge, no context, no background on this subject whatsoever. "
+            "You are a blank slate. Everything you know comes ONLY from what this person has told you in this conversation.\n\n"
+            "CRITICAL RULES:\n"
+            "- You MUST NOT reference, assume, or imply anything that the person has not explicitly said\n"
+            "- You MUST NOT use any knowledge from your training data about this topic or related fields\n"
+            "- You MUST NOT ask about concepts, terms, or people you 'know about' — only about things they have mentioned\n"
+            "- If they have not told you something, you do not know it. Period.\n"
+            "- Your ONLY source of information is the words the person has already said in this conversation\n\n"
+            "Your job is to ask ONE follow-up question based SOLELY on what they just said:\n"
+            "- Pick the most interesting or unclear thing from their last response and ask about that specifically\n"
+            "- Quote or closely reference their actual words to show you're listening\n"
+            "- Push them to go deeper: 'what do you mean by X?', 'how does that work?', 'can you give me an example of Y you mentioned?'\n"
+            "- Never repeat a question already asked\n"
+            "- Keep it to 1-2 sentences\n\n"
+            "Respond with ONLY the question text, nothing else."
+        )
+        anthropic_messages = [
+            {"role": "assistant" if m.role == "clone" else "user", "content": m.text}
+            for m in body.messages
+        ]
+        resp = await client.messages.create(
+            model=settings.classification_model,
+            max_tokens=200,
+            system=system,
+            messages=anthropic_messages,
+        )
+        return {"question": resp.content[0].text.strip()}
+
+
+# ---------------------------------------------------------------------------
 # Ingestion — file upload (PDF, DOCX, XLSX, PPTX, TXT, CSV, …)
 # ---------------------------------------------------------------------------
 
@@ -6273,6 +6370,7 @@ async def list_memories(
     pinned_only: bool = Query(default=False),
     include_excluded: bool = Query(default=False),
     search: str | None = Query(default=None),
+    source: str | None = Query(default=None),
     limit: int = Query(default=50, le=200),
     offset: int = Query(default=0, ge=0),
     session: AsyncSession = Depends(get_session),
@@ -6288,6 +6386,9 @@ async def list_memories(
     if search:
         where_parts.append("content ILIKE :search")
         params["search"] = f"%{search}%"
+    if source:
+        where_parts.append("source = :source")
+        params["source"] = source
     where = " AND ".join(where_parts)
 
     rows = await session.execute(

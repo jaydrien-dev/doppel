@@ -68,7 +68,7 @@ async def retrieve(
         query_embedding=query_embedding,
         limit=limit,
         extra_where=extra_where,
-        min_similarity=0.30,
+        min_similarity=0.40,
     )
     return [_row_to_fact(r) for r in rows]
 

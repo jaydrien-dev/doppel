@@ -7,17 +7,22 @@ Rules:
 - Hard-cap at max_chars (never exceed)
 - Drop chunks shorter than MIN_CHUNK_CHARS (noise)
 - Preserve semantic continuity — no mid-sentence cuts
+- Add OVERLAP_CHARS of trailing context from the previous chunk so concepts
+  that span a chunk boundary are still retrievable from either side.
 """
 from __future__ import annotations
 
 import re
 
 MIN_CHUNK_CHARS = 60
+# Characters from the end of the previous chunk prepended to the next.
+# Keeps cross-boundary concepts intact without re-embedding the full prior chunk.
+OVERLAP_CHARS = 200
 
 
 def chunk_text(text: str, max_chars: int = 1800) -> list[str]:
     """
-    Split `text` into chunks, each ≤ max_chars.
+    Split `text` into chunks, each ≤ max_chars (before overlap prefix).
     Returns only non-trivial chunks (>= MIN_CHUNK_CHARS).
     """
     text = text.strip()
@@ -70,7 +75,34 @@ def chunk_text(text: str, max_chars: int = 1800) -> list[str]:
         if len(merged) >= MIN_CHUNK_CHARS:
             chunks.append(merged)
 
-    return chunks
+    return _add_overlap(chunks, OVERLAP_CHARS)
+
+
+def _add_overlap(chunks: list[str], overlap_chars: int) -> list[str]:
+    """
+    Prepend the tail of the previous chunk to each subsequent chunk.
+    This ensures that concepts spanning a chunk boundary are embedded
+    in both chunks, dramatically improving retrieval recall for cross-boundary topics.
+
+    The overlap tail is trimmed to the nearest word boundary so the prefix
+    never starts mid-word.
+    """
+    if overlap_chars <= 0 or len(chunks) <= 1:
+        return chunks
+
+    result = [chunks[0]]
+    for i in range(1, len(chunks)):
+        tail = chunks[i - 1][-overlap_chars:]
+        # Trim to word boundary — don't start mid-word
+        space_idx = tail.find(" ")
+        if space_idx > 0:
+            tail = tail[space_idx + 1:]
+        tail = tail.strip()
+        if tail:
+            result.append(tail + "\n\n" + chunks[i])
+        else:
+            result.append(chunks[i])
+    return result
 
 
 def _split_sentences(text: str, max_chars: int) -> list[str]:
