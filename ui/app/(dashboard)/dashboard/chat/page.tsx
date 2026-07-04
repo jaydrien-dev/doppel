@@ -117,10 +117,12 @@ function useWebChat({
   responseMode: ResponseMode;
   onToolEvent?: (e: AgentEvent) => void;
 }) {
-  const [messages,   setMessages]   = useState<ChatMessage[]>([]);
-  const [isLoading,  setIsLoading]  = useState(false);
-  const [isThinking, setIsThinking] = useState(false);
-  const [error,      setError]      = useState<string | null>(null);
+  const [messages,       setMessages]       = useState<ChatMessage[]>([]);
+  const [isLoading,      setIsLoading]      = useState(false);
+  const [isThinking,     setIsThinking]     = useState(false);
+  const [error,          setError]          = useState<string | null>(null);
+  // Separate map: messageId → WorkflowDraft, so React state merging can't lose drafts
+  const [workflowDrafts, setWorkflowDrafts] = useState<Record<string, WorkflowDraft>>({});
   const scrollRef = useRef<HTMLDivElement>(null);
   const sessionRef = useRef(sessionId);
 
@@ -168,7 +170,7 @@ function useWebChat({
           message:       content.trim(),
           context_type:  "chat",
           response_mode: responseMode,
-          owner_mode:    false,
+          owner_mode:    true,
           metadata:      { memory_enabled: true },
         }),
       });
@@ -209,10 +211,23 @@ function useWebChat({
             const status = evt.status as string;
             const label = status === "ok" ? `✓ ${evt.tool as string}` : `✗ ${evt.tool as string}`;
             onToolEvent?.({ type: "status", message: label });
+          } else if (evt.event === "workflow_draft") {
+            const draft = evt.draft as WorkflowDraft | undefined;
+            console.log("[doppel] workflow_draft event received", draft);
+            if (draft?.name) {
+              setWorkflowDrafts(prev => ({ ...prev, [cloneMsgId]: draft }));
+            }
           } else if (evt.event === "done") {
             setIsThinking(false);
+            console.log("[doppel] done event", evt);
             const final = (evt.corrected_response as string | null) ?? accText;
             setMessages(prev => prev.map(m => m.id === cloneMsgId ? { ...m, content: final, isStreaming: false } : m));
+            // fallback: done event may still carry workflow_draft from older backend
+            const wfDraft = evt.workflow_draft as WorkflowDraft | undefined;
+            if (wfDraft?.name) {
+              console.log("[doppel] workflow_draft from done event fallback", wfDraft);
+              setWorkflowDrafts(prev => ({ ...prev, [cloneMsgId]: wfDraft }));
+            }
           } else if (evt.event === "error") {
             throw new Error(evt.message as string);
           }
@@ -232,14 +247,83 @@ function useWebChat({
     setMessages([]); setError(null);
   }
 
-  return { messages, setMessages, isLoading, isThinking, error, sendMessage, clearMessages, scrollRef };
+  return { messages, setMessages, workflowDrafts, isLoading, isThinking, error, sendMessage, clearMessages, scrollRef };
+}
+
+// ─── WorkflowDraftCard ────────────────────────────────────────────────────────
+
+interface WorkflowDraft {
+  name: string;
+  description?: string;
+  trigger?: { type: string; [key: string]: unknown };
+  conditions?: unknown[];
+  actions?: unknown[];
+}
+
+function WorkflowDraftCard({ draft, cloneId, onActivated }: {
+  draft: WorkflowDraft;
+  cloneId: string;
+  onActivated: (name: string) => void;
+}) {
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+
+  async function activate() {
+    setLoading(true); setErr(null);
+    try {
+      const res = await fetch("/api/skills/deploy", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clone_id: cloneId, workflow_draft: draft }),
+      });
+      if (!res.ok) { const e = await res.json().catch(() => ({})); setErr(e.detail ?? "Failed to deploy."); return; }
+      setDone(true);
+      onActivated(draft.name);
+    } catch { setErr("Network error."); }
+    finally { setLoading(false); }
+  }
+
+  const triggerLabel = draft.trigger?.type === "schedule" ? "Schedule"
+    : draft.trigger?.type === "poll_api" ? "Poll API"
+    : draft.trigger?.type === "poll_webpage" ? "Monitor page"
+    : draft.trigger?.type === "webhook" ? "Webhook"
+    : draft.trigger?.type ?? "Trigger";
+
+  return (
+    <div style={{ marginTop: 10, padding: "12px 14px", borderRadius: 12, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.09)" }}>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10, marginBottom: 6 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <p style={{ margin: "0 0 2px", fontSize: 13, fontWeight: 500, color: "rgba(255,255,255,0.85)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{draft.name}</p>
+          {draft.description && <p style={{ margin: 0, fontSize: 11, color: "rgba(255,255,255,0.38)", lineHeight: 1.5 }}>{draft.description}</p>}
+        </div>
+        <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 99, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.09)", color: "rgba(255,255,255,0.35)", whiteSpace: "nowrap" as const, flexShrink: 0 }}>workflow draft</span>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
+        <span style={{ fontSize: 10, padding: "2px 7px", borderRadius: 6, background: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.30)", border: "1px solid rgba(255,255,255,0.07)" }}>{triggerLabel}</span>
+        {(draft.actions?.length ?? 0) > 0 && <span style={{ fontSize: 10, color: "rgba(255,255,255,0.22)" }}>{draft.actions!.length} action{draft.actions!.length !== 1 ? "s" : ""}</span>}
+      </div>
+      {err && <p style={{ fontSize: 11, color: "rgba(248,113,113,0.70)", margin: "0 0 8px" }}>{err}</p>}
+      {done
+        ? <span style={{ fontSize: 12, color: "rgba(52,211,153,0.75)", display: "inline-flex", alignItems: "center", gap: 6 }}><svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 8l4 4 6-7" stroke="rgba(52,211,153,0.85)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>Workflow activated</span>
+        : <button onClick={activate} disabled={loading} style={{ fontSize: 12, fontWeight: 500, padding: "6px 16px", borderRadius: 9, background: "rgba(255,255,255,0.09)", border: "1px solid rgba(255,255,255,0.14)", color: "rgba(255,255,255,0.80)", cursor: loading ? "not-allowed" : "pointer", opacity: loading ? 0.5 : 1, fontFamily: "inherit" }}>
+          {loading ? "Activating…" : "Activate workflow"}
+        </button>}
+    </div>
+  );
 }
 
 // ─── MessageBubble ────────────────────────────────────────────────────────────
 
-function MessageBubble({ msg, cloneColor, cloneInitial, avatarUrl }: {
+function MessageBubble({ msg, cloneColor, cloneInitial, avatarUrl, cloneId, workflowDraft, onWorkflowActivated }: {
   msg: ChatMessage; cloneColor: string; cloneInitial: string; avatarUrl?: string | null;
+  cloneId: string;
+  workflowDraft?: WorkflowDraft | null;
+  onWorkflowActivated?: (name: string) => void;
 }) {
+  // Strip any legacy inline <!--wf:...--> comments from content
+  const displayContent = msg.content.replace(/<!--wf:[\s\S]*?-->/g, "").trim();
+
   if (msg.role === "user") {
     return (
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 12, maxWidth: "100%", animation: "msg-in 380ms cubic-bezier(0.34,1.56,0.64,1) both" }}>
@@ -263,9 +347,14 @@ function MessageBubble({ msg, cloneColor, cloneInitial, avatarUrl }: {
               {[0,1,2].map(i => <div key={i} style={{ width: 6, height: 6, borderRadius: "50%", background: "rgba(255,255,255,0.40)", animation: `typing-dot 1.2s ease-in-out ${i*0.2}s infinite` }} />)}
             </div>
           ) : (
-            <MarkdownRenderer content={msg.content} />
+            <MarkdownRenderer content={displayContent} />
           )}
         </div>
+        {workflowDraft && !msg.isStreaming && (
+          <div style={{ maxWidth: "82%" }}>
+            <WorkflowDraftCard draft={workflowDraft} cloneId={cloneId} onActivated={name => onWorkflowActivated?.(name)} />
+          </div>
+        )}
       </div>
     </div>
   );
@@ -338,6 +427,176 @@ function AutomateModal({ cloneId, initialInstruction, onClose, onCreated }: {
   );
 }
 
+// ─── ActivityPanel ────────────────────────────────────────────────────────────
+
+type ActivityKind = "task" | "automation" | "workflow";
+
+interface ActivityItem {
+  id: string;
+  kind: ActivityKind;
+  name: string;
+  status: string;
+  description?: string;
+  created_at: string;
+  raw: Record<string, unknown>;
+}
+
+const KIND_COLORS: Record<ActivityKind, string> = {
+  task:       "rgba(255,255,255,0.28)",
+  automation: "rgba(255,255,255,0.28)",
+  workflow:   "rgba(255,255,255,0.28)",
+};
+const KIND_LABELS: Record<ActivityKind, string> = {
+  task:       "task",
+  automation: "automation",
+  workflow:   "workflow",
+};
+const STATUS_COLOR: Record<string, string> = {
+  completed:  "rgba(52,211,153,0.65)",
+  done:       "rgba(52,211,153,0.65)",
+  active:     "rgba(52,211,153,0.65)",
+  running:    "rgba(52,211,153,0.65)",
+  pending:    "rgba(255,255,255,0.35)",
+  scheduled:  "rgba(255,255,255,0.35)",
+  failed:     "rgba(248,113,113,0.65)",
+  error:      "rgba(248,113,113,0.65)",
+  paused:     "rgba(255,255,255,0.28)",
+};
+
+function ActivityPanel({ cloneId }: { cloneId: string }) {
+  const [items, setItems]       = useState<ActivityItem[]>([]);
+  const [loading, setLoading]   = useState(true);
+  const [selected, setSelected] = useState<ActivityItem | null>(null);
+  const [err, setErr]           = useState<string | null>(null);
+  const [filter, setFilter]     = useState<ActivityKind | "all">("all");
+
+  async function load() {
+    setLoading(true); setErr(null);
+    try {
+      const toArr = (v: unknown, key: string): Record<string, unknown>[] => {
+        if (Array.isArray(v)) return v as Record<string, unknown>[];
+        if (v && typeof v === "object") {
+          const obj = v as Record<string, unknown>;
+          if (Array.isArray(obj[key])) return obj[key] as Record<string, unknown>[];
+          if (Array.isArray(obj.items)) return obj.items as Record<string, unknown>[];
+          if (Array.isArray(obj.results)) return obj.results as Record<string, unknown>[];
+        }
+        return [];
+      };
+      const [tasksR, autoR, wfR] = await Promise.allSettled([
+        fetch(`/api/tasks?clone_id=${cloneId}`).then(r => r.ok ? r.json() : []),
+        fetch(`/api/automations?clone_id=${cloneId}`).then(r => r.ok ? r.json() : []),
+        fetch(`/api/workflows?clone_id=${cloneId}`).then(r => r.ok ? r.json() : []),
+      ]);
+      const all: ActivityItem[] = [];
+      if (tasksR.status === "fulfilled")
+        toArr(tasksR.value, "tasks").forEach((t) => all.push({ id: t.id as string, kind: "task", name: (t.title ?? t.name) as string, status: (t.status as string) ?? "pending", description: (t.instruction ?? t.description) as string | undefined, created_at: (t.created_at as string) ?? new Date().toISOString(), raw: t }));
+      if (autoR.status === "fulfilled")
+        toArr(autoR.value, "automations").forEach((a) => all.push({ id: a.id as string, kind: "automation", name: a.name as string, status: (a.status as string) ?? "active", description: (a.instruction ?? a.schedule) as string | undefined, created_at: (a.created_at as string) ?? new Date().toISOString(), raw: a }));
+      if (wfR.status === "fulfilled")
+        toArr(wfR.value, "workflows").forEach((w) => all.push({ id: w.id as string, kind: "workflow", name: w.name as string, status: (w.status as string) ?? "active", description: w.description as string | undefined, created_at: (w.created_at as string) ?? new Date().toISOString(), raw: w }));
+      all.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      setItems(all);
+    } catch { setErr("Failed to load activity."); }
+    finally { setLoading(false); }
+  }
+
+  useEffect(() => { load(); }, [cloneId]);
+
+  const visible = filter === "all" ? items : items.filter(i => i.kind === filter);
+
+  if (selected) {
+    const s = selected;
+    const statusColor = STATUS_COLOR[s.status] ?? "rgba(255,255,255,0.30)";
+    return (
+      <div style={{ flex: 1, overflowY: "auto", padding: "20px 20px 40px" }} className="chat-scroll">
+        <div style={{ maxWidth: 680, margin: "0 auto" }}>
+          <button onClick={() => setSelected(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "rgba(255,255,255,0.35)", fontSize: 12, fontFamily: "inherit", padding: "0 0 14px", display: "flex", alignItems: "center", gap: 5 }}
+            onMouseEnter={e => { e.currentTarget.style.color = "rgba(255,255,255,0.65)"; }}
+            onMouseLeave={e => { e.currentTarget.style.color = "rgba(255,255,255,0.35)"; }}>
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M10 3L5 8l5 5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            Back to activity
+          </button>
+          <div style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.09)", borderRadius: 16, padding: "20px 22px" }}>
+            <div style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 14 }}>
+              <div style={{ flex: 1 }}>
+                <p style={{ margin: "0 0 4px", fontSize: 16, fontWeight: 500, color: "rgba(255,255,255,0.88)" }}>{s.name}</p>
+                <div style={{ display: "flex", gap: 7, alignItems: "center" }}>
+                  <span style={{ fontSize: 10, padding: "1px 7px", borderRadius: 6, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)", color: KIND_COLORS[s.kind] }}>{KIND_LABELS[s.kind]}</span>
+                  <span style={{ fontSize: 11, color: statusColor }}>{s.status}</span>
+                </div>
+              </div>
+            </div>
+            {s.description && <p style={{ fontSize: 13, color: "rgba(255,255,255,0.50)", lineHeight: 1.6, margin: "0 0 16px" }}>{s.description}</p>}
+            <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", paddingTop: 14 }}>
+              <p style={{ fontSize: 10, letterSpacing: "0.10em", textTransform: "uppercase" as const, color: "rgba(255,255,255,0.22)", margin: "0 0 10px" }}>Details</p>
+              {Object.entries(s.raw).filter(([k]) => !["id","clone_id","created_at","updated_at","name","description","status","instruction"].includes(k)).map(([k, v]) => (
+                <div key={k} style={{ display: "flex", gap: 10, marginBottom: 6 }}>
+                  <span style={{ fontSize: 11, color: "rgba(255,255,255,0.28)", minWidth: 110 }}>{k.replace(/_/g, " ")}</span>
+                  <span style={{ fontSize: 11, color: "rgba(255,255,255,0.55)", wordBreak: "break-all" as const }}>{typeof v === "object" ? JSON.stringify(v) : String(v ?? "—")}</span>
+                </div>
+              ))}
+              <div style={{ display: "flex", gap: 10, marginBottom: 6 }}>
+                <span style={{ fontSize: 11, color: "rgba(255,255,255,0.28)", minWidth: 110 }}>created</span>
+                <span style={{ fontSize: 11, color: "rgba(255,255,255,0.55)" }}>{new Date(s.created_at).toLocaleString()}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ flex: 1, overflowY: "auto", padding: "16px 20px 40px" }} className="chat-scroll">
+      <div style={{ maxWidth: 680, margin: "0 auto" }}>
+        {/* Filter pills */}
+        <div style={{ display: "flex", gap: 6, marginBottom: 16, flexWrap: "wrap" as const }}>
+          {(["all", "task", "automation", "workflow"] as const).map(f => (
+            <button key={f} onClick={() => setFilter(f)}
+              style={{ fontSize: 11, fontWeight: 500, padding: "4px 12px", borderRadius: 99, border: `1px solid ${filter === f ? "rgba(255,255,255,0.18)" : "rgba(255,255,255,0.08)"}`, background: filter === f ? "rgba(255,255,255,0.09)" : "transparent", color: filter === f ? "rgba(255,255,255,0.80)" : "rgba(255,255,255,0.32)", cursor: "pointer", fontFamily: "inherit", transition: "all 160ms" }}>
+              {f === "all" ? "All" : KIND_LABELS[f] + "s"}
+            </button>
+          ))}
+          <button onClick={load} style={{ marginLeft: "auto", fontSize: 11, padding: "4px 10px", borderRadius: 99, border: "1px solid rgba(255,255,255,0.07)", background: "transparent", color: "rgba(255,255,255,0.25)", cursor: "pointer", fontFamily: "inherit" }}
+            onMouseEnter={e => { e.currentTarget.style.color = "rgba(255,255,255,0.55)"; }}
+            onMouseLeave={e => { e.currentTarget.style.color = "rgba(255,255,255,0.25)"; }}>
+            Refresh
+          </button>
+        </div>
+
+        {loading && <div style={{ padding: "40px 0", display: "flex", justifyContent: "center", gap: 5 }}>{[0,1,2].map(i => <div key={i} style={{ width: 5, height: 5, borderRadius: "50%", background: "rgba(255,255,255,0.22)", animation: `typing-dot 1.2s ease-in-out ${i*0.2}s infinite` }} />)}</div>}
+        {err && <p style={{ fontSize: 12, color: "rgba(248,113,113,0.60)", textAlign: "center", padding: "32px 0" }}>{err}</p>}
+        {!loading && !err && visible.length === 0 && (
+          <div style={{ padding: "56px 0", textAlign: "center" }}>
+            <p style={{ fontSize: 13, color: "rgba(255,255,255,0.25)", margin: "0 0 4px" }}>Nothing here yet</p>
+            <p style={{ fontSize: 11, color: "rgba(255,255,255,0.15)" }}>Ask your clone to do something — tasks, automations, and workflows appear here.</p>
+          </div>
+        )}
+        {!loading && visible.map(item => {
+          const statusColor = STATUS_COLOR[item.status] ?? "rgba(255,255,255,0.30)";
+          return (
+            <div key={item.id} onClick={() => setSelected(item)}
+              style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 14px", borderRadius: 12, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", marginBottom: 6, cursor: "pointer", transition: "background 160ms, border-color 160ms" }}
+              onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,255,255,0.06)"; e.currentTarget.style.borderColor = "rgba(255,255,255,0.12)"; }}
+              onMouseLeave={e => { e.currentTarget.style.background = "rgba(255,255,255,0.03)"; e.currentTarget.style.borderColor = "rgba(255,255,255,0.07)"; }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <p style={{ margin: "0 0 3px", fontSize: 13, fontWeight: 500, color: "rgba(255,255,255,0.78)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.name}</p>
+                {item.description && <p style={{ margin: 0, fontSize: 11, color: "rgba(255,255,255,0.32)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.description}</p>}
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 7, flexShrink: 0 }}>
+                <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 5, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)", color: "rgba(255,255,255,0.28)" }}>{KIND_LABELS[item.kind]}</span>
+                <span style={{ fontSize: 11, color: statusColor }}>{item.status}</span>
+                <svg width="10" height="10" viewBox="0 0 16 16" fill="none" style={{ color: "rgba(255,255,255,0.20)" }}><path d="M6 4l4 4-4 4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ─── CloneChat ────────────────────────────────────────────────────────────────
 
 function CloneChat({ clone, userId }: { clone: CloneOwnerInfo; userId: string }) {
@@ -348,6 +607,7 @@ function CloneChat({ clone, userId }: { clone: CloneOwnerInfo; userId: string })
   const [moreOpen,           setMoreOpen]           = useState(false);
   const [consent,            setConsent]            = useState<"loading" | null | boolean>("loading");
   const [profile,            setProfile]            = useState<{ exists: boolean; total_sessions?: number } | null>(null);
+  const [activeView,         setActiveView]         = useState<"chat" | "activity">("chat");
   const [showAutomateModal,  setShowAutomateModal]  = useState(false);
   const [automateInstruction, setAutomateInstruction] = useState("");
   const [knowledgeAreas,  setKnowledgeAreas]  = useState<{ area: string; depth: string }[]>([]);
@@ -361,7 +621,7 @@ function CloneChat({ clone, userId }: { clone: CloneOwnerInfo; userId: string })
   const textareaRef        = useRef<HTMLTextAreaElement>(null);
   const agentScrollRef     = useRef<HTMLDivElement>(null);
 
-  const { messages, setMessages, isLoading, isThinking, error, sendMessage, clearMessages, scrollRef } = useWebChat({
+  const { messages, setMessages, workflowDrafts, isLoading, isThinking, error, sendMessage, clearMessages, scrollRef } = useWebChat({
     clone, sessionId, userId, responseMode,
     onToolEvent: (event) => {
       setAgentEvents(prev => [...prev, event]);
@@ -510,7 +770,7 @@ function CloneChat({ clone, userId }: { clone: CloneOwnerInfo; userId: string })
       });
       const data = await res.json();
       const title = data.title || instruction.slice(0, 60);
-      const final = `Task started: **${title}**\n\nI'm handling this in the background. Track progress in [Tasks →](/dashboard/tasks)`;
+      const final = `Task started: **${title}**\n\nHandling this in the background. Check the **Activity** tab above to track progress.`;
       setMessages(prev => prev.map(m => m.id === cloneMsgId ? { ...m, content: final, isStreaming: false } : m));
     } catch {
       setMessages(prev => prev.map(m => m.id === cloneMsgId ? { ...m, content: "Failed to create the task. Please try again.", isStreaming: false } : m));
@@ -644,8 +904,19 @@ function CloneChat({ clone, userId }: { clone: CloneOwnerInfo; userId: string })
             </div>
           </div>
         </div>
+        {/* Chat / Activity tab bar */}
+        <div style={{ maxWidth: 860, margin: "0 auto", padding: "0 16px 10px", display: "flex", gap: 2 }}>
+          {(["chat", "activity"] as const).map(v => (
+            <button key={v} onClick={() => setActiveView(v)}
+              style={{ fontSize: 12, fontWeight: 500, padding: "5px 14px", borderRadius: 8, border: "none", background: activeView === v ? "rgba(255,255,255,0.09)" : "transparent", color: activeView === v ? "rgba(255,255,255,0.82)" : "rgba(255,255,255,0.30)", cursor: "pointer", fontFamily: "inherit", transition: "all 180ms", textTransform: "capitalize" as const }}>
+              {v}
+            </button>
+          ))}
+        </div>
       </header>
 
+      {activeView === "chat" ? (
+        <>
       {/* Consent gate */}
       {showConsent && (
         <div style={{ margin: "10px 14px 0", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 12, padding: "12px 14px", flexShrink: 0, animation: "consent-in 360ms cubic-bezier(0.34,1.56,0.64,1) both" }}>
@@ -701,7 +972,10 @@ function CloneChat({ clone, userId }: { clone: CloneOwnerInfo; userId: string })
           </div>
         ) : (
           messages.map(msg => msg.isStreaming && !msg.content ? null : (
-            <MessageBubble key={msg.id} msg={msg} cloneColor={cloneColor} cloneInitial={cloneInitial} avatarUrl={clone.avatar_url} />
+            <MessageBubble key={msg.id} msg={msg} cloneColor={cloneColor} cloneInitial={cloneInitial} avatarUrl={clone.avatar_url} cloneId={clone.clone_id} workflowDraft={workflowDrafts[msg.id] ?? null} onWorkflowActivated={name => {
+              const id = uuid();
+              setMessages(prev => [...prev, { id, role: "clone" as const, content: `Workflow **${name}** is now active. It will run automatically — check the **Activity** tab to track it.`, isStreaming: false }]);
+            }} />
           ))
         )}
 
@@ -779,12 +1053,15 @@ function CloneChat({ clone, userId }: { clone: CloneOwnerInfo; userId: string })
               </span>
             )}
             <span style={{ marginLeft: "auto", fontSize: 10, color: "rgba(255,255,255,0.18)" }}>
-              <code style={{ fontSize: 10, color: "rgba(255,255,255,0.28)" }}>/task</code> to delegate ·{" "}
-              <code style={{ fontSize: 10, color: "rgba(255,255,255,0.28)" }}>/automate</code> to schedule
+              Just describe what you want — tasks, schedules, and workflows are auto-detected
             </span>
           </div>
         </div>
       </div>
+        </>
+      ) : (
+        <ActivityPanel cloneId={clone.clone_id} />
+      )}
 
       {/* Automate modal */}
       {showAutomateModal && (

@@ -186,6 +186,19 @@ export interface JobStatus {
 
 export type MessageRole = "user" | "clone";
 
+export interface WorkflowDraft {
+  id?: string;
+  name: string;
+  description?: string;
+  trigger?: { type: string; config?: Record<string, unknown> };
+  conditions?: unknown[];
+  actions?: unknown[];
+  poll_interval_ms?: number;
+  approval_mode?: string;
+  clone_id?: string;
+  status?: string;
+}
+
 export interface ChatMessage {
   id: string;
   role: MessageRole;
@@ -197,6 +210,8 @@ export interface ChatMessage {
   sources?: MemorySource[];
   trace_id?: string;
   needs_escalation?: boolean;
+  // Workflow draft attached to this message (if clone created one)
+  workflowDraft?: WorkflowDraft;
   // True while tokens are still arriving (streaming)
   isStreaming?: boolean;
   // True for messages loaded from history (not sent this session)

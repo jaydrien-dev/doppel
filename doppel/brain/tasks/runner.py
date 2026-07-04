@@ -30,7 +30,7 @@ from doppel.brain.tools.mcp_client import load_clone_tools, call_tool, call_nati
 _log = logging.getLogger(__name__)
 
 _PLAN_MODEL = "claude-haiku-4-5-20251001"   # fast/cheap for planning
-_EXEC_MODEL = "claude-sonnet-4-6"           # capable for execution
+_EXEC_MODEL = "claude-sonnet-5"
 _MAX_STEPS = 10
 _MAX_EXEC_ITERATIONS = 6                    # tool iterations per step
 
@@ -261,7 +261,7 @@ async def _create_approval_proposal(clone_id: UUID, task_id: UUID, step_idx: int
                     INSERT INTO proposals
                       (clone_id, proposal_type, title, content, context, confidence, status)
                     VALUES
-                      (:cid, 'task_approval', :title, :content, :ctx::jsonb, 0.9, 'pending')
+                      (:cid, 'task_approval', :title, :content, CAST(:ctx AS jsonb), 0.9, 'pending')
                 """),
                 {
                     "cid": str(clone_id),

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import time
 from typing import AsyncGenerator
 from uuid import UUID
@@ -144,8 +145,18 @@ class DoppelBrain:
         # ── 4d. Load recent tool actions for cross-session context ────────
         recent_actions = await _load_recent_tool_actions(self._session, self._clone_id)
 
+        # ── 4e. Workflow configuration intent detection ───────────────────
+        if brain_input.owner_mode and _is_workflow_request(brain_input.message):
+            response_text, _wf_draft, trace = await _handle_workflow_request(
+                brain_input=brain_input,
+                session=self._session,
+                clone_id=self._clone_id,
+                identity=identity,
+            )
         # ── 5. Reasoning (tool path, fast, or slow) ───────────────────────
-        if mcp_tools and _message_needs_tools(brain_input.message):
+        # Agent mode: always use tool path with full write access
+        # Chat mode: tool path only when message needs data lookup (read-only)
+        elif brain_input.agent_mode or _message_needs_tools(brain_input.message):
             response_text, trace = await _tool_path.run(
                 brain_input=brain_input,
                 identity=identity,
@@ -156,6 +167,7 @@ class DoppelBrain:
                 session=self._session,
                 clone_id=self._clone_id,
                 recent_actions=recent_actions,
+                read_only=not brain_input.agent_mode,
             )
         else:
             response_text, trace = await self._reasoning.think(
@@ -343,9 +355,60 @@ class DoppelBrain:
             path = "slow"
 
         _log.info("[TIMING] brain: gather=%.0fms path=%s heuristic=%s", (time.monotonic() - t_start) * 1000, path, quick is not None)
+
+        # ── 4e. Workflow configuration intent detection (streaming) ──────────
+        if brain_input.owner_mode and _is_workflow_request(brain_input.message):
+            yield f"data: {json.dumps({'event': 'start', 'path': 'workflow'})}\n\n"
+            response_text, wf_draft, wf_trace = await _handle_workflow_request(
+                brain_input=brain_input,
+                session=self._session,
+                clone_id=self._clone_id,
+                identity=identity,
+            )
+            # Stream response text in larger chunks (no JSON blob inline anymore)
+            chunk = 60
+            for i in range(0, len(response_text), chunk):
+                yield f"data: {json.dumps({'event': 'token', 'text': response_text[i:i+chunk]})}\n\n"
+            latency_ms = int((time.monotonic() - t_start) * 1000)
+            # Send workflow draft as its own event so serialization errors
+            # don't silently kill the done event
+            _log.info("workflow handler returned wf_draft=%s", "non-null" if wf_draft else "NULL")
+            if wf_draft:
+                try:
+                    yield f"data: {json.dumps({'event': 'workflow_draft', 'draft': wf_draft})}\n\n"
+                    _log.info("workflow_draft event sent, name=%s", wf_draft.get('name'))
+                except Exception as _e:
+                    _log.error("workflow_draft serialize failed: %s", _e)
+            done_payload: dict = {
+                "event": "done",
+                "trace_id": str(wf_trace.id),
+                "path_taken": wf_trace.path,
+                "confidence": wf_trace.confidence or 0.85,
+                "needs_escalation": False,
+                "approval_path": "auto",
+                "consequentiality": "low",
+                "corrected_response": None,
+                "sources": [],
+                "latency_ms": latency_ms,
+            }
+            yield f"data: {json.dumps(done_payload)}\n\n"
+            asyncio.create_task(
+                _persist_async(
+                    session=None,
+                    clone_id=self._clone_id,
+                    brain_input=brain_input,
+                    perceived=perceived,
+                    memory=memory,
+                    trace=wf_trace,
+                    final_response=response_text,
+                    latency_ms=latency_ms,
+                )
+            )
+            return
+
         yield f"data: {json.dumps({'event': 'start', 'path': path})}\n\n"
 
-        if mcp_tools and _message_needs_tools(brain_input.message):
+        if brain_input.agent_mode or _message_needs_tools(brain_input.message):
             gen = _tool_path.run_stream(
                 brain_input=brain_input,
                 identity=identity,
@@ -356,6 +419,7 @@ class DoppelBrain:
                 session=self._session,
                 clone_id=self._clone_id,
                 recent_actions=recent_actions,
+                read_only=not brain_input.agent_mode,
             )
         else:
             kwargs = dict(
@@ -440,6 +504,177 @@ class DoppelBrain:
         )
 
 
+_WORKFLOW_KEYWORDS = {
+    # ── Explicit automation vocabulary ─────────────────────────────────────────
+    "workflow", "automation", "automate", "automate this", "automated",
+    "set up a workflow", "create a workflow", "build a workflow", "make a workflow",
+    "set up an automation", "create an automation", "build an automation",
+    "set up a task", "create a task", "background task", "background job",
+    "set a schedule", "create a schedule", "schedule a task",
+    # ── Time-period triggers ───────────────────────────────────────────────────
+    "every morning", "every evening", "every night", "every afternoon", "every noon",
+    "every day", "every week", "every month", "every hour", "every minute",
+    "every second", "every few", "every other",
+    "each morning", "each evening", "each day", "each week", "each month",
+    "each hour", "each minute",
+    "daily", "weekly", "hourly", "monthly", "nightly", "yearly", "annually",
+    "every 5 min", "every 10 min", "every 15 min", "every 30 min",
+    "every 1 hour", "every 2 hour", "every 24 hour", "every 6 hour", "every 12 hour",
+    "in the morning", "in the evening", "at night", "at dawn", "at noon", "at midnight",
+    "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+    "weekdays", "weekends", "on mondays", "on fridays",
+    # ── Conditional / reactive triggers ───────────────────────────────────────
+    "when ", "whenever ", "if ", "once ", "as soon as ",
+    "every time ", "each time ", "any time ",
+    "notify me when", "alert me when", "let me know when", "ping me when",
+    "tell me when", "inform me when", "warn me when",
+    "trigger when", "trigger if", "fire when",
+    "in case ", "in the event",
+    # ── Monitoring & polling patterns ──────────────────────────────────────────
+    "watch ", "monitor ", "track ", "observe ", "scan ",
+    "check every", "check for", "keep checking", "keep watching",
+    "keep monitoring", "keep scanning", "keep tracking",
+    "poll ", "watch for", "look for", "look out for",
+    "stay on top of", "stay updated", "keep an eye",
+    # ── Loop / persistence / background ────────────────────────────────────────
+    "until ", "loop", "repeat", "periodically", "continuously", "ongoing",
+    "on repeat", "on loop", "in the background", "run in background",
+    "keep running", "keep doing", "keep sending", "keep checking",
+    "non-stop", "indefinitely", "recurring",
+    "auto-", "automatically ", "on autopilot",
+    # ── Explicit scheduling language ───────────────────────────────────────────
+    "schedule this", "schedule it", "schedule a",
+    "run this every", "run every", "run daily", "run weekly", "run hourly",
+    "run at ", "execute at ", "execute every", "fire every", "fire at ",
+    "cron", "cron job", "cronjob",
+    # ── Reminder & alert patterns ──────────────────────────────────────────────
+    "remind me", "send me a reminder", "set a reminder",
+    "reminder every", "daily reminder", "weekly reminder",
+    "alert me", "send me an alert", "notify me", "send a notification",
+    # ── Domain-specific event triggers ─────────────────────────────────────────
+    "price drops", "price rises", "price hits", "price exceeds", "price falls below",
+    "price goes above", "price goes below", "price changes",
+    "stock hits", "stock drops", "stock rises", "stock reaches",
+    "bitcoin", "ethereum", "crypto", "coin price",
+    "form is submitted", "someone fills", "someone submits",
+    "new message", "new email", "new post", "new comment", "new order",
+    "new signup", "new lead", "new follower", "new mention",
+    "someone visits", "someone clicks", "page loads",
+    "webhook", "event fires", "event triggers",
+    # ── "Until a state" / conditional termination ──────────────────────────────
+    "until it", "until the", "until price", "until stock", "until i",
+    "stop when", "stop once", "pause when", "terminate when",
+    "loop until", "repeat until", "keep going until", "run until",
+}
+
+
+# Matches "at 9am", "at 9:30pm", "at noon", "at midnight", "every 5 minutes", etc.
+_WORKFLOW_TIME_RE = re.compile(
+    r"\b(?:at\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?|"
+    r"every\s+\d+\s*(?:min(?:ute)?s?|hours?|days?|weeks?|months?)|"
+    r"(?:daily|weekly|hourly|monthly|nightly|annually))\b",
+    re.IGNORECASE,
+)
+
+
+def _is_workflow_request(message: str) -> bool:
+    """
+    Detect if an owner message is requesting workflow/skill configuration.
+    Catches time-based schedules, conditional triggers, and explicit automation requests.
+    """
+    lower = message.lower()
+
+    # Explicit automation vocabulary = immediate match, no further checks needed
+    _EXPLICIT = {
+        "workflow", "automation", "automate", "schedule", "cron", "recurring",
+        "remind me", "set a reminder", "run every", "run daily", "run weekly",
+        "run hourly", "keep checking", "keep monitoring", "keep watching",
+        "on autopilot", "in the background", "background task",
+    }
+    if any(kw in lower for kw in _EXPLICIT):
+        return True
+
+    has_trigger = (
+        any(kw in lower for kw in _WORKFLOW_KEYWORDS)
+        or bool(_WORKFLOW_TIME_RE.search(message))
+    )
+    has_action = any(kw in lower for kw in (
+        "send", "email", "whatsapp", "message", "notify", "alert",
+        "check", "create", "update", "post", "slack", "calendar",
+        "do", "fetch", "search", "look", "get", "find", "report",
+        "summary", "summarize", "tell", "ping", "push", "pull",
+        "read", "scan", "watch", "track", "monitor", "deploy",
+    ))
+    return has_trigger and has_action and len(message.split()) >= 4
+
+
+async def _handle_workflow_request(
+    brain_input: BrainInput,
+    session,
+    clone_id: UUID,
+    identity,
+) -> tuple[str, object]:
+    """Route a workflow-configuration message through the skill generator."""
+    from doppel.brain.tasks.skill_generator import configure_workflow_from_conversation
+    from doppel.brain.models.types import ReasoningTrace
+    from doppel.brain.tools.mcp_client import load_clone_tools
+    from sqlalchemy import text as sql_text
+
+    # Get connected connectors
+    rows = await session.execute(
+        sql_text("SELECT name FROM clone_mcp_servers WHERE clone_id = :cid AND enabled = TRUE"),
+        {"cid": str(clone_id)},
+    )
+    connected = [r["name"] for r in rows.mappings().all()]
+    # Web tools and native email are always available — no connector setup required
+    if "Web" not in connected:
+        connected.append("Web")
+    if "email" not in connected:
+        connected.append("email")
+
+    skill_rows = await session.execute(
+        sql_text("SELECT name FROM clone_skills WHERE clone_id = :cid AND status = 'active'"),
+        {"cid": str(clone_id)},
+    )
+    existing_skills = [r["name"] for r in skill_rows.mappings().all()]
+
+    result = await configure_workflow_from_conversation(
+        request=brain_input.message,
+        clone_id=clone_id,
+        connected_connectors=connected,
+        available_skills=existing_skills,
+        clone_name=identity.display_name if hasattr(identity, "display_name") else "your clone",
+    )
+
+    status = result.get("status")
+    wf_draft: dict | None = None
+
+    if status == "ready":
+        wf_draft = result.get("workflow_draft") or None
+        response_text = (
+            result.get("summary", "") + "\n\n"
+            "Want me to activate this? Hit **Activate** below, or tell me what to change."
+        )
+    elif status == "needs_clarification":
+        questions = result.get("questions", [])
+        response_text = "To set this up, I need a few details:\n\n" + "\n".join(f"• {q}" for q in questions)
+    elif status == "needs_connector":
+        missing = result.get("required_connectors", [])
+        response_text = (
+            f"To build this, I need access to: **{', '.join(missing)}**.\n\n"
+            "Connect those in Settings → Connectors, then ask me again."
+        )
+    else:  # unsafe
+        response_text = result.get("explanation", "I can't build this workflow.")
+
+    trace = ReasoningTrace(
+        path="workflow_config",
+        confidence=0.9,
+        needs_escalation=False,
+    )
+    return response_text, wf_draft, trace
+
+
 def _message_needs_tools(message: str) -> bool:
     """
     Decide if a message should be routed to the tool path.
@@ -456,14 +691,26 @@ def _message_needs_tools(message: str) -> bool:
         "slack", "google drive", "gdrive",
         "gmail", "google mail",
         "google calendar", "gcal",
+        "google sheet", "google sheets", "spreadsheet",
         "github", "notion", "linear",
         "my drive", "my calendar", "my inbox",
         "my slack", "my github", "my notion",
+        # Web / live data keywords — always routed to web tools
+        "search the web", "go online", "look online", "look up online",
+        "look up the", "look up current", "search online", "search for",
+        "find businesses", "find companies", "find contacts",
+        "current price", "live price", "price of", "what is the price",
+        "latest news", "browse", "visit the site", "visit the url",
+        "check the website", "fetch the", "coinmarketcap", "coingecko",
+        "bitcoin", "ethereum", "solana", "crypto", "stock price",
+        "what's happening", "what is happening", "real-time", "real time",
+        "live data", "trending", "breaking news",
+        "contact info", "phone number", "business listing",
     )
     if any(kw in lower for kw in explicit_services):
         return True
 
-    # Tier 2: generic action + generic object (still needs both to avoid false positives)
+    # Tier 2: generic action + generic object
     action_kw = (
         "post", "send", "share", "publish",
         "search", "find", "look up", "query",
@@ -471,11 +718,14 @@ def _message_needs_tools(message: str) -> bool:
         "delete", "remove", "clear", "archive",
         "list", "show me", "get me", "fetch",
         "update", "edit", "rename", "move",
+        "research", "compile", "collect", "gather",
     )
     subject_kw = (
         "file", "folder", "email", "message",
         "channel", "issue", "pull request", "ticket",
         "event", "meeting", "doc", "sheet", "spreadsheet",
+        "businesses", "companies", "contacts", "leads",
+        "website", "web", "online", "internet",
     )
     has_action = any(kw in lower for kw in action_kw)
     has_subject = any(kw in lower for kw in subject_kw)

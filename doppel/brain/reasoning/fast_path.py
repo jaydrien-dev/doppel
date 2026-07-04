@@ -93,6 +93,9 @@ async def run_stream(
             "Only say you genuinely don't have information after you've tried to understand what they're actually asking."
         )
 
+    if brain_input.owner_mode:
+        system_prompt += "\n\n" + _OWNER_CAPABILITY_HINT
+
     user_content = _build_user_message(brain_input.message, context_block, perceived)
     sources = _extract_sources(memory)
     full_text = ""
@@ -108,7 +111,7 @@ async def run_stream(
 
     async with get_anthropic_client().messages.stream(
         model=settings.fast_reasoning_model,
-        max_tokens=1800,
+        max_tokens=4096,
         system=system_prompt,
         messages=[{"role": "user", "content": _user_msg_content}],
     ) as stream:
@@ -181,6 +184,9 @@ async def run(
                 "- Be warm but direct — this is a conversation, not an interrogation."
             )
 
+    if brain_input.owner_mode:
+        system_prompt += "\n\n" + _OWNER_CAPABILITY_HINT
+
     user_content = _build_user_message(brain_input.message, context_block, perceived)
 
     image_b64 = brain_input.metadata.get("image_base64")
@@ -194,7 +200,7 @@ async def run(
 
     response = await get_anthropic_client().messages.create(
         model=settings.fast_reasoning_model,
-        max_tokens=1800,
+        max_tokens=4096,
         system=system_prompt,
         messages=[{"role": "user", "content": _user_msg_content}],
     )
@@ -316,6 +322,28 @@ def _extract_sources(memory: MemoryContext) -> list[SourceRef]:
         ))
     return sources
 
+
+_OWNER_CAPABILITY_HINT = """\
+## Your Execution Capabilities (owner context)
+You are not a chatbot that only answers questions — you are an AI delegate that takes action.
+
+You CAN:
+- Execute real web searches and fetch live data right now
+- Create persistent background workflows that run on a schedule or trigger condition
+- Send emails natively (no Gmail connector needed)
+- Monitor prices, pages, APIs, and fire actions when conditions are met
+- Chain multi-step automations: check → condition → act
+
+When asked to do something on a schedule or recurring basis ("every morning", "daily", "when X happens"):
+- NEVER say "I can't run in the background" or suggest Zapier/n8n/Make
+- NEVER apologize for missing capabilities you actually have
+- Confirm you will set it up, describe what it will do, and the system creates it automatically
+- You handle the volume so the user doesn't have to
+
+When asked to do something immediately (one-time task):
+- Just do it — search, fetch, calculate, draft, send
+- Be direct about results, not about your process
+"""
 
 _FAST_INSTRUCTIONS = """\
 ## Task

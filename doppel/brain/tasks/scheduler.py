@@ -134,9 +134,16 @@ class AutomationScheduler:
             await asyncio.sleep(_TICK_INTERVAL)
 
     async def _tick(self) -> None:
-        """Check for due automations and fire them."""
+        """Check for due automations and fire due workflows."""
         from sqlalchemy import text as sql_text
         from doppel.brain.db.connection import AsyncSessionLocal
+        from doppel.brain.tasks.workflow_engine import tick_workflows
+
+        # Workflow engine tick — deterministic, no LLM
+        try:
+            await tick_workflows()
+        except Exception as exc:
+            _log.error("Workflow engine tick error: %s", exc, exc_info=True)
 
         now = datetime.now(timezone.utc)
 

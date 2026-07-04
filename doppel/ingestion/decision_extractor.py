@@ -114,7 +114,7 @@ async def _merge_epistemic_profile(
     await session.execute(
         text("""
             UPDATE clone_identity
-            SET epistemic_profile = :extracted::jsonb || COALESCE(epistemic_profile, '{}'::jsonb),
+            SET epistemic_profile = CAST(:extracted AS jsonb) || COALESCE(epistemic_profile, '{}'::jsonb),
                 updated_at = NOW()
             WHERE clone_id = :id
         """),

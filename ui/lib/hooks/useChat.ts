@@ -2,7 +2,22 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { v4 as uuidv4 } from "uuid";
-import type { ChatMessage, ContextType, MemorySource } from "../types";
+import type { ChatMessage, ContextType, MemorySource, WorkflowDraft } from "../types";
+
+// Words that mean "yes, do it" when the previous clone message contained a workflow draft
+const CONFIRMATION_PHRASES = [
+  "yes", "yep", "yeah", "yup", "sure", "ok", "okay", "do it", "activate",
+  "go ahead", "confirm", "proceed", "let's do it", "let's go", "sounds good",
+  "perfect", "great", "go", "run it", "start it", "create it", "make it",
+  "activate it", "set it up", "do that", "do this", "yes please", "please do",
+  "go for it", "absolutely", "definitely", "of course", "please", "yes do it",
+];
+
+function isPendingConfirmation(content: string, lastCloneMsg?: ChatMessage): boolean {
+  if (!lastCloneMsg?.workflowDraft) return false;
+  const lower = content.trim().toLowerCase().replace(/[!.,?]/g, "");
+  return CONFIRMATION_PHRASES.some(p => lower === p || lower.startsWith(p + " ") || lower.endsWith(" " + p));
+}
 
 interface UseChatOptions {
   cloneId: string;
@@ -86,8 +101,38 @@ export function useChat({ cloneId, contextType = "chat", sessionId: initialSessi
   }, [initialSessionId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const sendMessage = useCallback(
-    async (content: string, responseMode: "fast" | "pro" | "extended" = "fast", metadata?: Record<string, unknown>) => {
+    async (content: string, responseMode: "fast" | "pro" | "extended" | "agent" = "fast", metadata?: Record<string, unknown>) => {
       if (!content.trim() || isLoading) return;
+
+      // If user is confirming a pending workflow, auto-deploy it
+      const lastCloneMsg = [...messages].reverse().find(m => m.role === "clone");
+      if (ownerMode && isPendingConfirmation(content, lastCloneMsg)) {
+        const draft = lastCloneMsg!.workflowDraft!;
+        const userMsg: ChatMessage = { id: uuidv4(), role: "user", content: content.trim(), timestamp: new Date() };
+        setMessages(prev => [...prev, userMsg]);
+        setIsLoading(true);
+        try {
+          const res = await fetch("/api/skills/deploy", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ clone_id: cloneId, workflow_draft: draft }),
+          });
+          const data = await res.json().catch(() => ({}));
+          const confirmMsg: ChatMessage = {
+            id: uuidv4(), role: "clone", timestamp: new Date(),
+            content: res.ok
+              ? `Done. **${draft.name}** is now running in the background. Check the Activity tab to track it.`
+              : `Couldn't activate the workflow: ${data.detail ?? "unknown error"}`,
+            isStreaming: false,
+          };
+          setMessages(prev => [...prev, confirmMsg]);
+        } catch {
+          setMessages(prev => [...prev, { id: uuidv4(), role: "clone" as const, content: "Network error — couldn't activate workflow.", timestamp: new Date(), isStreaming: false }]);
+        } finally {
+          setIsLoading(false);
+        }
+        return;
+      }
 
       const userMsg: ChatMessage = {
         id: uuidv4(),
@@ -122,8 +167,9 @@ export function useChat({ cloneId, contextType = "chat", sessionId: initialSessi
             session_id: resolvedSessionId.current,
             message: content.trim(),
             context_type: contextType,
-            response_mode: responseMode,
+            response_mode: responseMode === "agent" ? "fast" : responseMode,
             owner_mode: ownerMode,
+            agent_mode: responseMode === "agent",
             ...(metadata ? { metadata } : {}),
           }),
         });
@@ -173,10 +219,21 @@ export function useChat({ cloneId, contextType = "chat", sessionId: initialSessi
                   m.id === cloneMsgId ? { ...m, content: accText } : m
                 )
               );
+            } else if (evt.event === "workflow_draft") {
+              const draft = evt.draft as WorkflowDraft | undefined;
+              if (draft?.name) {
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === cloneMsgId ? { ...m, workflowDraft: draft } : m
+                  )
+                );
+              }
             } else if (evt.event === "done") {
               setIsThinking(false);
               const finalText =
                 (evt.corrected_response as string | null) ?? accText;
+              // Also pick up workflow_draft from done event as a fallback
+              const draft = evt.workflow_draft as WorkflowDraft | undefined;
               setMessages((prev) =>
                 prev.map((m) =>
                   m.id === cloneMsgId
@@ -189,6 +246,7 @@ export function useChat({ cloneId, contextType = "chat", sessionId: initialSessi
                         needs_escalation: evt.needs_escalation as boolean,
                         sources: evt.sources as MemorySource[],
                         trace_id: evt.trace_id as string,
+                        ...(draft?.name ? { workflowDraft: draft } : {}),
                       }
                     : m
                 )
@@ -209,7 +267,7 @@ export function useChat({ cloneId, contextType = "chat", sessionId: initialSessi
         setIsThinking(false);
       }
     },
-    [cloneId, contextType, ownerMode, isLoading] // eslint-disable-line react-hooks/exhaustive-deps
+    [cloneId, contextType, ownerMode, isLoading, messages] // eslint-disable-line react-hooks/exhaustive-deps
   );
 
   const clearMessages = useCallback(() => {

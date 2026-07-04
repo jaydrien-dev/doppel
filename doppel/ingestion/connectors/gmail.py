@@ -239,7 +239,7 @@ async def setup_watch(clone_id: UUID, pubsub_topic: str, session: AsyncSession) 
     await session.execute(
         text("""
             UPDATE oauth_tokens
-            SET metadata = COALESCE(metadata, '{}') || :patch::jsonb,
+            SET metadata = COALESCE(metadata, '{}') || CAST(:patch AS jsonb),
                 updated_at = NOW()
             WHERE clone_id = :clone_id AND provider = 'gmail'
         """),

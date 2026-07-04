@@ -25,6 +25,7 @@ interface Conversation {
   avatar_url: string | null;
   category: string | null;
   price_per_query: number;
+  is_owner?: boolean;
 }
 
 interface MarketplaceClone {
@@ -1097,9 +1098,243 @@ function AutomationsPanel({ cloneId }: { cloneId: string }) {
 }
 
 // ---------------------------------------------------------------------------
+// Workflows
+// ---------------------------------------------------------------------------
+interface Workflow {
+  id: string; name: string; description?: string; status: string;
+  trigger?: { type?: string; config?: Record<string, unknown> };
+  conditions?: { field?: string; operator?: string; value?: unknown }[];
+  actions?: { type: string; config?: Record<string, unknown> }[];
+  poll_interval_ms?: number; last_fired_at?: string; next_poll_at?: string;
+  daily_firing_count?: number; error_message?: string; created_at: string;
+}
+
+function wfRelTime(iso?: string): string | null {
+  if (!iso) return null;
+  const diff = Date.now() - new Date(iso).getTime();
+  const abs = Math.abs(diff);
+  const mins = Math.floor(abs / 60000);
+  const hrs = Math.floor(mins / 60);
+  if (diff < 0) {
+    if (mins < 1) return "in <1m";
+    if (mins < 60) return `in ${mins}m`;
+    return `in ${hrs}h`;
+  }
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
+
+function WorkflowRow({ wf, cloneId, onRefresh }: { wf: Workflow; cloneId: string; onRefresh: () => void }) {
+  const [deleting, setDeleting] = useState(false);
+  const [toggling, setToggling] = useState(false);
+
+  const isActive = wf.status === "active";
+  const isError = wf.status === "error";
+  const statusDot = isError ? "#F87171" : isActive ? "#34D399" : "rgba(255,255,255,0.2)";
+
+  const tType = wf.trigger?.type ?? "schedule";
+  const tCfg = wf.trigger?.config ?? {} as Record<string, unknown>;
+  const intervalSec = wf.poll_interval_ms ? Math.round(wf.poll_interval_ms / 1000) : null;
+
+  const triggerSummary = tType === "schedule"
+    ? `Schedule · ${String((tCfg as Record<string,unknown>).schedule ?? "daily")}`
+    : tType === "poll_api" ? `Poll API · every ${intervalSec ?? 60}s`
+    : tType === "poll_webpage" ? `Monitor page · every ${intervalSec ?? 60}s`
+    : tType === "webhook" ? "Webhook"
+    : tType;
+
+  const condSummary = (wf.conditions ?? []).map(c => `${c.field} ${c.operator} ${String(c.value ?? "")}`).join(" AND ");
+
+  const actionSummary = (wf.actions ?? []).map(a => {
+    if (a.type === "send_email") return `email → ${String((a.config ?? {}).to ?? "?")}`;
+    if (a.type === "notify") return "notify";
+    if (a.type === "connector_action") return String((a.config ?? {}).connectorId ?? a.type);
+    return a.type;
+  }).join(", ");
+
+  async function toggleStatus() {
+    setToggling(true);
+    try {
+      await fetch(`/api/workflows/${wf.id}?clone_id=${cloneId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: isActive ? "paused" : "active" }),
+      });
+      onRefresh();
+    } finally { setToggling(false); }
+  }
+
+  async function del() {
+    if (!confirm(`Delete "${wf.name}"?`)) return;
+    setDeleting(true);
+    try { await fetch(`/api/workflows/${wf.id}?clone_id=${cloneId}`, { method: "DELETE" }); onRefresh(); }
+    finally { setDeleting(false); }
+  }
+
+  return (
+    <div style={{ background: "rgba(255,255,255,0.03)", border: `1px solid ${isError ? "rgba(248,113,113,0.18)" : "rgba(255,255,255,0.07)"}`, borderRadius: 14, padding: "13px 15px", marginBottom: 8, opacity: wf.status === "paused" ? 0.6 : 1, transition: "opacity 200ms" }}>
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 11 }}>
+        {/* Status dot */}
+        <div style={{ marginTop: 5, flexShrink: 0 }}>
+          <div style={{ width: 7, height: 7, borderRadius: 999, background: statusDot, boxShadow: isActive ? `0 0 6px ${statusDot}60` : "none" }} />
+        </div>
+
+        {/* Content */}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" as const, marginBottom: 4 }}>
+            <span style={{ fontSize: 13, fontWeight: 500, color: "rgba(255,255,255,0.85)" }}>{wf.name}</span>
+            <span style={{ fontSize: 10, padding: "1px 7px", borderRadius: 5, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.30)" }}>{triggerSummary}</span>
+          </div>
+
+          {condSummary && (
+            <p style={{ margin: "0 0 3px", fontSize: 11, color: "rgba(255,255,255,0.38)", fontFamily: "monospace" }}>{condSummary}</p>
+          )}
+          {actionSummary && (
+            <p style={{ margin: "0 0 4px", fontSize: 11, color: "rgba(255,255,255,0.32)" }}>{actionSummary}</p>
+          )}
+
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" as const }}>
+            {wf.last_fired_at && (
+              <span style={{ fontSize: 10, color: "rgba(255,255,255,0.22)" }}>last fired {wfRelTime(wf.last_fired_at)}</span>
+            )}
+            {isActive && wf.next_poll_at && (
+              <span style={{ fontSize: 10, color: "rgba(255,255,255,0.22)" }}>next {wfRelTime(wf.next_poll_at)}</span>
+            )}
+            {(wf.daily_firing_count ?? 0) > 0 && (
+              <span style={{ fontSize: 10, color: "rgba(255,255,255,0.18)" }}>{wf.daily_firing_count}× today</span>
+            )}
+          </div>
+
+          {isError && wf.error_message && (
+            <p style={{ margin: "5px 0 0", fontSize: 11, color: "rgba(248,113,113,0.70)" }}>{wf.error_message.slice(0, 120)}</p>
+          )}
+        </div>
+
+        {/* Actions */}
+        <div style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }}>
+          <button onClick={toggleStatus} disabled={toggling} title={isActive ? "Pause" : "Resume"}
+            style={{ width: 28, height: 28, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", background: "transparent", border: "1px solid rgba(255,255,255,0.08)", cursor: "pointer", color: "rgba(255,255,255,0.40)", opacity: toggling ? 0.4 : 1 }}>
+            {isActive
+              ? <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><rect x="1.5" y="1.5" width="2.5" height="7" rx="0.8" fill="currentColor"/><rect x="6" y="1.5" width="2.5" height="7" rx="0.8" fill="currentColor"/></svg>
+              : <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 1.5l7 3.5-7 3.5V1.5z" fill="currentColor"/></svg>}
+          </button>
+          <button onClick={del} disabled={deleting} title="Delete"
+            style={{ width: 28, height: 28, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", background: "transparent", border: "1px solid rgba(248,113,113,0.10)", cursor: "pointer", color: "rgba(248,113,113,0.45)", opacity: deleting ? 0.4 : 1 }}>
+            <svg width="10" height="10" viewBox="0 0 11 11" fill="none"><path d="M2 2l7 7M9 2L2 9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Unified Activity panel (Tasks + Automations + Workflows)
+// ---------------------------------------------------------------------------
+type ActivityFilter = "all" | "task" | "automation" | "workflow";
+
+function ActivityPanel({ cloneId }: { cloneId: string }) {
+  const [filter, setFilter]         = useState<ActivityFilter>("all");
+  const [showNewTask, setShowNewTask]   = useState(false);
+  const [showNewAuto, setShowNewAuto]   = useState(false);
+
+  const { data: taskData,   mutate: mutateTasks, isLoading: tasksLoading } = useSWR<{ tasks: Task[] }>(`/api/tasks?clone_id=${cloneId}`, swrFetcher, { refreshInterval: 5000 });
+  const { data: autoData,   mutate: mutateAutos }                           = useSWR<{ automations: Automation[] }>(`/api/automations?clone_id=${cloneId}`, swrFetcher, { revalidateOnFocus: false });
+  const { data: wfRaw,      mutate: mutateWfs }                             = useSWR<unknown>(`/api/workflows?clone_id=${cloneId}`, swrFetcher, { refreshInterval: 10000 });
+
+  const tasks       = taskData?.tasks ?? [];
+  const automations = autoData?.automations ?? [];
+  const workflows: Workflow[] = Array.isArray(wfRaw) ? wfRaw : ((wfRaw as Record<string, unknown>)?.workflows as Workflow[] ?? []);
+  const activeTasks = tasks.filter(t => ["pending","planning","running","waiting_approval"].includes(t.status));
+  const activeWfs   = workflows.filter(w => w.status === "active");
+  const isEmpty     = tasks.length === 0 && automations.length === 0 && workflows.length === 0;
+
+  const filterLabels: Record<ActivityFilter, string> = { all: "All", task: "Tasks", automation: "Automations", workflow: "Workflows" };
+  const counts: Record<ActivityFilter, number> = { all: tasks.length + automations.length + workflows.length, task: tasks.length, automation: automations.length, workflow: workflows.length };
+
+  return (
+    <div style={{ flex: 1, overflowY: "auto", padding: "20px 20px 40px" }}>
+      <div style={{ maxWidth: 680, margin: "0 auto" }}>
+
+        {/* Header */}
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 16 }}>
+          <div>
+            <h2 style={{ fontSize: 18, fontWeight: 400, color: "rgba(255,255,255,0.82)", margin: "0 0 3px", letterSpacing: "-0.01em" }}>Activity</h2>
+            <p style={{ fontSize: 12, color: "rgba(255,255,255,0.28)", margin: 0 }}>Everything your clone is running.</p>
+          </div>
+          <div style={{ display: "flex", gap: 6 }}>
+            {(filter === "all" || filter === "task") && (
+              <button onClick={() => setShowNewTask(true)} style={{ fontSize: 11, padding: "6px 12px", borderRadius: 9, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)", color: "rgba(255,255,255,0.65)", cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", gap: 5 }}>
+                <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M6 1v10M1 6h10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/></svg>Task
+              </button>
+            )}
+            {(filter === "all" || filter === "automation") && (
+              <button onClick={() => setShowNewAuto(true)} style={{ fontSize: 11, padding: "6px 12px", borderRadius: 9, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)", color: "rgba(255,255,255,0.65)", cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", gap: 5 }}>
+                <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M6 1v10M1 6h10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/></svg>Automation
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Live status bar */}
+        {(activeTasks.length > 0 || activeWfs.length > 0) && (
+          <div style={{ background: "rgba(255,255,255,0.025)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 10, padding: "9px 13px", marginBottom: 14, display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" as const }}>
+            {activeTasks.length > 0 && (
+              <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "rgba(107,174,255,0.85)" }}>
+                <div style={{ width: 6, height: 6, borderRadius: 999, background: "#6BAEFF", boxShadow: "0 0 5px #6BAEFF80" }} />
+                {activeTasks.length} task{activeTasks.length !== 1 ? "s" : ""} running
+              </span>
+            )}
+            {activeWfs.length > 0 && (
+              <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "rgba(52,211,153,0.80)" }}>
+                <div style={{ width: 6, height: 6, borderRadius: 999, background: "#34D399", boxShadow: "0 0 5px #34D39980" }} />
+                {activeWfs.length} workflow{activeWfs.length !== 1 ? "s" : ""} active
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* Filter pills */}
+        <div style={{ display: "flex", gap: 5, marginBottom: 14, flexWrap: "wrap" as const }}>
+          {(["all","task","automation","workflow"] as ActivityFilter[]).map(f => (
+            <button key={f} onClick={() => setFilter(f)}
+              style={{ fontSize: 11, fontWeight: 500, padding: "4px 11px", borderRadius: 99, border: `1px solid ${filter === f ? "rgba(255,255,255,0.18)" : "rgba(255,255,255,0.06)"}`, background: filter === f ? "rgba(255,255,255,0.08)" : "transparent", color: filter === f ? "rgba(255,255,255,0.78)" : "rgba(255,255,255,0.28)", cursor: "pointer", fontFamily: "inherit", transition: "all 140ms" }}>
+              {filterLabels[f]}{counts[f] > 0 ? ` ${counts[f]}` : ""}
+            </button>
+          ))}
+        </div>
+
+        {/* Content */}
+        {tasksLoading && tasks.length === 0 && (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "20px 0" }}>
+            <div style={{ width: 5, height: 5, borderRadius: 999, background: "rgba(255,255,255,0.2)" }} />
+            <p style={{ fontSize: 12, color: "rgba(255,255,255,0.25)", margin: 0 }}>Loading…</p>
+          </div>
+        )}
+        {!tasksLoading && isEmpty && (
+          <div style={{ textAlign: "center" as const, padding: "48px 24px", background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.05)", borderRadius: 16 }}>
+            <p style={{ fontSize: 13, fontWeight: 400, color: "rgba(255,255,255,0.30)", marginBottom: 6 }}>Nothing running yet.</p>
+            <p style={{ fontSize: 12, color: "rgba(255,255,255,0.16)", lineHeight: 1.6 }}>Ask your clone to do something in Chat —<br/>tasks, automations, and workflows show up here.</p>
+          </div>
+        )}
+
+        {(filter === "all" || filter === "task") && tasks.map(task => <TaskCard key={task.id} task={task} cloneId={cloneId} onRefresh={() => mutateTasks()} />)}
+        {(filter === "all" || filter === "automation") && automations.map(auto => <AutomationRow key={auto.id} auto={auto} cloneId={cloneId} onRefresh={() => mutateAutos()} />)}
+        {(filter === "all" || filter === "workflow") && workflows.map(wf => <WorkflowRow key={wf.id} wf={wf} cloneId={cloneId} onRefresh={() => mutateWfs()} />)}
+      </div>
+
+      {showNewTask && <NewTaskModal cloneId={cloneId} onCreated={() => mutateTasks()} onClose={() => setShowNewTask(false)} />}
+      {showNewAuto && <NewAutomationModal cloneId={cloneId} onCreated={() => mutateAutos()} onClose={() => setShowNewAuto(false)} />}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Chat view (right panel when a conversation is selected)
 // ---------------------------------------------------------------------------
-type HomeTab = "chat" | "tasks" | "automations" | "connectors";
+type HomeTab = "chat" | "activity" | "connectors";
 
 function ConvChatView({
   conv,
@@ -1198,9 +1433,9 @@ function ConvChatView({
 
       {/* Tab bar */}
       <div style={{ display: "flex", borderBottom: "1px solid rgba(255,255,255,0.07)", padding: "0 16px", flexShrink: 0 }}>
-        {(["chat", "tasks", "automations", "connectors"] as HomeTab[]).map(tab => {
+        {(["chat", "activity", "connectors"] as HomeTab[]).map(tab => {
           const isActive = activeTab === tab;
-          const label = tab === "chat" ? "Chat" : tab === "tasks" ? "Tasks" : tab === "automations" ? "Automations" : "Connectors";
+          const label = tab === "chat" ? "Chat" : tab === "activity" ? "Activity" : "Connectors";
           return (
             <button key={tab} onClick={() => setActiveTab(tab)} style={{ fontSize: 13, fontWeight: isActive ? 500 : 400, color: isActive ? "rgba(255,255,255,0.85)" : "rgba(255,255,255,0.35)", background: "none", border: "none", cursor: "pointer", padding: "10px 14px", fontFamily: "inherit", borderBottom: `2px solid ${isActive ? "rgba(255,255,255,0.50)" : "transparent"}`, marginBottom: -1, transition: "all 200ms" }}
               onMouseEnter={e => { if (!isActive) e.currentTarget.style.color = "rgba(255,255,255,0.55)"; }}
@@ -1220,16 +1455,14 @@ function ConvChatView({
               cloneName={conv.display_name}
               cloneColor={color}
               contextType="chat"
-              ownerMode={false}
+              ownerMode={conv.is_owner ?? false}
               placeholder={`Ask ${conv.display_name} anything…`}
               pricePerQuery={conv.price_per_query ?? 0}
               sessionId={conv.session_id}
             />
           </div>
-        ) : activeTab === "tasks" ? (
-          <TasksPanel cloneId={conv.clone_id} />
-        ) : activeTab === "automations" ? (
-          <AutomationsPanel cloneId={conv.clone_id} />
+        ) : activeTab === "activity" ? (
+          <ActivityPanel cloneId={conv.clone_id} />
         ) : (
           <ConnectorsPanel cloneId={conv.clone_id} />
         )}

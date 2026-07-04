@@ -780,6 +780,11 @@ async def _call_notion(tool_name: str, args: dict, token: str) -> str:
 # ─── Registry ─────────────────────────────────────────────────────────────────
 
 # Maps MCPServer.name → (tool_schemas, call_function)
+async def _call_web(tool_name: str, args: dict, _token: str) -> str:
+    from doppel.brain.tools.web_tools import call_web_tool
+    return await call_web_tool(tool_name, args)
+
+
 _REGISTRY: dict[str, tuple[list[dict], Callable[..., Coroutine[Any, Any, str]]]] = {
     "Google Drive":       (_GDRIVE_TOOLS,   _call_gdrive),
     "Gmail":              (_GMAIL_TOOLS,    _call_gmail),
@@ -787,6 +792,7 @@ _REGISTRY: dict[str, tuple[list[dict], Callable[..., Coroutine[Any, Any, str]]]]
     "GitHub Integration": (_GITHUB_TOOLS,   _call_github),
     "Slack":              (_SLACK_TOOLS,    _call_slack),
     "Notion":             (_NOTION_TOOLS,   _call_notion),
+    "Web":                ([], _call_web),  # tool list injected dynamically by load_clone_tools
 }
 
 

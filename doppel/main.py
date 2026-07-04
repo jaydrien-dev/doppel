@@ -63,7 +63,7 @@ from doppel.brain.orchestrator import DoppelBrain
 from doppel.config import settings
 
 # Credit multipliers per response mode (based on actual token usage ratio)
-CREDITS_MULTIPLIER: dict[str, int] = {"fast": 1, "pro": 3, "extended": 8}
+CREDITS_MULTIPLIER: dict[str, int] = {"fast": 1, "pro": 3, "extended": 8, "agent": 10}
 from doppel.ingestion.connectors.gmail import (
     GmailConnector,
     get_auth_url,
@@ -1316,7 +1316,8 @@ async def get_consumer_conversations(
                     ch.last_user_message,
                     ci.display_name, ci.handle, ci.avatar_url, ci.category,
                     COALESCE(ci.price_per_query, 0) AS price_per_query,
-                    COALESCE(ch.last_message_at, a.added_at) AS sort_key
+                    COALESCE(ch.last_message_at, a.added_at) AS sort_key,
+                    (ci.user_id = :uid) AS is_owner
                 FROM added a
                 JOIN clone_identity ci ON ci.clone_id = a.clone_id
                 LEFT JOIN chat_history ch ON ch.clone_id = a.clone_id
@@ -1331,14 +1332,15 @@ async def get_consumer_conversations(
                     ch.last_user_message,
                     ci.display_name, ci.handle, ci.avatar_url, ci.category,
                     COALESCE(ci.price_per_query, 0) AS price_per_query,
-                    ch.last_message_at AS sort_key
+                    ch.last_message_at AS sort_key,
+                    (ci.user_id = :uid) AS is_owner
                 FROM chat_history ch
                 JOIN clone_identity ci ON ci.clone_id = ch.clone_id
                 WHERE ch.clone_id NOT IN (SELECT clone_id FROM added)
             )
             SELECT DISTINCT ON (clone_id)
                 clone_id, session_id, last_message_at, last_user_message,
-                display_name, handle, avatar_url, category, price_per_query, sort_key
+                display_name, handle, avatar_url, category, price_per_query, sort_key, is_owner
             FROM combined
             ORDER BY clone_id, sort_key DESC NULLS LAST
         """),
@@ -1357,6 +1359,7 @@ async def get_consumer_conversations(
             "avatar_url":        r["avatar_url"],
             "category":          r["category"],
             "price_per_query":   float(r["price_per_query"] or 0),
+            "is_owner":          bool(r["is_owner"]),
         })
     convs.sort(key=lambda c: c["last_message_at"] or "", reverse=True)
     return {"conversations": convs}
@@ -2437,6 +2440,9 @@ async def _handle_chat_credits_and_context(
     if not price_rec:
         raise HTTPException(status_code=404, detail="Clone not found")
     caller_is_owner = bool(caller_user_id and caller_user_id == price_rec["user_id"])
+    # If the caller is provably the owner (server-verified), always enable owner_mode
+    if caller_is_owner and not body.owner_mode:
+        body = body.model_copy(update={"owner_mode": True})
     # All messages use credits — owner in owner_mode is exempt
     charge_credits = not (caller_is_owner and body.owner_mode)
 
@@ -11756,3 +11762,355 @@ async def run_automation_now(
     from doppel.brain.tasks.runner import run_task as _run_task
     asyncio.create_task(_run_task(task_id))
     return {"task_id": str(task_id), "status": "started"}
+
+
+# ---------------------------------------------------------------------------
+# WORKFLOWS — Deterministic trigger → condition → action pipelines
+# ---------------------------------------------------------------------------
+
+class WorkflowCreate(BaseModel):
+    name: str
+    description: str = ""
+    trigger: dict
+    conditions: list[dict] = []
+    actions: list[dict] = []
+    poll_interval_ms: int = 60000
+    cooldown_ms: int = 300000
+    max_firings_per_day: int = 100
+    approval_mode: str = "auto_execute"
+
+
+class WorkflowUpdate(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    status: str | None = None
+    trigger: dict | None = None
+    conditions: list[dict] | None = None
+    actions: list[dict] | None = None
+    poll_interval_ms: int | None = None
+    approval_mode: str | None = None
+
+
+@app.get("/clones/{clone_id}/workflows")
+async def list_workflows(
+    clone_id: UUID,
+    session: AsyncSession = Depends(get_session),
+):
+    rows = await session.execute(
+        sql_text("""
+            SELECT id, name, description, status, trigger, conditions, actions,
+                   poll_interval_ms, cooldown_ms, max_firings_per_day, approval_mode,
+                   last_fired_at, next_poll_at, daily_firing_count, error_message,
+                   created_at, updated_at
+            FROM clone_workflows WHERE clone_id = :cid ORDER BY created_at DESC
+        """),
+        {"cid": str(clone_id)},
+    )
+    workflows = []
+    for r in rows.mappings().all():
+        wf = dict(r)
+        wf["id"] = str(wf["id"])
+        for f in ("last_fired_at", "next_poll_at", "created_at", "updated_at"):
+            if wf.get(f):
+                wf[f] = wf[f].isoformat() if hasattr(wf[f], "isoformat") else wf[f]
+        workflows.append(wf)
+    return {"workflows": workflows}
+
+
+@app.post("/clones/{clone_id}/workflows", status_code=201)
+async def create_workflow(
+    clone_id: UUID,
+    body: WorkflowCreate,
+    session: AsyncSession = Depends(get_session),
+):
+    from doppel.brain.tasks.scheduler import compute_next_run
+    from datetime import timedelta
+
+    workflow_id = uuid4()
+    trigger = body.trigger
+    trigger_type = trigger.get("type", "schedule")
+
+    poll_interval_ms = max(body.poll_interval_ms, 10000)
+
+    now = datetime.now(timezone.utc)
+    if trigger_type == "schedule":
+        schedule = trigger.get("config", {}).get("schedule", "daily:09:00")
+        next_poll = compute_next_run(schedule)
+    else:
+        next_poll = now + timedelta(milliseconds=poll_interval_ms)
+
+    # Webhook secret for webhook triggers
+    webhook_secret = secrets.token_urlsafe(24) if trigger_type == "webhook" else None
+
+    await session.execute(
+        sql_text("""
+            INSERT INTO clone_workflows
+                (id, clone_id, name, description, status, trigger, conditions, actions,
+                 poll_interval_ms, cooldown_ms, max_firings_per_day, approval_mode,
+                 next_poll_at, webhook_secret)
+            VALUES
+                (:id, :cid, :name, :desc, 'active', CAST(:trigger AS jsonb), CAST(:conditions AS jsonb),
+                 CAST(:actions AS jsonb), :poll_ms, :cooldown, :max_day, :approval, :next_poll, :ws)
+        """),
+        {
+            "id": str(workflow_id),
+            "cid": str(clone_id),
+            "name": body.name,
+            "desc": body.description,
+            "trigger": json.dumps(body.trigger),
+            "conditions": json.dumps(body.conditions),
+            "actions": json.dumps(body.actions),
+            "poll_ms": poll_interval_ms,
+            "cooldown": body.cooldown_ms,
+            "max_day": body.max_firings_per_day,
+            "approval": body.approval_mode,
+            "next_poll": next_poll,
+            "ws": webhook_secret,
+        },
+    )
+    await session.commit()
+
+    result = {"workflow_id": str(workflow_id), "name": body.name, "status": "active"}
+    if webhook_secret:
+        result["webhook_url"] = f"/webhooks/{clone_id}/{workflow_id}"
+        result["webhook_secret"] = webhook_secret
+    return result
+
+
+@app.patch("/clones/{clone_id}/workflows/{workflow_id}")
+async def update_workflow(
+    clone_id: UUID,
+    workflow_id: UUID,
+    body: WorkflowUpdate,
+    session: AsyncSession = Depends(get_session),
+):
+    updates: dict = {}
+    if body.name is not None:       updates["name"] = body.name
+    if body.description is not None: updates["description"] = body.description
+    if body.status is not None:     updates["status"] = body.status
+    if body.trigger is not None:    updates["trigger"] = json.dumps(body.trigger)
+    if body.conditions is not None: updates["conditions"] = json.dumps(body.conditions)
+    if body.actions is not None:    updates["actions"] = json.dumps(body.actions)
+    if body.approval_mode is not None: updates["approval_mode"] = body.approval_mode
+    if body.poll_interval_ms is not None:
+        updates["poll_interval_ms"] = max(body.poll_interval_ms, 10000)
+
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+
+    set_parts = ", ".join(
+        f"{k} = CAST(:{k} AS jsonb)" if k in ('trigger', 'conditions', 'actions') else f"{k} = :{k}"
+        for k in updates
+    )
+    updates["workflow_id"] = str(workflow_id)
+    updates["clone_id"] = str(clone_id)
+
+    await session.execute(
+        sql_text(f"UPDATE clone_workflows SET {set_parts}, updated_at = NOW() WHERE id = :workflow_id AND clone_id = :clone_id"),
+        updates,
+    )
+    await session.commit()
+    return {"ok": True}
+
+
+@app.delete("/clones/{clone_id}/workflows/{workflow_id}", status_code=204)
+async def delete_workflow(
+    clone_id: UUID,
+    workflow_id: UUID,
+    session: AsyncSession = Depends(get_session),
+):
+    await session.execute(
+        sql_text("DELETE FROM clone_workflows WHERE id = :wid AND clone_id = :cid"),
+        {"wid": str(workflow_id), "cid": str(clone_id)},
+    )
+    await session.commit()
+
+
+@app.post("/clones/{clone_id}/workflows/{workflow_id}/trigger", status_code=202)
+async def trigger_workflow_now(
+    clone_id: UUID,
+    workflow_id: UUID,
+    session: AsyncSession = Depends(get_session),
+):
+    """Manually fire a workflow immediately."""
+    row = await session.execute(
+        sql_text("SELECT id, name FROM clone_workflows WHERE id = :wid AND clone_id = :cid"),
+        {"wid": str(workflow_id), "cid": str(clone_id)},
+    )
+    wf = row.mappings().first()
+    if not wf:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+
+    from doppel.brain.tasks.workflow_engine import fire_workflow as _fire_wf
+    asyncio.create_task(_fire_wf(workflow_id, clone_id, {"trigger_value": "manual", "manual": True}))
+    return {"status": "triggered", "workflow_id": str(workflow_id)}
+
+
+@app.get("/clones/{clone_id}/workflows/{workflow_id}/firings")
+async def list_workflow_firings(
+    clone_id: UUID,
+    workflow_id: UUID,
+    limit: int = Query(default=20, le=100),
+    session: AsyncSession = Depends(get_session),
+):
+    rows = await session.execute(
+        sql_text("""
+            SELECT id, fired_at, trigger_value, conditions_passed, actions_executed,
+                   latency_ms, status
+            FROM clone_workflow_firings
+            WHERE workflow_id = :wid
+            ORDER BY fired_at DESC LIMIT :lim
+        """),
+        {"wid": str(workflow_id), "lim": limit},
+    )
+    firings = []
+    for r in rows.mappings().all():
+        f = dict(r)
+        f["id"] = str(f["id"])
+        if f.get("fired_at"):
+            f["fired_at"] = f["fired_at"].isoformat()
+        firings.append(f)
+    return {"firings": firings}
+
+
+@app.post("/webhooks/{clone_id}/{workflow_id}")
+async def receive_webhook(
+    clone_id: UUID,
+    workflow_id: UUID,
+    request: Request,
+):
+    """Webhook receiver — fires a workflow triggered by an external POST."""
+    from doppel.brain.tasks.workflow_engine import fire_workflow as _fire_wf
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    # Validate secret if set
+    async with AsyncSessionLocal() as session:
+        row = await session.execute(
+            sql_text("SELECT webhook_secret, status FROM clone_workflows WHERE id = :wid AND clone_id = :cid"),
+            {"wid": str(workflow_id), "cid": str(clone_id)},
+        )
+        wf = row.mappings().first()
+
+    if not wf:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    if wf["status"] != "active":
+        raise HTTPException(status_code=409, detail="Workflow is not active")
+
+    secret = wf.get("webhook_secret")
+    if secret:
+        sig_header = request.headers.get("X-Doppel-Signature", "")
+        import hmac as _hmac, hashlib as _hashlib
+        raw_body = await request.body()
+        expected = _hmac.new(secret.encode(), raw_body, _hashlib.sha256).hexdigest()
+        if not _hmac.compare_digest(sig_header, f"sha256={expected}"):
+            raise HTTPException(status_code=401, detail="Invalid signature")
+
+    asyncio.create_task(_fire_wf(workflow_id, clone_id, {"trigger_value": body, "source": "webhook"}))
+    return {"ok": True, "workflow_id": str(workflow_id)}
+
+
+# ---------------------------------------------------------------------------
+# SKILL GENERATION — Configure workflows through conversation
+# ---------------------------------------------------------------------------
+
+class SkillConfigRequest(BaseModel):
+    clone_id: UUID
+    request: str
+
+
+class SkillDeployRequest(BaseModel):
+    clone_id: UUID
+    workflow_draft: dict
+    source_request: str = ""
+    explanation: str = ""
+
+
+@app.post("/clones/{clone_id}/skills/configure")
+async def configure_skill_from_conversation(
+    clone_id: UUID,
+    body: SkillConfigRequest,
+    session: AsyncSession = Depends(get_session),
+):
+    """
+    Analyze a natural-language skill request and return a workflow draft + dry run.
+    The client shows the result to the creator for approval, then calls /skills/deploy.
+    """
+    from doppel.brain.tasks.skill_generator import configure_workflow_from_conversation
+
+    # Get connected connectors for this clone
+    rows = await session.execute(
+        sql_text("SELECT name FROM clone_mcp_servers WHERE clone_id = :cid AND enabled = TRUE"),
+        {"cid": str(clone_id)},
+    )
+    connected = [r["name"] for r in rows.mappings().all()]
+
+    # Get existing skills
+    skill_rows = await session.execute(
+        sql_text("SELECT name FROM clone_skills WHERE clone_id = :cid AND status = 'active'"),
+        {"cid": str(clone_id)},
+    )
+    existing_skills = [r["name"] for r in skill_rows.mappings().all()]
+
+    # Get clone name
+    name_row = await session.execute(
+        sql_text("SELECT display_name FROM clone_identity WHERE clone_id = :cid"),
+        {"cid": str(clone_id)},
+    )
+    name_rec = name_row.mappings().first()
+    clone_name = name_rec["display_name"] if name_rec else "your clone"
+
+    result = await configure_workflow_from_conversation(
+        request=body.request,
+        clone_id=clone_id,
+        connected_connectors=connected,
+        available_skills=existing_skills,
+        clone_name=clone_name,
+    )
+    return result
+
+
+@app.post("/clones/{clone_id}/skills/deploy", status_code=201)
+async def deploy_skill(
+    clone_id: UUID,
+    body: SkillDeployRequest,
+    session: AsyncSession = Depends(get_session),
+):
+    """Deploy an approved workflow draft as an active skill."""
+    from doppel.brain.tasks.skill_generator import deploy_skill_from_workflow
+
+    result = await deploy_skill_from_workflow(
+        workflow_draft=body.workflow_draft,
+        source_request=body.source_request,
+        clone_id=clone_id,
+        explanation=body.explanation,
+    )
+    return result
+
+
+@app.get("/clones/{clone_id}/skills")
+async def list_skills(
+    clone_id: UUID,
+    session: AsyncSession = Depends(get_session),
+):
+    rows = await session.execute(
+        sql_text("""
+            SELECT id, name, category, description, is_generated, source_request,
+                   workflow_id, status, explanation, approval_count, created_at
+            FROM clone_skills WHERE clone_id = :cid ORDER BY created_at DESC
+        """),
+        {"cid": str(clone_id)},
+    )
+    skills = []
+    for r in rows.mappings().all():
+        s = dict(r)
+        s["id"] = str(s["id"])
+        if s.get("workflow_id"):
+            s["workflow_id"] = str(s["workflow_id"])
+        if s.get("created_at"):
+            s["created_at"] = s["created_at"].isoformat()
+        skills.append(s)
+    return {"skills": skills}

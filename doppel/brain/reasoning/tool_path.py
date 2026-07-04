@@ -35,7 +35,7 @@ from doppel.brain.tools.connectors import call_native_tool
 _log = logging.getLogger(__name__)
 
 _MAX_TOOL_ITERATIONS = 8
-_MODEL = "claude-sonnet-4-6"
+_MODEL = "claude-sonnet-5"
 
 
 def _build_messages(
@@ -56,10 +56,26 @@ def _build_messages(
     return messages
 
 
+_WRITE_VERBS = {"send", "create", "post", "write", "delete", "remove", "update",
+                "edit", "reply", "forward", "move", "archive", "upload", "insert",
+                "add", "patch", "put", "publish", "submit", "set", "reset", "push"}
+
+
+def _is_write_tool(tool_name: str) -> bool:
+    lower = tool_name.lower().replace("-", "_")
+    return any(verb in lower.split("_") or lower.startswith(verb) for verb in _WRITE_VERBS)
+
+
+def _filter_read_only(tools: list[dict]) -> list[dict]:
+    """Remove any tool whose name suggests a write/mutating operation."""
+    return [t for t in tools if not _is_write_tool(t.get("name", ""))]
+
+
 def _build_system(
     identity: IdentityLayer,
     memory: MemoryContext,
     recent_actions: list[dict] | None = None,
+    read_only: bool = False,
 ) -> str:
     """Build the system prompt for the tool path."""
     import datetime
@@ -108,17 +124,33 @@ def _build_system(
 
     context_block = "\n\n".join(context_parts)
 
+    if read_only:
+        mode_block = """\
+## Mode: Read-only
+You can read, search, and fetch data from connected sources to answer the user's question.
+You CANNOT send, create, post, delete, or modify anything. Read-only access only.
+If the user asks you to take a write action (send email, post message, create file, etc.),
+tell them to switch to Agent mode by clicking the Agent button in the chat."""
+    else:
+        mode_block = """\
+## Mode: Agent (full access)
+You are an execution agent with full tool access. Take decisive action — read AND write.
+Complete the task end-to-end without asking for unnecessary confirmation.
+If a tool call fails, retry with adjusted parameters or try an alternative approach.
+Never give up after one failure — exhaust all options before reporting an error.
+NEVER say you can't run in the background or suggest Zapier/n8n/Make."""
+
     return f"""{persona}
 
 {context_block}
 
-## Tool use instructions
-You have access to external tools. Use them when the user asks you to take an action (post, search, find, create, delete, etc.).
-- Call the appropriate tool with the right arguments.
-- After calling a tool, report the result clearly and concisely.
-- If a tool fails, say so and offer an alternative.
-- Never fabricate tool results.
-- Respond in plain conversational sentences. Never use email sign-offs (Best, Regards, Cheers, etc.), bullet lists of steps, or formal closings."""
+{mode_block}
+
+## Tool use rules
+- Call tools with precise arguments extracted from the user's request.
+- After each tool result, decide: is the task complete, or do you need another tool call?
+- Never fabricate tool results. If a search returns nothing, say so and try a different query.
+- Respond in plain, direct sentences. No email sign-offs, no bullet lists of steps."""
 
 
 async def _log_tool_action(
@@ -141,7 +173,7 @@ async def _log_tool_action(
                     INSERT INTO proposals
                       (clone_id, proposal_type, title, content, context, confidence, status, executed_at)
                     VALUES
-                      (:cid, 'tool_action', :title, :content, :ctx::jsonb, :conf, 'executed', NOW())
+                      (:cid, 'tool_action', :title, :content, CAST(:ctx AS jsonb), :conf, 'executed', NOW())
                 """),
                 {
                     "cid": str(clone_id),
@@ -166,6 +198,7 @@ async def run(
     session: AsyncSession | None = None,
     clone_id: UUID | None = None,
     recent_actions: list[dict] | None = None,
+    read_only: bool = False,
 ) -> tuple[str, ReasoningTrace]:
     """
     Non-streaming tool path. Returns (response_text, trace).
@@ -176,17 +209,18 @@ async def run(
     trace.framing = "tool_path"
 
     messages = _build_messages(brain_input, memory, working)
-    system = _build_system(identity, memory, recent_actions)
+    system = _build_system(identity, memory, recent_actions, read_only=read_only)
     api_key = get_anthropic_key()
 
+    active_tools = _filter_read_only(mcp_tools) if read_only else mcp_tools
     tool_names_called: list[str] = []
 
     for iteration in range(_MAX_TOOL_ITERATIONS):
         body = {
             "model": _MODEL,
-            "max_tokens": 1024,
+            "max_tokens": 4096,
             "system": system,
-            "tools": mcp_tools,
+            "tools": active_tools,
             "messages": messages,
         }
 
@@ -280,6 +314,7 @@ async def run_stream(
     session: AsyncSession | None = None,
     clone_id: UUID | None = None,
     recent_actions: list[dict] | None = None,
+    read_only: bool = False,
 ) -> AsyncGenerator[tuple[str, object], None]:
     """
     Streaming tool path. Yields:
@@ -294,17 +329,18 @@ async def run_stream(
     trace.framing = "tool_path"
 
     messages = _build_messages(brain_input, memory, working)
-    system = _build_system(identity, memory, recent_actions)
+    system = _build_system(identity, memory, recent_actions, read_only=read_only)
     api_key = get_anthropic_key()
 
+    active_tools = _filter_read_only(mcp_tools) if read_only else mcp_tools
     tool_names_called: list[str] = []
 
     for iteration in range(_MAX_TOOL_ITERATIONS):
         body = {
             "model": _MODEL,
-            "max_tokens": 1024,
+            "max_tokens": 4096,
             "system": system,
-            "tools": mcp_tools,
+            "tools": active_tools,
             "messages": messages,
         }
 

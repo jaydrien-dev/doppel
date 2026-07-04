@@ -15,6 +15,7 @@ declare global {
 }
 import { MessageBubble } from "./MessageBubble";
 import { TypingIndicator } from "./TypingIndicator";
+import type { WorkflowDraft } from "@/lib/types";
 
 interface KnowledgeArea {
   area: string;
@@ -917,11 +918,159 @@ function ExpertMatchModal({ onClose }: { onClose: () => void }) {
 }
 
 // ---------------------------------------------------------------------------
+// WorkflowDraftCard
+// ---------------------------------------------------------------------------
+type WFAction = { type: string; config?: Record<string, unknown> };
+type WFCondition = { field?: string; operator?: string; value?: unknown };
+
+function WorkflowDraftCard({ draft, cloneId, onActivated }: { draft: WorkflowDraft; cloneId: string; onActivated: (name: string) => void }) {
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+
+  async function activate() {
+    setLoading(true); setErr(null);
+    try {
+      const res = await fetch("/api/skills/deploy", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clone_id: cloneId, workflow_draft: draft }),
+      });
+      if (!res.ok) { const e = await res.json().catch(() => ({})); setErr(e.detail ?? "Failed to deploy."); return; }
+      setDone(true);
+      onActivated(draft.name);
+    } catch { setErr("Network error."); }
+    finally { setLoading(false); }
+  }
+
+  const tType = draft.trigger?.type ?? "schedule";
+  const tCfg = (draft.trigger?.config ?? {}) as Record<string, unknown>;
+  const actions = (draft.actions ?? []) as WFAction[];
+  const conditions = (draft.conditions ?? []) as WFCondition[];
+  const intervalSec = draft.poll_interval_ms ? Math.round(draft.poll_interval_ms / 1000) : null;
+
+  const triggerLine = tType === "schedule"
+    ? `Schedule · ${String(tCfg.schedule ?? "daily")}`
+    : tType === "poll_api"
+    ? `Poll API · every ${intervalSec ?? 60}s`
+    : tType === "poll_webpage"
+    ? `Monitor page · every ${intervalSec ?? 60}s`
+    : tType === "webhook"
+    ? "Webhook trigger"
+    : tType;
+
+  function actionSummary(a: WFAction): string {
+    const c = a.config ?? {};
+    if (a.type === "send_email") return `Email → ${String(c.to ?? "recipient")}`;
+    if (a.type === "connector_action") return `${String(c.connectorId ?? "connector")} → ${String(c.tool ?? "action")}`;
+    if (a.type === "notify") return `Notify · ${String(c.message ?? "").slice(0, 40)}`;
+    if (a.type === "ai_decide") return "Clone decides action";
+    return a.type;
+  }
+
+  const sep = { height: 1, background: "rgba(255,255,255,0.05)", margin: "10px 0" };
+
+  if (done) {
+    return (
+      <div style={{ marginTop: 8, marginLeft: 40, maxWidth: 500, padding: "14px 16px", borderRadius: 14, background: "rgba(52,211,153,0.05)", border: "1px solid rgba(52,211,153,0.18)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7.5" fill="rgba(52,211,153,0.12)" stroke="rgba(52,211,153,0.4)"/><path d="M4.5 8.5l2.5 2.5 5-5.5" stroke="#34D399" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg>
+          <div>
+            <p style={{ margin: 0, fontSize: 13, fontWeight: 500, color: "rgba(52,211,153,0.9)" }}>Running in background</p>
+            <p style={{ margin: 0, fontSize: 11, color: "rgba(255,255,255,0.35)", marginTop: 2 }}>{draft.name} · check Activity tab to monitor</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ marginTop: 8, marginLeft: 40, maxWidth: 500, borderRadius: 14, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.09)", overflow: "hidden" }}>
+      {/* Header */}
+      <div style={{ padding: "13px 16px 12px", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
+          <p style={{ margin: 0, fontSize: 13, fontWeight: 500, color: "rgba(255,255,255,0.88)", lineHeight: 1.4 }}>{draft.name}</p>
+          <span style={{ fontSize: 9, padding: "3px 8px", borderRadius: 99, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.30)", whiteSpace: "nowrap" as const, flexShrink: 0, marginTop: 1 }}>WORKFLOW DRAFT</span>
+        </div>
+        {draft.description && <p style={{ margin: "5px 0 0", fontSize: 11, color: "rgba(255,255,255,0.40)", lineHeight: 1.6 }}>{draft.description}</p>}
+      </div>
+
+      {/* Details */}
+      <div style={{ padding: "11px 16px" }}>
+        {/* Trigger */}
+        <div style={{ marginBottom: 8 }}>
+          <p style={{ margin: "0 0 4px", fontSize: 9, color: "rgba(255,255,255,0.25)", textTransform: "uppercase" as const, letterSpacing: "0.08em" }}>Trigger</p>
+          <p style={{ margin: 0, fontSize: 12, color: "rgba(255,255,255,0.65)" }}>{triggerLine}</p>
+          {tType === "poll_api" && tCfg.url && (
+            <p style={{ margin: "2px 0 0", fontSize: 10, color: "rgba(255,255,255,0.28)", fontFamily: "monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>{String(tCfg.url)}</p>
+          )}
+        </div>
+
+        {/* Conditions */}
+        {conditions.length > 0 && (
+          <>
+            <div style={sep} />
+            <div style={{ marginBottom: 8 }}>
+              <p style={{ margin: "0 0 4px", fontSize: 9, color: "rgba(255,255,255,0.25)", textTransform: "uppercase" as const, letterSpacing: "0.08em" }}>Condition{conditions.length > 1 ? "s" : ""}</p>
+              {conditions.map((c, i) => (
+                <p key={i} style={{ margin: "0 0 2px", fontSize: 12, color: "rgba(255,255,255,0.65)", fontFamily: "monospace" }}>
+                  {c.field} {c.operator} {String(c.value ?? "")}
+                </p>
+              ))}
+            </div>
+          </>
+        )}
+
+        {/* Actions */}
+        {actions.length > 0 && (
+          <>
+            <div style={sep} />
+            <div>
+              <p style={{ margin: "0 0 4px", fontSize: 9, color: "rgba(255,255,255,0.25)", textTransform: "uppercase" as const, letterSpacing: "0.08em" }}>Action{actions.length > 1 ? "s" : ""}</p>
+              {actions.map((a, i) => (
+                <p key={i} style={{ margin: "0 0 2px", fontSize: 12, color: "rgba(255,255,255,0.65)" }}>{actionSummary(a)}</p>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Footer */}
+      <div style={{ padding: "11px 16px 13px", borderTop: "1px solid rgba(255,255,255,0.06)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+        <span style={{ fontSize: 11, color: "rgba(255,255,255,0.25)" }}>
+          {draft.approval_mode === "auto_execute" ? "auto-execute" : draft.approval_mode?.replace("_", " ") ?? "auto-execute"}
+        </span>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          {err && <span style={{ fontSize: 11, color: "rgba(248,113,113,0.75)" }}>{err}</span>}
+          <button
+            onClick={activate}
+            disabled={loading}
+            style={{ fontSize: 12, fontWeight: 500, padding: "7px 18px", borderRadius: 10, background: loading ? "rgba(255,255,255,0.06)" : "rgba(255,255,255,0.10)", border: "1px solid rgba(255,255,255,0.15)", color: loading ? "rgba(255,255,255,0.40)" : "rgba(255,255,255,0.85)", cursor: loading ? "not-allowed" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", gap: 7, transition: "all 150ms" }}
+          >
+            {loading ? (
+              <>
+                <svg width="11" height="11" viewBox="0 0 16 16" fill="none" style={{ animation: "spin 1s linear infinite" }}><circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="2" strokeDasharray="25 13" strokeLinecap="round"/></svg>
+                Activating…
+              </>
+            ) : (
+              <>
+                <svg width="11" height="11" viewBox="0 0 16 16" fill="none"><path d="M3 3l10 5-10 5V3z" fill="currentColor"/></svg>
+                Activate workflow
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // ChatInterface
 // ---------------------------------------------------------------------------
-type ResponseMode = "fast" | "pro" | "extended";
+type ResponseMode = "fast" | "pro" | "extended" | "agent";
 
-const MULTIPLIERS: Record<ResponseMode, number> = { fast: 1, pro: 3, extended: 8 };
+const MULTIPLIERS: Record<ResponseMode, number> = { fast: 1, pro: 3, extended: 8, agent: 10 };
 
 const MODES: { value: ResponseMode; label: string; hint: string; icon: React.ReactNode }[] = [
   {
@@ -941,6 +1090,12 @@ const MODES: { value: ResponseMode; label: string; hint: string; icon: React.Rea
     label: "Extended",
     hint: "Deep thinking · ~15s",
     icon: <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M8 2l1.2 3.6L13 7l-3.8 1.4L8 12l-1.2-3.6L3 7l3.8-1.4z" opacity="0.9"/></svg>,
+  },
+  {
+    value: "agent",
+    label: "Agent",
+    hint: "Execute tasks · full connector access",
+    icon: <svg width="11" height="11" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="6" r="3" stroke="currentColor" strokeWidth="1.4"/><path d="M2 14c0-3 2.7-5 6-5s6 2 6 5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/></svg>,
   },
 ];
 
@@ -1524,11 +1679,20 @@ export function ChatInterface({
           {messages.map((msg) => {
             if (msg.isStreaming && !msg.content) return null;
             return (
-              <MessageBubble key={msg.id} message={msg}
-                cloneId={ownerMode ? cloneId : undefined}
-                cloneName={cloneName}
-                ownerMode={ownerMode} cloneInitial={cloneInitial} cloneColor={avatarColor}
-                onFeedback={makeConsFeedback(msg.trace_id)} />
+              <div key={msg.id}>
+                <MessageBubble message={msg}
+                  cloneId={ownerMode ? cloneId : undefined}
+                  cloneName={cloneName}
+                  ownerMode={ownerMode} cloneInitial={cloneInitial} cloneColor={avatarColor}
+                  onFeedback={makeConsFeedback(msg.trace_id)} />
+                {msg.workflowDraft && !msg.isStreaming && (
+                  <WorkflowDraftCard
+                    draft={msg.workflowDraft}
+                    cloneId={cloneId}
+                    onActivated={(_name) => { /* card shows its own success state */ }}
+                  />
+                )}
+              </div>
             );
           })}
 
@@ -1677,7 +1841,7 @@ export function ChatInterface({
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={voiceEnabled && !listening ? "Tap mic to speak, or type…" : placeholder}
+              placeholder={voiceEnabled && !listening ? "Tap mic to speak, or type…" : responseMode === "agent" ? "Give your clone an instruction to execute…" : placeholder}
               rows={1}
             />
             {voiceEnabled && (
@@ -1704,16 +1868,37 @@ export function ChatInterface({
 
           <div className="composer-meta">
             {/* Mode selector */}
-            <div style={{ display: "flex", alignItems: "center", gap: 1, background: "rgba(255,255,255,0.04)", borderRadius: 8, padding: 2, border: "1px solid rgba(255,255,255,0.06)" }}>
-              {MODES.map((m) => {
-                const active = responseMode === m.value;
+            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              {/* Fast / Pro / Extended pill group */}
+              <div style={{ display: "flex", alignItems: "center", gap: 1, background: "rgba(255,255,255,0.04)", borderRadius: 8, padding: 2, border: "1px solid rgba(255,255,255,0.06)" }}>
+                {MODES.filter(m => m.value !== "agent").map((m) => {
+                  const active = responseMode === m.value;
+                  return (
+                    <button key={m.value} onClick={() => setResponseMode(m.value)} title={m.hint}
+                      style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "3px 8px", borderRadius: 6, border: "none", fontSize: 11, fontWeight: 500, cursor: "pointer", fontFamily: "inherit", background: active ? "rgba(255,255,255,0.09)" : "transparent", color: active ? "rgba(255,255,255,0.75)" : "rgba(255,255,255,0.28)", transition: "all 120ms", whiteSpace: "nowrap" }}>
+                      {m.icon}{m.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Separator */}
+              <div style={{ width: 1, height: 14, background: "rgba(255,255,255,0.08)" }} />
+
+              {/* Agent toggle */}
+              {(() => {
+                const agentMode = responseMode === "agent";
                 return (
-                  <button key={m.value} onClick={() => setResponseMode(m.value)} title={m.hint}
-                    style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "3px 8px", borderRadius: 6, border: "none", fontSize: 11, fontWeight: 500, cursor: "pointer", fontFamily: "inherit", background: active ? "rgba(255,255,255,0.09)" : "transparent", color: active ? "rgba(255,255,255,0.75)" : "rgba(255,255,255,0.28)", transition: "all 120ms", whiteSpace: "nowrap" }}>
-                    {m.icon}{m.label}
+                  <button
+                    onClick={() => setResponseMode(agentMode ? "fast" : "agent")}
+                    title="Agent mode — executes tasks with full connector access (read + write)"
+                    style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 10px", borderRadius: 7, border: `1px solid ${agentMode ? "rgba(255,255,255,0.18)" : "rgba(255,255,255,0.07)"}`, fontSize: 11, fontWeight: 500, cursor: "pointer", fontFamily: "inherit", background: agentMode ? "rgba(255,255,255,0.10)" : "rgba(255,255,255,0.03)", color: agentMode ? "rgba(255,255,255,0.82)" : "rgba(255,255,255,0.32)", transition: "all 140ms", whiteSpace: "nowrap" as const }}>
+                    <svg width="11" height="11" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="6" r="3" stroke="currentColor" strokeWidth="1.4"/><path d="M2 14c0-3 2.7-5 6-5s6 2 6 5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/></svg>
+                    Agent
+                    {agentMode && <span style={{ width: 5, height: 5, borderRadius: 999, background: "#34D399", marginLeft: 2 }} />}
                   </button>
                 );
-              })}
+              })()}
             </div>
 
             {/* Clear history — only shown when there are messages */}

@@ -30,6 +30,9 @@ class BrainInput(BaseModel):
     # When True: caller is the owner training their clone — skip credit deduction for owner.
     # When False: treat caller as a consumer — deduct credits even if caller is the owner.
     owner_mode: bool = True
+    # When True: treat the message as an agent instruction — full tool/connector access, can write.
+    # When False (default): chat mode — connectors are read-only (fetch/search only, no writes).
+    agent_mode: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -251,7 +254,7 @@ class ReasoningTrace(BaseModel):
     The scratchpad is the 'thinking' step before every non-trivial response.
     """
     id: UUID = Field(default_factory=uuid4)
-    path: Literal["fast", "slow"]
+    path: Literal["fast", "slow", "tool", "workflow_config"]
 
     # Fast path fields (populated for all traces)
     framing: str = ""                       # how the brain understood the input
@@ -281,7 +284,7 @@ class BrainOutput(BaseModel):
     escalation_reason: Optional[str] = None
     sources: list[SourceRef] = Field(default_factory=list)
     reasoning_trace_id: UUID                # stored trace for learning loop
-    path_taken: Literal["fast", "slow"]
+    path_taken: Literal["fast", "slow", "tool", "workflow_config"]
     latency_ms: Optional[int] = None
     style_score: Optional[float] = None    # auto-eval, populated async
 

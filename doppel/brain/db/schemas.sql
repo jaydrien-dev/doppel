@@ -944,3 +944,77 @@ CREATE TABLE IF NOT EXISTS clone_tasks (
     completed_at    TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS clone_tasks_clone_idx ON clone_tasks (clone_id, status, created_at DESC);
+
+
+-- ---------------------------------------------------------------------------
+-- CLONE WORKFLOWS
+-- Deterministic trigger → condition → action pipelines (no LLM in the execution loop).
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS clone_workflows (
+    id                   UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    clone_id             UUID NOT NULL REFERENCES clone_identity(clone_id) ON DELETE CASCADE,
+    name                 TEXT NOT NULL,
+    description          TEXT,
+    status               TEXT NOT NULL DEFAULT 'active',  -- active | paused | error
+    trigger              JSONB NOT NULL DEFAULT '{}',     -- {type, config}
+    conditions           JSONB NOT NULL DEFAULT '[]',     -- [{field, operator, value, combineWith}]
+    actions              JSONB NOT NULL DEFAULT '[]',     -- [{type, config}]
+    poll_interval_ms     INTEGER NOT NULL DEFAULT 60000,  -- minimum 10000
+    cooldown_ms          INTEGER NOT NULL DEFAULT 300000,
+    max_firings_per_day  INTEGER NOT NULL DEFAULT 100,
+    approval_mode        TEXT NOT NULL DEFAULT 'auto_execute',
+    last_trigger_value   JSONB,                           -- last polled value for change detection
+    last_fired_at        TIMESTAMPTZ,
+    next_poll_at         TIMESTAMPTZ,
+    daily_firing_count   INTEGER NOT NULL DEFAULT 0,
+    daily_count_reset_at TIMESTAMPTZ,
+    error_message        TEXT,
+    webhook_secret       TEXT,                            -- for webhook trigger type
+    created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS clone_workflows_clone_idx ON clone_workflows (clone_id, status);
+CREATE INDEX IF NOT EXISTS clone_workflows_poll_idx ON clone_workflows (next_poll_at) WHERE status = 'active';
+
+
+-- ---------------------------------------------------------------------------
+-- CLONE WORKFLOW FIRINGS
+-- Immutable log of every workflow execution.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS clone_workflow_firings (
+    id                UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    workflow_id       UUID NOT NULL REFERENCES clone_workflows(id) ON DELETE CASCADE,
+    clone_id          UUID NOT NULL,
+    fired_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    trigger_value     JSONB,
+    conditions_passed BOOLEAN NOT NULL DEFAULT TRUE,
+    actions_executed  JSONB NOT NULL DEFAULT '[]',
+    approval_required BOOLEAN NOT NULL DEFAULT FALSE,
+    approved_at       TIMESTAMPTZ,
+    latency_ms        INTEGER,
+    status            TEXT NOT NULL DEFAULT 'completed'  -- completed | failed | pending_approval
+);
+CREATE INDEX IF NOT EXISTS clone_workflow_firings_wf_idx ON clone_workflow_firings (workflow_id, fired_at DESC);
+CREATE INDEX IF NOT EXISTS clone_workflow_firings_clone_idx ON clone_workflow_firings (clone_id, fired_at DESC);
+
+
+-- ---------------------------------------------------------------------------
+-- CLONE SKILLS
+-- Skill library: platform-built and clone-generated capabilities.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS clone_skills (
+    id               UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    clone_id         UUID NOT NULL REFERENCES clone_identity(clone_id) ON DELETE CASCADE,
+    name             TEXT NOT NULL,
+    category         TEXT NOT NULL DEFAULT 'execution',
+    description      TEXT,
+    is_generated     BOOLEAN NOT NULL DEFAULT FALSE,
+    source_request   TEXT,           -- original natural-language request (generated skills only)
+    workflow_id      UUID REFERENCES clone_workflows(id) ON DELETE SET NULL,
+    status           TEXT NOT NULL DEFAULT 'active',  -- active | paused | draft | rejected
+    explanation      TEXT,           -- plain-language explanation shown to creator
+    approval_count   INTEGER NOT NULL DEFAULT 0,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS clone_skills_clone_idx ON clone_skills (clone_id, status);

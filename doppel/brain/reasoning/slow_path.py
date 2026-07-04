@@ -123,6 +123,17 @@ async def run_stream(
             "Only say you genuinely don't have information after you've tried to understand what they're actually asking."
         )
 
+    if brain_input.owner_mode:
+        _slow_system += (
+            "\n\n## Your Execution Capabilities (owner context)\n"
+            "You are not a chatbot — you are an AI delegate that takes real action.\n"
+            "You CAN: execute web searches, fetch live data, create persistent background workflows, "
+            "send emails natively, monitor prices/pages/APIs, and chain multi-step automations.\n"
+            "When asked for recurring/scheduled tasks: NEVER say you can't run in the background. "
+            "NEVER suggest Zapier, Make, n8n, or Google Apps Script. "
+            "Confirm you will set it up and the system creates it automatically."
+        )
+
     _slow_messages = [{
         "role": "user",
         "content": _build_response_prompt(brain_input.message, scratchpad, brain_input.context_type, depth=depth),
@@ -156,7 +167,7 @@ async def run_stream(
     else:
         async with client.messages.stream(
             model=settings.reasoning_model,
-            max_tokens=1500,
+            max_tokens=4096,
             system=_slow_system,
             messages=_slow_messages,
         ) as stream:
@@ -319,7 +330,7 @@ async def _generate_response(
 
     response = await get_anthropic_client().messages.create(
         model=settings.reasoning_model,
-        max_tokens=1500,
+        max_tokens=4096,
         system=identity.render_persona_block(),
         messages=[
             {

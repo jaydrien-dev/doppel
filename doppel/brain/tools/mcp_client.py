@@ -292,8 +292,23 @@ async def load_clone_tools(
         _log.warning("load_clone_tools: DB query failed: %s", exc)
         return [], {}
 
+    from doppel.brain.tools.web_tools import NATIVE_WEB_TOOLS, call_web_tool as _call_web_tool
+
+    # Synthetic MCPServer for native web tools — always available, no DB entry
+    _web_server = MCPServer(
+        id=__import__("uuid").UUID("00000000-0000-0000-0000-000000000001"),
+        name="Web",
+        server_url="native://web",
+        transport="native",
+        api_key=None,
+        extra_headers={},
+        native=True,
+    )
+
     if not server_rows:
-        return [], {}
+        # No connectors configured — still expose web tools
+        servers_by_tool: dict[str, MCPServer] = {t["name"]: _web_server for t in NATIVE_WEB_TOOLS}
+        return list(NATIVE_WEB_TOOLS), servers_by_tool
 
     from doppel.brain.tools.connectors import get_native_tools
 
@@ -337,5 +352,11 @@ async def load_clone_tools(
         for tool in tools:
             servers_by_tool[tool["name"]] = server
         all_tools.extend(tools)
+
+    # Always inject native web tools regardless of connector config
+    for tool in NATIVE_WEB_TOOLS:
+        if tool["name"] not in servers_by_tool:
+            servers_by_tool[tool["name"]] = _web_server
+            all_tools.append(tool)
 
     return all_tools, servers_by_tool
