@@ -291,9 +291,6 @@ export function Sidebar() {
         <span className="sb__brand-name">doppel</span>
       </Link>
 
-      {/* Home shortcut */}
-      <HomeButton />
-
       {/* Nav */}
       <nav style={{ flex: 1, overflowY: "auto" }}>
         {GROUPS.map((g) => {
@@ -430,31 +427,6 @@ function UserFooter() {
   );
 }
 
-function HomeButton() {
-  return (
-    <Link
-      href="/home"
-      style={{
-        display: "flex", alignItems: "center", gap: 9,
-        margin: "0 4px 8px",
-        padding: "8px 10px", borderRadius: 12,
-        background: "rgba(26,115,232,0.10)",
-        border: "1px solid rgba(26,115,232,0.22)",
-        color: "#6BAEFF", textDecoration: "none",
-        fontSize: 13, fontWeight: 500,
-        transition: "all 180ms ease",
-      }}
-      onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(26,115,232,0.18)"; e.currentTarget.style.borderColor = "rgba(26,115,232,0.36)"; }}
-      onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(26,115,232,0.10)"; e.currentTarget.style.borderColor = "rgba(26,115,232,0.22)"; }}
-    >
-      <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-        <path d="M10 1H4a1 1 0 00-1 1v8a1 1 0 001 1h1.5V9h3v2H10a1 1 0 001-1V2a1 1 0 00-1-1z" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" opacity="0.7"/>
-        <path d="M1 5.5l6-4 6 4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
-      </svg>
-      Go to Home
-    </Link>
-  );
-}
 
 function TourButton() {
   const { startTour } = useTour();
