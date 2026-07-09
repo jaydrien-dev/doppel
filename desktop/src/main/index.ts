@@ -33,7 +33,7 @@ interface StoreSchema {
 const store = new Store<StoreSchema>({
   defaults: {
     launchAtStartup: false,
-    windowBounds: { width: 1280, height: 820 },
+    windowBounds: { width: 1440, height: 900 },
   },
 });
 
@@ -66,8 +66,8 @@ function createWindow(): void {
     height: bounds.height,
     x: bounds.x,
     y: bounds.y,
-    minWidth: 860,
-    minHeight: 560,
+    minWidth: 960,
+    minHeight: 600,
     title: "doppel",
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
     backgroundColor: "#080808",

@@ -705,7 +705,7 @@ function CloneChat({ clone, userId }: { clone: Clone; userId: string }) {
 
       {/* Header */}
       <header style={{ flexShrink:0,background:"rgba(8,8,8,0.85)",backdropFilter:"blur(20px)",borderBottom:"1px solid rgba(255,255,255,0.09)",position:"sticky",top:0,zIndex:20 } as React.CSSProperties}>
-        <div style={{ maxWidth:860,margin:"0 auto",display:"flex",alignItems:"center",gap:10,padding:"10px 16px" }}>
+        <div style={{ maxWidth:1080,margin:"0 auto",display:"flex",alignItems:"center",gap:10,padding:"10px 16px" }}>
           <div style={{ width:36,height:36,borderRadius:8,background:cloneColor,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,fontWeight:500,color:"#fff",flexShrink:0,overflow:"hidden" }}>
             {clone.avatar_url ? <img src={clone.avatar_url} alt="" style={{ width:"100%",height:"100%",objectFit:"cover" }} onError={e=>{(e.currentTarget as HTMLImageElement).style.display="none"}} /> : cloneInitial}
           </div>
@@ -739,7 +739,7 @@ function CloneChat({ clone, userId }: { clone: Clone; userId: string }) {
           </div>
         </div>
         {/* Tab bar */}
-        <div style={{ maxWidth:860,margin:"0 auto",padding:"0 16px 10px",display:"flex",gap:2 }}>
+        <div style={{ maxWidth:1080,margin:"0 auto",padding:"0 16px 10px",display:"flex",gap:2 }}>
           {(["chat","activity","connectors"] as const).map(v => (
             <button key={v} onClick={()=>setActiveView(v)} style={{ fontSize:12,fontWeight:500,padding:"5px 14px",borderRadius:8,border:"none",background:activeView===v?"rgba(255,255,255,0.09)":"transparent",color:activeView===v?"rgba(255,255,255,0.82)":"rgba(255,255,255,0.30)",cursor:"pointer",fontFamily:"inherit",transition:"all 180ms",textTransform:"capitalize" }}>{v}</button>
           ))}
@@ -750,7 +750,7 @@ function CloneChat({ clone, userId }: { clone: Clone; userId: string }) {
         <>
           {/* Readiness gate */}
           {readiness && !readiness.is_ready && (
-            <div style={{ margin:"10px 16px 0",maxWidth:860,alignSelf:"center",width:"calc(100% - 32px)",flexShrink:0 }}>
+            <div style={{ margin:"10px 16px 0",maxWidth:1080,alignSelf:"center",width:"calc(100% - 32px)",flexShrink:0 }}>
               <div style={{ background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.09)",borderRadius:14,padding:"14px 16px" }}>
                 <div style={{ display:"flex",alignItems:"flex-start",gap:10,marginBottom:10 }}>
                   <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style={{ flexShrink:0,marginTop:1 }}><circle cx="8" cy="8" r="6.5" stroke="rgba(255,255,255,0.30)" strokeWidth="1.3"/><path d="M8 5v4M8 11v.5" stroke="rgba(255,255,255,0.30)" strokeWidth="1.5" strokeLinecap="round"/></svg>
@@ -774,7 +774,7 @@ function CloneChat({ clone, userId }: { clone: Clone; userId: string }) {
           )}
 
           {/* Messages */}
-          <div className="chat-scroll" ref={scrollRef} style={{ flex:1,width:"100%",maxWidth:860,margin:"0 auto",padding:isEmpty?"24px 20px 16px":"24px 20px 140px",display:"flex",flexDirection:"column",gap:18,overflowY:"auto",boxSizing:"border-box" }}>
+          <div className="chat-scroll" ref={scrollRef} style={{ flex:1,width:"100%",maxWidth:1080,margin:"0 auto",padding:isEmpty?"24px 20px 16px":"24px 20px 140px",display:"flex",flexDirection:"column",gap:18,overflowY:"auto",boxSizing:"border-box" }}>
             {isEmpty ? (
               <div style={{ maxWidth:640,margin:"0 auto",width:"100%" }}>
                 <div style={{ display:"flex",alignItems:"center",gap:14,marginBottom:16 }}>
@@ -825,7 +825,7 @@ function CloneChat({ clone, userId }: { clone: Clone; userId: string }) {
 
           {/* Composer */}
           <div style={{ position:"sticky",bottom:0,background:"linear-gradient(180deg, rgba(8,8,8,0) 0%, rgba(8,8,8,0.88) 30%, #080808 65%)",padding:"28px 20px 16px",flexShrink:0 }}>
-            <div style={{ maxWidth:860,margin:"0 auto" }}>
+            <div style={{ maxWidth:1080,margin:"0 auto" }}>
               <div style={{ position:"relative" }}>
                 {/* Autocomplete */}
                 {(autoLoading||autoSuggestions.length>0) && (
