@@ -587,7 +587,7 @@ function CloneChat({ clone, userId }: { clone: Clone; userId: string }) {
   const [input,               setInput]               = useState("");
   const [shareCopied,         setShareCopied]         = useState(false);
   const [moreOpen,            setMoreOpen]            = useState(false);
-  const [activeView,          setActiveView]          = useState<"chat"|"activity">("chat");
+  const [activeView,          setActiveView]          = useState<"chat"|"activity"|"connectors">("chat");
   const [showAutomateModal,   setShowAutomateModal]   = useState(false);
   const [automateInstruction, setAutomateInstruction] = useState("");
   const [knowledgeAreas,      setKnowledgeAreas]      = useState<{area:string;depth:string}[]>([]);
@@ -648,7 +648,7 @@ function CloneChat({ clone, userId }: { clone: Clone; userId: string }) {
     ta.style.height="auto"; ta.style.height=`${Math.min(ta.scrollHeight,180)}px`;
   }, [input]);
 
-  function handleShare() { const url=`https://doppel.ai/c/${clone.handle}`; navigator.clipboard.writeText(url).catch(()=>{}); setShareCopied(true); setTimeout(()=>setShareCopied(false),2000); }
+  function handleShare() { const url=`https://doppel-pi.vercel.app/c/${clone.handle}`; navigator.clipboard.writeText(url).catch(()=>{}); setShareCopied(true); setTimeout(()=>setShareCopied(false),2000); }
 
   function isActionMessage(text: string): boolean {
     const lower=text.toLowerCase();
@@ -724,7 +724,7 @@ function CloneChat({ clone, userId }: { clone: Clone; userId: string }) {
               {moreOpen && (
                 <div style={{ position:"absolute",top:"calc(100% + 4px)",right:0,zIndex:50,background:"rgba(12,12,12,0.98)",border:"1px solid rgba(255,255,255,0.10)",borderRadius:10,padding:4,minWidth:176,backdropFilter:"blur(20px)",boxShadow:"0 12px 40px rgba(0,0,0,0.65)",transformOrigin:"top right",animation:"menu-in 260ms cubic-bezier(0.34,1.56,0.64,1) both" }}>
                   {([
-                    { label:"Open profile", icon:<svg width="12" height="12" viewBox="0 0 14 14" fill="none"><path d="M6 2H2.5A1.5 1.5 0 001 3.5v8A1.5 1.5 0 002.5 13h8A1.5 1.5 0 0012 11.5V8M8 1h5v5M13 1L7 7" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>, action:()=>{window.open(`https://doppel.ai/c/${clone.handle}`,"_blank");setMoreOpen(false);} },
+                    { label:"Open profile", icon:<svg width="12" height="12" viewBox="0 0 14 14" fill="none"><path d="M6 2H2.5A1.5 1.5 0 001 3.5v8A1.5 1.5 0 002.5 13h8A1.5 1.5 0 0012 11.5V8M8 1h5v5M13 1L7 7" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>, action:()=>{window.open(`https://doppel-pi.vercel.app/c/${clone.handle}`,"_blank");setMoreOpen(false);} },
                     { divider:true },
                     { label:"Clear history", icon:<svg width="12" height="12" viewBox="0 0 14 14" fill="none"><path d="M2 4h10M5 4V2.5h4V4M5.5 10.5V6M8.5 10.5V6M3 4l.8 8h6.4L11 4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>, action:()=>{startNewConversation();setMoreOpen(false);}, danger:true },
                   ] as Array<{label?:string;icon?:React.ReactNode;action?:()=>void;danger?:boolean;divider?:boolean}>).map((item,i) => item.divider
@@ -740,7 +740,7 @@ function CloneChat({ clone, userId }: { clone: Clone; userId: string }) {
         </div>
         {/* Tab bar */}
         <div style={{ maxWidth:860,margin:"0 auto",padding:"0 16px 10px",display:"flex",gap:2 }}>
-          {(["chat","activity"] as const).map(v => (
+          {(["chat","activity","connectors"] as const).map(v => (
             <button key={v} onClick={()=>setActiveView(v)} style={{ fontSize:12,fontWeight:500,padding:"5px 14px",borderRadius:8,border:"none",background:activeView===v?"rgba(255,255,255,0.09)":"transparent",color:activeView===v?"rgba(255,255,255,0.82)":"rgba(255,255,255,0.30)",cursor:"pointer",fontFamily:"inherit",transition:"all 180ms",textTransform:"capitalize" }}>{v}</button>
           ))}
         </div>
@@ -768,7 +768,7 @@ function CloneChat({ clone, userId }: { clone: Clone; userId: string }) {
                     </div>
                   ))}
                 </div>
-                <a href={`https://doppel.ai/dashboard/train`} target="_blank" rel="noreferrer" style={{ display:"inline-flex",alignItems:"center",gap:6,fontSize:12,fontWeight:500,padding:"5px 14px",borderRadius:8,background:"rgba(255,255,255,0.08)",border:"1px solid rgba(255,255,255,0.12)",color:"rgba(255,255,255,0.72)",textDecoration:"none",transition:"all 140ms" }} onMouseEnter={e=>{e.currentTarget.style.background="rgba(255,255,255,0.12)"}} onMouseLeave={e=>{e.currentTarget.style.background="rgba(255,255,255,0.08)"}}>Train this clone <svg width="10" height="10" viewBox="0 0 16 16" fill="none"><path d="M6 4l4 4-4 4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg></a>
+                <a href={`https://doppel-pi.vercel.app/dashboard/train`} target="_blank" rel="noreferrer" style={{ display:"inline-flex",alignItems:"center",gap:6,fontSize:12,fontWeight:500,padding:"5px 14px",borderRadius:8,background:"rgba(255,255,255,0.08)",border:"1px solid rgba(255,255,255,0.12)",color:"rgba(255,255,255,0.72)",textDecoration:"none",transition:"all 140ms" }} onMouseEnter={e=>{e.currentTarget.style.background="rgba(255,255,255,0.12)"}} onMouseLeave={e=>{e.currentTarget.style.background="rgba(255,255,255,0.08)"}}>Train this clone <svg width="10" height="10" viewBox="0 0 16 16" fill="none"><path d="M6 4l4 4-4 4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg></a>
               </div>
             </div>
           )}
@@ -878,6 +878,8 @@ function CloneChat({ clone, userId }: { clone: Clone; userId: string }) {
             </div>
           </div>
         </>
+      ) : activeView==="connectors" ? (
+        <ConnectorsPanel cloneId={clone.clone_id} />
       ) : (
         <ActivityPanel cloneId={clone.clone_id} />
       )}
@@ -919,177 +921,333 @@ function CloneChat({ clone, userId }: { clone: Clone; userId: string }) {
   );
 }
 
+// ── Shared input style ────────────────────────────────────────────────────────
+
+const inputStyle: React.CSSProperties = { width:"100%",padding:"8px 12px",borderRadius:10,border:"1px solid rgba(255,255,255,0.08)",background:"rgba(255,255,255,0.04)",color:"rgba(255,255,255,0.70)",fontSize:12,fontFamily:"inherit",outline:"none" };
+const labelStyle: React.CSSProperties = { display:"block",fontSize:12,color:"rgba(255,255,255,0.35)",marginBottom:6 };
+const cardStyle: React.CSSProperties = { display:"flex",flexDirection:"column",gap:16,padding:"18px 20px",borderRadius:14,background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.08)" };
+const eyebrowStyle: React.CSSProperties = { fontSize:10,textTransform:"uppercase" as const,letterSpacing:"0.12em",color:"rgba(255,255,255,0.25)",margin:0 };
+
+// ── ConnectorsPanel ───────────────────────────────────────────────────────────
+
+const CHANNEL_DEFS: { id: string; label: string; desc: string }[] = [
+  { id: "gmail",  label: "Gmail",           desc: "Read and send email on your behalf." },
+  { id: "gcal",   label: "Google Calendar",  desc: "Read and create calendar events." },
+  { id: "gdrive", label: "Google Drive",     desc: "Search and manage files." },
+  { id: "slack",  label: "Slack",            desc: "Post messages and read channels." },
+  { id: "github", label: "GitHub",           desc: "Read issues, PRs, and repos." },
+  { id: "notion", label: "Notion",           desc: "Read and edit pages." },
+];
+
+const TOOL_NAME_TO_ID: Record<string, string> = {
+  "Gmail": "gmail", "Google Calendar": "gcal", "Google Drive": "gdrive",
+  "Slack": "slack", "GitHub Integration": "github", "Notion": "notion",
+};
+
+interface ConnectedTool { id: string; name: string; server_url: string; transport: string; tool_names: string[]; enabled: boolean; created_at: string; }
+
+function ConnectorsPanel({ cloneId }: { cloneId: string }) {
+  const [tools, setTools] = useState<ConnectedTool[]>([]);
+  const [disconnecting, setDisconnecting] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  const webhookUrl = `${BACKEND}/webhook/whatsapp/${cloneId}`;
+
+  function loadTools() {
+    api(`/clones/${cloneId}/tools`).then(r => r.ok ? r.json() : []).then(d => { setTools(Array.isArray(d) ? d : d.tools ?? []); setLoading(false); }).catch(() => setLoading(false));
+  }
+  useEffect(() => { loadTools(); }, [cloneId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const connectedIds = new Set(tools.map(t => TOOL_NAME_TO_ID[t.name]).filter(Boolean));
+
+  async function disconnect(chId: string) {
+    const tool = tools.find(t => TOOL_NAME_TO_ID[t.name] === chId);
+    if (!tool) return;
+    setDisconnecting(chId);
+    await api(`/clones/${cloneId}/tools/${tool.id}`, { method: "DELETE" });
+    loadTools();
+    setDisconnecting(null);
+  }
+
+  function connect(serviceId: string) {
+    window.open(`${BACKEND}/oauth/${serviceId}/start?clone_id=${cloneId}&user_id=${_userId}`, "_blank");
+  }
+
+  return (
+    <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
+      {/* WhatsApp */}
+      <div style={{ borderRadius:14,border:"1px solid rgba(255,255,255,0.08)",background:"rgba(255,255,255,0.03)",padding:"16px 18px",display:"flex",flexDirection:"column",gap:10 }}>
+        <div style={{ display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:12 }}>
+          <div>
+            <p style={{ fontSize:13,fontWeight:500,color:"rgba(255,255,255,0.75)",margin:0 }}>WhatsApp</p>
+            <p style={{ fontSize:11,color:"rgba(255,255,255,0.35)",margin:"3px 0 0" }}>Paste this URL into your Twilio number's webhook settings.</p>
+          </div>
+          <span style={{ fontSize:10,padding:"2px 8px",borderRadius:999,flexShrink:0,marginTop:2,color:"rgba(255,255,255,0.28)",border:"1px solid rgba(255,255,255,0.08)" }}>Manual setup</span>
+        </div>
+        <div style={{ display:"flex",gap:8,alignItems:"center" }}>
+          <code style={{ flex:1,fontSize:11,padding:"7px 10px",borderRadius:8,background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.07)",color:"rgba(255,255,255,0.50)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{webhookUrl}</code>
+          <button onClick={() => { navigator.clipboard.writeText(webhookUrl); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
+            style={{ padding:"6px 12px",borderRadius:8,fontSize:11,background:"transparent",border:"1px solid rgba(255,255,255,0.10)",color:copied?"rgba(52,211,153,0.80)":"rgba(255,255,255,0.40)",cursor:"pointer",fontFamily:"inherit",flexShrink:0,transition:"color 150ms" }}>
+            {copied ? "Copied" : "Copy"}
+          </button>
+        </div>
+      </div>
+
+      {/* OAuth channels */}
+      {CHANNEL_DEFS.map(ch => {
+        const isConnected = connectedIds.has(ch.id);
+        const isDisc = disconnecting === ch.id;
+        return (
+          <div key={ch.id} style={{ borderRadius:14,border:"1px solid rgba(255,255,255,0.08)",background:"rgba(255,255,255,0.03)",padding:"14px 18px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12 }}>
+            <div>
+              <p style={{ fontSize:13,fontWeight:500,color:"rgba(255,255,255,0.75)",margin:0 }}>{ch.label}</p>
+              <p style={{ fontSize:11,color:"rgba(255,255,255,0.35)",margin:"3px 0 0" }}>{ch.desc}</p>
+            </div>
+            <div style={{ display:"flex",alignItems:"center",gap:8,flexShrink:0 }}>
+              {isConnected && <span style={{ fontSize:11,padding:"2px 8px",borderRadius:999,color:"rgba(52,211,153,0.70)",background:"rgba(52,211,153,0.08)",border:"1px solid rgba(52,211,153,0.18)" }}>Connected</span>}
+              {isConnected ? (
+                <button disabled={isDisc} onClick={() => disconnect(ch.id)}
+                  style={{ padding:"5px 12px",borderRadius:8,fontSize:11,background:"transparent",border:"1px solid rgba(248,113,113,0.15)",color:"rgba(248,113,113,0.60)",cursor:"pointer",fontFamily:"inherit",opacity:isDisc?0.4:1,transition:"all 150ms" }}
+                  onMouseEnter={e=>{e.currentTarget.style.borderColor="rgba(248,113,113,0.30)";e.currentTarget.style.color="rgba(248,113,113,0.85)"}}
+                  onMouseLeave={e=>{e.currentTarget.style.borderColor="rgba(248,113,113,0.15)";e.currentTarget.style.color="rgba(248,113,113,0.60)"}}>
+                  {isDisc ? "..." : "Disconnect"}
+                </button>
+              ) : (
+                <button onClick={() => connect(ch.id)}
+                  style={{ padding:"5px 12px",borderRadius:8,fontSize:11,background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.10)",color:"rgba(255,255,255,0.55)",cursor:"pointer",fontFamily:"inherit",transition:"all 150ms" }}
+                  onMouseEnter={e=>{e.currentTarget.style.background="rgba(255,255,255,0.09)";e.currentTarget.style.color="rgba(255,255,255,0.80)"}}
+                  onMouseLeave={e=>{e.currentTarget.style.background="rgba(255,255,255,0.05)";e.currentTarget.style.color="rgba(255,255,255,0.55)"}}>
+                  Connect
+                </button>
+              )}
+            </div>
+          </div>
+        );
+      })}
+
+      {loading && <p style={{ fontSize:12,color:"rgba(255,255,255,0.25)",textAlign:"center",padding:"12px 0" }}>Loading...</p>}
+    </div>
+  );
+}
+
 // ── SettingsPanel ──────────────────────────────────────────────────────────────
 
 function SettingsPanel({ clone, onBack }: { clone: Clone; onBack: () => void }) {
+  // Profile state
+  const [fullName, setFullName] = useState(_userName);
+  const [bio, setBio] = useState("");
+  const [location, setLocation] = useState("");
+  const [website, setWebsite] = useState("");
+  const [dob, setDob] = useState("");
+  const [phone, setPhone] = useState("");
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileSaved, setProfileSaved] = useState(false);
+  const [profileLoaded, setProfileLoaded] = useState(false);
+
+  // Delegate policies state
   const [blockedTopics, setBlockedTopics] = useState<string[]>([]);
   const [escalationThreshold, setEscalationThreshold] = useState(50);
   const [requireHumanReview, setRequireHumanReview] = useState(false);
   const [topicDraft, setTopicDraft] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [loaded, setLoaded] = useState(false);
-  const [saveOk, setSaveOk] = useState(false);
+  const [policySaving, setPolicySaving] = useState(false);
+  const [policySaved, setPolicySaved] = useState(false);
+  const [policyLoaded, setPolicyLoaded] = useState(false);
 
+  // Load profile
   useEffect(() => {
-    api(`/identity?user_id=${_userId}&clone_id=${clone.clone_id}`)
-      .then(r => r.json())
-      .then(d => {
-        const p = d.admin_policies ?? {};
-        setBlockedTopics(p.blocked_topics ?? []);
-        setEscalationThreshold(p.escalation_threshold ?? 50);
-        setRequireHumanReview(p.require_human_review ?? false);
-        setLoaded(true);
-      })
-      .catch(() => setLoaded(true));
+    api("/user/profile").then(r => r.json()).then(d => {
+      if (d.full_name) setFullName(d.full_name);
+      setBio(d.bio ?? ""); setLocation(d.location ?? ""); setWebsite(d.website ?? ""); setDob(d.dob ?? ""); setPhone(d.phone ?? "");
+      setProfileLoaded(true);
+    }).catch(() => setProfileLoaded(true));
+  }, []);
+
+  // Load policies
+  useEffect(() => {
+    api(`/identity?user_id=${_userId}&clone_id=${clone.clone_id}`).then(r => r.json()).then(d => {
+      const p = d.admin_policies ?? {};
+      setBlockedTopics(p.blocked_topics ?? []); setEscalationThreshold(p.escalation_threshold ?? 50); setRequireHumanReview(p.require_human_review ?? false);
+      setPolicyLoaded(true);
+    }).catch(() => setPolicyLoaded(true));
   }, [clone.clone_id]);
 
-  async function save() {
-    setSaving(true); setSaveOk(false);
+  async function saveProfile() {
+    setProfileSaving(true); setProfileSaved(false);
     try {
-      await api("/identity/policies", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          user_id: _userId,
-          policies: { blocked_topics: blockedTopics, escalation_threshold: escalationThreshold, require_human_review: requireHumanReview },
-        }),
+      await api("/user/profile", { method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ full_name: fullName.trim() || null, bio: bio.trim() || null, location: location.trim() || null, website: website.trim() || null, dob: dob.trim() || null, phone: phone.trim() || null }),
       });
-      setSaveOk(true);
-      setTimeout(() => setSaveOk(false), 2000);
-    } finally { setSaving(false); }
+      setProfileSaved(true); setTimeout(() => setProfileSaved(false), 2500);
+    } finally { setProfileSaving(false); }
   }
 
-  function addTopic() {
-    const t = topicDraft.trim();
-    if (t && !blockedTopics.includes(t)) { setBlockedTopics(prev => [...prev, t]); setTopicDraft(""); }
+  async function savePolicies() {
+    setPolicySaving(true); setPolicySaved(false);
+    try {
+      await api("/identity/policies", { method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: _userId, policies: { blocked_topics: blockedTopics, escalation_threshold: escalationThreshold, require_human_review: requireHumanReview } }),
+      });
+      setPolicySaved(true); setTimeout(() => setPolicySaved(false), 2500);
+    } finally { setPolicySaving(false); }
   }
 
-  function openExternal(url: string) { window.open(url, "_blank"); }
+  function addTopic() { const t = topicDraft.trim(); if (t && !blockedTopics.includes(t)) { setBlockedTopics(prev => [...prev, t]); setTopicDraft(""); } }
+
+  const saveBtnStyle = (saving: boolean, saved: boolean): React.CSSProperties => ({
+    width:"100%",padding:"8px 0",borderRadius:10,border:`1px solid ${saved?"rgba(52,211,153,0.20)":"rgba(255,255,255,0.12)"}`,
+    background:saved?"rgba(52,211,153,0.08)":"rgba(255,255,255,0.06)",color:saved?"rgba(52,211,153,0.80)":"rgba(255,255,255,0.65)",
+    fontSize:12,fontWeight:500,cursor:saving?"not-allowed":"pointer",fontFamily:"inherit",transition:"all 180ms",opacity:saving?0.5:1,
+  });
 
   return (
-    <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+    <div style={{ flex:1,display:"flex",flexDirection:"column",overflow:"hidden" }}>
       {/* Header */}
-      <header style={{ flexShrink: 0, borderBottom: "1px solid rgba(255,255,255,0.07)", padding: "16px 20px" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, maxWidth: 640, margin: "0 auto" }}>
-          <button onClick={onBack} style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 10px", borderRadius: 8, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.45)", cursor: "pointer", fontSize: 11, fontFamily: "inherit", transition: "all 180ms" }}
-            onMouseEnter={e => { e.currentTarget.style.color = "rgba(255,255,255,0.80)"; e.currentTarget.style.background = "rgba(255,255,255,0.08)"; }}
-            onMouseLeave={e => { e.currentTarget.style.color = "rgba(255,255,255,0.45)"; e.currentTarget.style.background = "rgba(255,255,255,0.04)"; }}>
-            <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M10 3L5 8l5 5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
+      <header style={{ flexShrink:0,borderBottom:"1px solid rgba(255,255,255,0.07)",padding:"16px 20px" }}>
+        <div style={{ display:"flex",alignItems:"center",gap:10,maxWidth:560,margin:"0 auto" }}>
+          <button onClick={onBack} style={{ display:"flex",alignItems:"center",gap:5,padding:"5px 10px",borderRadius:8,background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",color:"rgba(255,255,255,0.45)",cursor:"pointer",fontSize:11,fontFamily:"inherit",transition:"all 180ms" }}
+            onMouseEnter={e=>{e.currentTarget.style.color="rgba(255,255,255,0.80)";e.currentTarget.style.background="rgba(255,255,255,0.08)"}}
+            onMouseLeave={e=>{e.currentTarget.style.color="rgba(255,255,255,0.45)";e.currentTarget.style.background="rgba(255,255,255,0.04)"}}>
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M10 3L5 8l5 5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>
             Back
           </button>
-          <h2 style={{ fontSize: 15, fontWeight: 500, color: "rgba(255,255,255,0.85)", margin: 0, flex: 1 }}>Settings</h2>
+          <h2 style={{ fontSize:15,fontWeight:500,color:"rgba(255,255,255,0.85)",margin:0,flex:1 }}>Settings</h2>
         </div>
       </header>
 
       {/* Content */}
-      <div style={{ flex: 1, overflowY: "auto", padding: "24px 20px 40px" }}>
-        <div style={{ maxWidth: 640, margin: "0 auto", display: "flex", flexDirection: "column", gap: 24 }}>
+      <div style={{ flex:1,overflowY:"auto",padding:"24px 20px 40px" }}>
+        <div style={{ maxWidth:560,margin:"0 auto",display:"flex",flexDirection:"column",gap:0 }}>
 
-          {/* Clone indicator */}
-          <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", borderRadius: 12, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)" }}>
-            <div style={{ width: 32, height: 32, borderRadius: 8, background: clone.avatar_url ? "transparent" : deriveColor(clone.display_name), display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 500, color: "rgba(255,255,255,0.80)", overflow: "hidden", flexShrink: 0 }}>
-              {clone.avatar_url ? <img src={clone.avatar_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : clone.display_name[0]?.toUpperCase()}
+          {/* ── Profile section ─────────────────────────────────── */}
+          <p style={{ ...eyebrowStyle, marginBottom:12 }}>Profile</p>
+
+          {/* Avatar + name header */}
+          <div style={{ ...cardStyle, flexDirection:"row",alignItems:"center",gap:16,padding:"20px 24px",marginBottom:20 }}>
+            <div style={{ width:48,height:48,borderRadius:"50%",background:"rgba(26,115,232,0.22)",border:"1px solid rgba(26,115,232,0.35)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,fontWeight:600,color:"rgba(107,174,255,0.90)",flexShrink:0,userSelect:"none" as const }}>
+              {_userInitial}
             </div>
-            <div>
-              <p style={{ fontSize: 13, fontWeight: 500, color: "rgba(255,255,255,0.75)", margin: 0 }}>{clone.display_name}</p>
-              <p style={{ fontSize: 11, color: "rgba(255,255,255,0.30)", margin: "1px 0 0" }}>@{clone.handle}</p>
+            <div style={{ minWidth:0 }}>
+              <p style={{ fontSize:16,fontWeight:500,color:"rgba(255,255,255,0.85)",margin:0,lineHeight:1.3 }}>{fullName || "—"}</p>
+              <p style={{ fontSize:13,color:"rgba(255,255,255,0.35)",margin:"2px 0 0" }}>{_userId ? "Signed in" : ""}</p>
             </div>
           </div>
 
-          {/* Delegate policies */}
-          <div>
-            <p style={{ fontSize: 10, textTransform: "uppercase" as const, letterSpacing: "0.12em", color: "rgba(255,255,255,0.25)", marginBottom: 12 }}>Delegate policies</p>
-            <div style={{ display: "flex", flexDirection: "column", gap: 16, padding: "18px 20px", borderRadius: 14, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)" }}>
-              <p style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", lineHeight: 1.6, margin: 0 }}>
+          {/* Personal info card */}
+          {profileLoaded && (
+            <>
+              <div style={{ ...cardStyle, marginBottom:20 }}>
+                <p style={eyebrowStyle}>Personal</p>
+                <div>
+                  <label style={labelStyle}>Full name</label>
+                  <input value={fullName} onChange={e => setFullName(e.target.value)} placeholder="Jane Smith" style={inputStyle} />
+                </div>
+                <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:12 }}>
+                  <div>
+                    <label style={labelStyle}>Date of birth</label>
+                    <input type="date" value={dob} onChange={e => setDob(e.target.value)} style={{ ...inputStyle, colorScheme:"dark" }} />
+                  </div>
+                  <div>
+                    <label style={labelStyle}>Phone</label>
+                    <input type="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="+1 (555) 000-0000" style={inputStyle} />
+                  </div>
+                </div>
+              </div>
+
+              {/* Presence card */}
+              <div style={{ ...cardStyle, marginBottom:20 }}>
+                <p style={eyebrowStyle}>Presence</p>
+                <div>
+                  <label style={labelStyle}>Bio</label>
+                  <textarea value={bio} onChange={e => setBio(e.target.value)} placeholder="A sentence or two about what you do." rows={3} style={{ ...inputStyle, resize:"none",lineHeight:"1.6" }} />
+                </div>
+                <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:12 }}>
+                  <div>
+                    <label style={labelStyle}>Location</label>
+                    <input value={location} onChange={e => setLocation(e.target.value)} placeholder="San Francisco" style={inputStyle} />
+                  </div>
+                  <div>
+                    <label style={labelStyle}>Website</label>
+                    <input value={website} onChange={e => setWebsite(e.target.value)} placeholder="https://..." type="url" style={inputStyle} />
+                  </div>
+                </div>
+              </div>
+
+              {/* Save profile */}
+              <div style={{ marginBottom:32 }}>
+                <button onClick={saveProfile} disabled={profileSaving} style={saveBtnStyle(profileSaving, profileSaved)}>
+                  {profileSaving ? "Saving..." : profileSaved ? "Saved" : "Save changes"}
+                </button>
+              </div>
+            </>
+          )}
+
+          {/* ── Clone settings ──────────────────────────────────── */}
+          <div style={{ display:"flex",alignItems:"center",gap:10,marginBottom:12 }}>
+            <div style={{ width:28,height:28,borderRadius:7,background:clone.avatar_url?"transparent":deriveColor(clone.display_name),display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:500,color:"rgba(255,255,255,0.80)",overflow:"hidden",flexShrink:0 }}>
+              {clone.avatar_url ? <img src={clone.avatar_url} alt="" style={{ width:"100%",height:"100%",objectFit:"cover" }} /> : clone.display_name[0]?.toUpperCase()}
+            </div>
+            <p style={{ ...eyebrowStyle, fontSize:11 }}>Delegate policies — {clone.display_name}</p>
+          </div>
+
+          {policyLoaded && (
+            <div style={{ ...cardStyle, marginBottom:24 }}>
+              <p style={{ fontSize:12,color:"rgba(255,255,255,0.35)",lineHeight:1.6,margin:0 }}>
                 Control what your clone will and won't respond to. These policies apply to all surfaces.
               </p>
 
               {/* Blocked topics */}
-              {loaded && (
-                <>
-                  <div>
-                    <p style={{ fontSize: 12, fontWeight: 500, color: "rgba(255,255,255,0.50)", marginBottom: 6 }}>Blocked topics</p>
-                    <p style={{ fontSize: 11, color: "rgba(255,255,255,0.25)", marginBottom: 10 }}>
-                      Your clone will decline any question touching these topics.
-                    </p>
-                    {blockedTopics.length > 0 && (
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
-                        {blockedTopics.map(t => (
-                          <span key={t} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: "rgba(255,255,255,0.55)", background: "rgba(248,113,113,0.07)", border: "1px solid rgba(248,113,113,0.15)", borderRadius: 8, padding: "4px 10px" }}>
-                            {t}
-                            <button onClick={() => setBlockedTopics(prev => prev.filter(x => x !== t))} style={{ background: "none", border: "none", cursor: "pointer", color: "rgba(255,255,255,0.25)", padding: 0, fontSize: 12, lineHeight: 1, fontFamily: "inherit" }}>x</button>
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                    <div style={{ display: "flex", gap: 8 }}>
-                      <input type="text" value={topicDraft} onChange={e => setTopicDraft(e.target.value)} onKeyDown={e => e.key === "Enter" && addTopic()} placeholder="e.g. salary, competitors, legal advice"
-                        style={{ flex: 1, padding: "7px 12px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.70)", fontSize: 12, fontFamily: "inherit", outline: "none" }} />
-                      <button onClick={addTopic} style={{ padding: "6px 14px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.05)", color: "rgba(255,255,255,0.50)", fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}
-                        onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,255,255,0.09)"; e.currentTarget.style.color = "rgba(255,255,255,0.75)"; }}
-                        onMouseLeave={e => { e.currentTarget.style.background = "rgba(255,255,255,0.05)"; e.currentTarget.style.color = "rgba(255,255,255,0.50)"; }}>
-                        Add
-                      </button>
-                    </div>
+              <div>
+                <p style={{ fontSize:12,fontWeight:500,color:"rgba(255,255,255,0.50)",marginBottom:6 }}>Blocked topics</p>
+                <p style={{ fontSize:11,color:"rgba(255,255,255,0.25)",marginBottom:10 }}>Your clone will decline any question touching these topics.</p>
+                {blockedTopics.length > 0 && (
+                  <div style={{ display:"flex",flexWrap:"wrap",gap:6,marginBottom:10 }}>
+                    {blockedTopics.map(t => (
+                      <span key={t} style={{ display:"inline-flex",alignItems:"center",gap:6,fontSize:12,color:"rgba(255,255,255,0.55)",background:"rgba(248,113,113,0.07)",border:"1px solid rgba(248,113,113,0.15)",borderRadius:8,padding:"4px 10px" }}>
+                        {t}
+                        <button onClick={() => setBlockedTopics(prev => prev.filter(x => x !== t))} style={{ background:"none",border:"none",cursor:"pointer",color:"rgba(255,255,255,0.25)",padding:0,fontSize:12,lineHeight:1,fontFamily:"inherit" }}>x</button>
+                      </span>
+                    ))}
                   </div>
-
-                  {/* Escalation threshold */}
-                  <div>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-                      <p style={{ fontSize: 12, fontWeight: 500, color: "rgba(255,255,255,0.50)", margin: 0 }}>Escalation threshold</p>
-                      <span style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", fontFamily: "ui-monospace, Menlo, monospace" }}>{escalationThreshold}%</span>
-                    </div>
-                    <p style={{ fontSize: 11, color: "rgba(255,255,255,0.25)", marginBottom: 10 }}>
-                      Responses below this confidence level will be flagged for human review.
-                    </p>
-                    <input type="range" min={10} max={90} value={escalationThreshold} onChange={e => setEscalationThreshold(Number(e.target.value))}
-                      style={{ width: "100%", accentColor: "rgba(255,255,255,0.50)" }} />
-                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "rgba(255,255,255,0.20)", marginTop: 4 }}>
-                      <span>10% (rarely escalate)</span>
-                      <span>90% (almost always)</span>
-                    </div>
-                  </div>
-
-                  {/* Require human review */}
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                    <div>
-                      <p style={{ fontSize: 12, fontWeight: 500, color: "rgba(255,255,255,0.50)", marginBottom: 3 }}>Require human review for all responses</p>
-                      <p style={{ fontSize: 11, color: "rgba(255,255,255,0.25)", margin: 0 }}>Clone drafts but never auto-sends — you approve every response.</p>
-                    </div>
-                    <button onClick={() => setRequireHumanReview(v => !v)} style={{ position: "relative", width: 36, height: 20, borderRadius: 10, flexShrink: 0, background: requireHumanReview ? "rgba(255,255,255,0.30)" : "rgba(255,255,255,0.08)", border: "none", cursor: "pointer", transition: "background 180ms" }}>
-                      <span style={{ position: "absolute", top: 2, width: 16, height: 16, borderRadius: "50%", background: "#fff", transition: "transform 180ms", transform: requireHumanReview ? "translateX(18px)" : "translateX(2px)" }} />
-                    </button>
-                  </div>
-
-                  {/* Save button */}
-                  <button onClick={save} disabled={saving} style={{ width: "100%", padding: "8px 0", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: saveOk ? "rgba(52,211,153,0.08)" : "rgba(255,255,255,0.06)", color: saveOk ? "rgba(52,211,153,0.80)" : "rgba(255,255,255,0.65)", fontSize: 12, fontWeight: 500, cursor: saving ? "not-allowed" : "pointer", fontFamily: "inherit", transition: "all 180ms", opacity: saving ? 0.5 : 1 }}
-                    onMouseEnter={e => { if (!saving && !saveOk) { e.currentTarget.style.background = "rgba(255,255,255,0.10)"; e.currentTarget.style.color = "rgba(255,255,255,0.85)"; } }}
-                    onMouseLeave={e => { if (!saveOk) { e.currentTarget.style.background = "rgba(255,255,255,0.06)"; e.currentTarget.style.color = "rgba(255,255,255,0.65)"; } }}>
-                    {saving ? "Saving..." : saveOk ? "Saved" : "Save policies"}
-                  </button>
-                </>
-              )}
-            </div>
-          </div>
-
-          {/* Open full dashboard link */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
-            <p style={{ fontSize: 10, textTransform: "uppercase" as const, letterSpacing: "0.12em", color: "rgba(255,255,255,0.25)", marginBottom: 4 }}>More</p>
-            {[
-              { label: "Connectors", desc: "Connect Gmail, Slack, Drive, and more.", href: "https://doppel.ai/dashboard/settings" },
-              { label: "Full dashboard", desc: "Profile, billing, data retention, and more.", href: "https://doppel.ai/dashboard" },
-            ].map(item => (
-              <button key={item.label} onClick={() => openExternal(item.href)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 18px", borderRadius: 14, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", cursor: "pointer", fontFamily: "inherit", textAlign: "left", transition: "all 180ms" }}
-                onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,255,255,0.06)"; e.currentTarget.style.borderColor = "rgba(255,255,255,0.12)"; }}
-                onMouseLeave={e => { e.currentTarget.style.background = "rgba(255,255,255,0.03)"; e.currentTarget.style.borderColor = "rgba(255,255,255,0.08)"; }}>
-                <div>
-                  <p style={{ fontSize: 13, fontWeight: 500, color: "rgba(255,255,255,0.70)", margin: 0 }}>{item.label}</p>
-                  <p style={{ fontSize: 11, color: "rgba(255,255,255,0.30)", margin: "3px 0 0" }}>{item.desc}</p>
+                )}
+                <div style={{ display:"flex",gap:8 }}>
+                  <input type="text" value={topicDraft} onChange={e => setTopicDraft(e.target.value)} onKeyDown={e => e.key === "Enter" && addTopic()} placeholder="e.g. salary, competitors, legal advice" style={inputStyle} />
+                  <button onClick={addTopic} style={{ padding:"6px 14px",borderRadius:10,border:"1px solid rgba(255,255,255,0.10)",background:"rgba(255,255,255,0.05)",color:"rgba(255,255,255,0.50)",fontSize:12,cursor:"pointer",fontFamily:"inherit",flexShrink:0 }}
+                    onMouseEnter={e=>{e.currentTarget.style.background="rgba(255,255,255,0.09)";e.currentTarget.style.color="rgba(255,255,255,0.75)"}}
+                    onMouseLeave={e=>{e.currentTarget.style.background="rgba(255,255,255,0.05)";e.currentTarget.style.color="rgba(255,255,255,0.50)"}}>Add</button>
                 </div>
-                <svg width="12" height="12" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0, color: "rgba(255,255,255,0.25)" }}><path d="M6 4l4 4-4 4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
+              </div>
+
+              {/* Escalation threshold */}
+              <div>
+                <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6 }}>
+                  <p style={{ fontSize:12,fontWeight:500,color:"rgba(255,255,255,0.50)",margin:0 }}>Escalation threshold</p>
+                  <span style={{ fontSize:12,color:"rgba(255,255,255,0.35)",fontFamily:"ui-monospace, Menlo, monospace" }}>{escalationThreshold}%</span>
+                </div>
+                <p style={{ fontSize:11,color:"rgba(255,255,255,0.25)",marginBottom:10 }}>Responses below this confidence level will be flagged for human review.</p>
+                <input type="range" min={10} max={90} value={escalationThreshold} onChange={e => setEscalationThreshold(Number(e.target.value))} style={{ width:"100%",accentColor:"rgba(255,255,255,0.50)" }} />
+                <div style={{ display:"flex",justifyContent:"space-between",fontSize:10,color:"rgba(255,255,255,0.20)",marginTop:4 }}>
+                  <span>10% (rarely escalate)</span><span>90% (almost always)</span>
+                </div>
+              </div>
+
+              {/* Require human review */}
+              <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between" }}>
+                <div>
+                  <p style={{ fontSize:12,fontWeight:500,color:"rgba(255,255,255,0.50)",marginBottom:3 }}>Require human review for all responses</p>
+                  <p style={{ fontSize:11,color:"rgba(255,255,255,0.25)",margin:0 }}>Clone drafts but never auto-sends — you approve every response.</p>
+                </div>
+                <button onClick={() => setRequireHumanReview(v => !v)} style={{ position:"relative",width:36,height:20,borderRadius:10,flexShrink:0,background:requireHumanReview?"rgba(255,255,255,0.30)":"rgba(255,255,255,0.08)",border:"none",cursor:"pointer",transition:"background 180ms" }}>
+                  <span style={{ position:"absolute",top:2,width:16,height:16,borderRadius:"50%",background:"#fff",transition:"transform 180ms",transform:requireHumanReview?"translateX(18px)":"translateX(2px)" }} />
+                </button>
+              </div>
+
+              {/* Save policies */}
+              <button onClick={savePolicies} disabled={policySaving} style={saveBtnStyle(policySaving, policySaved)}>
+                {policySaving ? "Saving..." : policySaved ? "Saved" : "Save policies"}
               </button>
-            ))}
-          </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -1131,7 +1289,7 @@ function Sidebar({ open, clones, orgClones, active, userName, userInitial, onSel
               <span style={{ fontSize: 15, fontWeight: 600, letterSpacing:"-0.02em", color:"rgba(255,255,255,0.93)" }}>doppel</span>
             </div>
             <button
-              onClick={() => openExternal(`https://doppel.ai/dashboard`)}
+              onClick={() => openExternal(`https://doppel-pi.vercel.app/dashboard`)}
               title="Open dashboard"
               style={{ width: 30, height: 30, borderRadius: 9, display:"flex", alignItems:"center", justifyContent:"center", background:"rgba(255,255,255,0.06)", border:"1px solid rgba(255,255,255,0.09)", color:"rgba(255,255,255,0.50)", cursor:"pointer", transition:"all 180ms" }}
               onMouseEnter={e=>{e.currentTarget.style.background="rgba(255,255,255,0.10)";e.currentTarget.style.color="rgba(255,255,255,0.80)"}}
@@ -1161,7 +1319,7 @@ function Sidebar({ open, clones, orgClones, active, userName, userInitial, onSel
         {/* My Brain + My Organisation shortcut cards */}
         <div style={{ padding:"0 8px 6px", display:"flex", flexDirection:"column", gap: 4 }}>
           <button
-            onClick={() => openExternal(`https://doppel.ai/dashboard/my-brain`)}
+            onClick={() => openExternal(`https://doppel-pi.vercel.app/dashboard/my-brain`)}
             style={{ display:"flex", alignItems:"center", gap: 10, padding:"11px 16px", borderRadius: 12, background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.09)", color:"rgba(255,255,255,0.70)", fontSize: 13, fontWeight: 500, cursor:"pointer", textAlign:"left" as const, fontFamily:"inherit", transition:"all 150ms", width:"100%" }}
             onMouseEnter={e=>{e.currentTarget.style.background="rgba(255,255,255,0.09)";e.currentTarget.style.color="rgba(255,255,255,0.90)";e.currentTarget.style.borderColor="rgba(255,255,255,0.16)"}}
             onMouseLeave={e=>{e.currentTarget.style.background="rgba(255,255,255,0.05)";e.currentTarget.style.color="rgba(255,255,255,0.70)";e.currentTarget.style.borderColor="rgba(255,255,255,0.09)"}}
@@ -1173,7 +1331,7 @@ function Sidebar({ open, clones, orgClones, active, userName, userInitial, onSel
             My Brain
           </button>
           <button
-            onClick={() => openExternal(`https://doppel.ai/org`)}
+            onClick={() => openExternal(`https://doppel-pi.vercel.app/org`)}
             style={{ display:"flex", alignItems:"center", gap: 10, padding:"11px 16px", borderRadius: 12, background:"rgba(26,115,232,0.07)", border:"1px solid rgba(26,115,232,0.18)", color:"rgba(107,174,255,0.75)", fontSize: 13, fontWeight: 500, cursor:"pointer", textAlign:"left" as const, fontFamily:"inherit", transition:"all 150ms", width:"100%" }}
             onMouseEnter={e=>{e.currentTarget.style.background="rgba(26,115,232,0.14)";e.currentTarget.style.color="rgba(107,174,255,0.95)";e.currentTarget.style.borderColor="rgba(26,115,232,0.34)"}}
             onMouseLeave={e=>{e.currentTarget.style.background="rgba(26,115,232,0.07)";e.currentTarget.style.color="rgba(107,174,255,0.75)";e.currentTarget.style.borderColor="rgba(26,115,232,0.18)"}}
@@ -1346,7 +1504,7 @@ export default function Desktop() {
     return (
       <div style={{ display:"flex",height:"100vh",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:12,background:"#080808" }}>
         <p style={{ fontSize:14,fontWeight:500,color:"rgba(255,255,255,0.55)",margin:0 }}>No clones yet</p>
-        <p style={{ fontSize:12,color:"rgba(255,255,255,0.28)",margin:0,textAlign:"center",maxWidth:240,lineHeight:1.6 }}>Create a clone on doppel.ai to get started.</p>
+        <p style={{ fontSize:12,color:"rgba(255,255,255,0.28)",margin:0,textAlign:"center",maxWidth:240,lineHeight:1.6 }}>Create a clone on doppel-pi.vercel.app to get started.</p>
       </div>
     );
   }
