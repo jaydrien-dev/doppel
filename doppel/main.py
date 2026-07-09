@@ -4362,6 +4362,390 @@ async def feedback(
 
 
 # ---------------------------------------------------------------------------
+# Clone readiness gate
+# ---------------------------------------------------------------------------
+
+@app.get("/clones/{handle}/readiness")
+async def clone_readiness(
+    handle: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """
+    Check if a clone meets the minimum training requirements to respond.
+    Returns: {is_ready, knowledge_ok, decision_making_ok, voice_ok, details}
+    """
+    user_id = request.headers.get("X-User-Id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    row = await session.execute(
+        sql_text("SELECT clone_id, user_id FROM clone_identity WHERE handle = :h"),
+        {"h": handle},
+    )
+    rec = row.mappings().first()
+    if not rec or rec["user_id"] != user_id:
+        raise HTTPException(status_code=403, detail="Not your clone")
+
+    clone_id = str(rec["clone_id"])
+
+    # Knowledge: episodic + semantic chunks
+    knowledge_row = await session.execute(
+        sql_text("""
+            SELECT
+                (SELECT COUNT(*) FROM episodic_memory WHERE clone_id = :cid AND is_excluded = FALSE) +
+                (SELECT COUNT(*) FROM semantic_memory WHERE clone_id = :cid) AS total
+        """),
+        {"cid": clone_id},
+    )
+    knowledge_count = int((knowledge_row.mappings().first() or {}).get("total") or 0)
+    knowledge_ok = knowledge_count >= 5
+
+    # Decision-making: procedural memory with decision heuristics
+    decision_row = await session.execute(
+        sql_text("""
+            SELECT COUNT(*) AS total FROM procedural_memory
+            WHERE clone_id = :cid AND pattern_type = 'decision_heuristic'
+        """),
+        {"cid": clone_id},
+    )
+    decision_count = int((decision_row.mappings().first() or {}).get("total") or 0)
+    decision_ok = decision_count >= 1
+
+    # Voice: email, message, or document style chunks
+    voice_row = await session.execute(
+        sql_text("""
+            SELECT COUNT(*) AS total FROM episodic_memory
+            WHERE clone_id = :cid
+              AND is_excluded = FALSE
+              AND (
+                context_type IN ('email_reply', 'message', 'document')
+                OR source IN ('gmail', 'slack')
+              )
+        """),
+        {"cid": clone_id},
+    )
+    voice_count = int((voice_row.mappings().first() or {}).get("total") or 0)
+    voice_ok = voice_count >= 1
+
+    missing = []
+    if not knowledge_ok:
+        missing.append(f"knowledge ({knowledge_count}/5 chunks minimum)")
+    if not decision_ok:
+        missing.append("decision-making style (no decision patterns found)")
+    if not voice_ok:
+        missing.append("communication voice (no emails, messages, or documents)")
+
+    return {
+        "is_ready": knowledge_ok and decision_ok and voice_ok,
+        "knowledge_ok": knowledge_ok,
+        "decision_making_ok": decision_ok,
+        "voice_ok": voice_ok,
+        "knowledge_count": knowledge_count,
+        "decision_count": decision_count,
+        "voice_count": voice_count,
+        "missing": missing,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Cross-clone import (copy decision-making and/or voice patterns between clones)
+# ---------------------------------------------------------------------------
+
+class CrossCloneImportRequest(BaseModel):
+    types: list[str]  # "decision" | "voice"
+
+
+@app.post("/clones/{handle}/import-from/{source_handle}")
+async def cross_clone_import(
+    handle: str,
+    source_handle: str,
+    body: CrossCloneImportRequest,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """
+    Copy decision-making style and/or communication voice patterns from one
+    owned clone to another. Both clones must belong to the requesting user.
+    """
+    user_id = request.headers.get("X-User-Id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    rows = await session.execute(
+        sql_text("SELECT clone_id, handle, user_id FROM clone_identity WHERE handle = ANY(:handles)"),
+        {"handles": [handle, source_handle]},
+    )
+    clones_by_handle = {r["handle"]: r for r in rows.mappings().all()}
+
+    target = clones_by_handle.get(handle)
+    source = clones_by_handle.get(source_handle)
+
+    if not target or target["user_id"] != user_id:
+        raise HTTPException(status_code=403, detail="Target clone not found or not yours")
+    if not source or source["user_id"] != user_id:
+        raise HTTPException(status_code=403, detail="Source clone not found or not yours")
+    if str(target["clone_id"]) == str(source["clone_id"]):
+        raise HTTPException(status_code=400, detail="Cannot import from the same clone")
+
+    target_id = str(target["clone_id"])
+    source_id = str(source["clone_id"])
+    imported_counts: dict[str, int] = {}
+
+    if "decision" in body.types:
+        result = await session.execute(
+            sql_text("""
+                INSERT INTO procedural_memory
+                    (clone_id, pattern_type, description, embedding, examples, confidence, occurrence_count)
+                SELECT :target_id, pattern_type, description, embedding, examples, confidence, occurrence_count
+                FROM procedural_memory
+                WHERE clone_id = :source_id AND pattern_type = 'decision_heuristic'
+            """),
+            {"target_id": target_id, "source_id": source_id},
+        )
+        imported_counts["decision"] = result.rowcount
+
+    if "voice" in body.types:
+        result = await session.execute(
+            sql_text("""
+                INSERT INTO procedural_memory
+                    (clone_id, pattern_type, description, embedding, examples, confidence, occurrence_count)
+                SELECT :target_id, pattern_type, description, embedding, examples, confidence, occurrence_count
+                FROM procedural_memory
+                WHERE clone_id = :source_id AND pattern_type = 'communication_norm'
+            """),
+            {"target_id": target_id, "source_id": source_id},
+        )
+        imported_counts["voice"] = result.rowcount
+
+    await session.commit()
+    return {"imported": imported_counts, "ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Clone Decisions — decision heuristics CRUD + LLM extraction
+# ---------------------------------------------------------------------------
+
+class DecisionHeuristicBody(BaseModel):
+    description: str
+    domain: str = "general"
+    examples: list[str] = []
+    confidence: float = 0.8
+
+
+async def _require_clone_owner(handle: str, user_id: str | None, session: AsyncSession) -> tuple[str, str]:
+    """Returns (clone_id_str, display_name) or raises 401/403."""
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    row = await session.execute(
+        sql_text("SELECT clone_id, user_id, display_name FROM clone_identity WHERE handle = :h"),
+        {"h": handle},
+    )
+    rec = row.mappings().first()
+    if not rec or rec["user_id"] != user_id:
+        raise HTTPException(status_code=403, detail="Not your clone")
+    return str(rec["clone_id"]), rec["display_name"]
+
+
+@app.get("/clones/{handle}/decisions")
+async def list_decisions(
+    handle: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """List all decision heuristics for a clone, ordered by strength."""
+    user_id = request.headers.get("X-User-Id")
+    clone_id, _ = await _require_clone_owner(handle, user_id, session)
+
+    result = await session.execute(
+        sql_text("""
+            SELECT id, description, examples, confidence, occurrence_count,
+                   COALESCE(domain, 'general') AS domain, created_at
+            FROM procedural_memory
+            WHERE clone_id = :cid AND pattern_type = 'decision_heuristic'
+            ORDER BY occurrence_count DESC, confidence DESC, created_at DESC
+        """),
+        {"cid": clone_id},
+    )
+    rows = result.mappings().all()
+    return {
+        "decisions": [
+            {
+                "id": str(r["id"]),
+                "description": r["description"],
+                "examples": list(r["examples"] or []),
+                "confidence": float(r["confidence"] or 0.7),
+                "occurrence_count": int(r["occurrence_count"] or 1),
+                "domain": r["domain"] or "general",
+                "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+            }
+            for r in rows
+        ],
+        "total": len(rows),
+    }
+
+
+@app.post("/clones/{handle}/decisions", status_code=201)
+async def add_decision(
+    handle: str,
+    body: DecisionHeuristicBody,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Manually add a decision heuristic."""
+    user_id = request.headers.get("X-User-Id")
+    clone_id, _ = await _require_clone_owner(handle, user_id, session)
+
+    from doppel.brain.db.vector import embed as _embed
+    embedding = await _embed(body.description)
+    pattern_id = uuid4()
+
+    await session.execute(
+        sql_text("""
+            INSERT INTO procedural_memory
+              (id, clone_id, pattern_type, description, embedding, examples, confidence, domain)
+            VALUES
+              (:id, :clone_id, 'decision_heuristic', :description, :embedding, :examples, :confidence, :domain)
+        """),
+        {
+            "id": str(pattern_id),
+            "clone_id": clone_id,
+            "description": body.description,
+            "embedding": "[" + ",".join(str(v) for v in embedding) + "]",
+            "examples": body.examples,
+            "confidence": body.confidence,
+            "domain": body.domain,
+        },
+    )
+    await session.commit()
+    return {"id": str(pattern_id), "ok": True}
+
+
+@app.delete("/clones/{handle}/decisions/{decision_id}", status_code=204)
+async def delete_decision(
+    handle: str,
+    decision_id: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+):
+    """Remove a decision heuristic."""
+    user_id = request.headers.get("X-User-Id")
+    clone_id, _ = await _require_clone_owner(handle, user_id, session)
+
+    await session.execute(
+        sql_text("""
+            DELETE FROM procedural_memory
+            WHERE id = :id AND clone_id = :cid AND pattern_type = 'decision_heuristic'
+        """),
+        {"id": decision_id, "cid": clone_id},
+    )
+    await session.commit()
+
+
+@app.post("/clones/{handle}/decisions/extract")
+async def extract_decisions(
+    handle: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """
+    Run an LLM extraction pass over recent authored episodic_memory to surface
+    decision-making heuristics and store them as procedural patterns.
+    Uses Haiku for cost efficiency — this is a high-volume pattern scan.
+    """
+    user_id = request.headers.get("X-User-Id")
+    clone_id, clone_name = await _require_clone_owner(handle, user_id, session)
+
+    # Pull recent authored content for analysis
+    content_rows = await session.execute(
+        sql_text("""
+            SELECT content FROM episodic_memory
+            WHERE clone_id = :cid
+              AND is_excluded = FALSE
+              AND authored_by_user = TRUE
+            ORDER BY created_at DESC LIMIT 100
+        """),
+        {"cid": clone_id},
+    )
+    chunks = [r["content"] for r in content_rows.mappings().all() if r["content"]]
+    if not chunks:
+        return {"extracted": 0, "message": "No authored content found — connect a source first."}
+
+    combined = "\n---\n".join(chunks)[:7000]
+
+    from doppel.brain.context import get_anthropic_client
+    import json as _json
+    client = get_anthropic_client()
+
+    prompt = (
+        f"You are analyzing real communications written by {clone_name}.\n"
+        "Extract their DECISION-MAKING PATTERNS — the rules, heuristics, and principles they consistently apply.\n\n"
+        f"Source content (their actual words):\n{combined}\n\n"
+        "Return a JSON array. Each item:\n"
+        '{"description": "One clear sentence stating the heuristic in first person",'
+        '"domain": "one of: hiring | product | technical | financial | relationships | operations | general",'
+        '"examples": ["short supporting quote from the text"],'
+        '"confidence": 0.6}\n\n'
+        "Rules: only extract CLEAR patterns with direct evidence. Do NOT infer or speculate. "
+        "Maximum 8 patterns. Return ONLY the JSON array, no other text."
+    )
+
+    resp = await client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=1400,
+        messages=[{"role": "user", "content": prompt}],
+    )
+
+    raw = resp.content[0].text.strip()
+    if raw.startswith("```"):
+        raw = raw.split("```")[1]
+        if raw.startswith("json"):
+            raw = raw[4:]
+
+    try:
+        patterns = _json.loads(raw)
+    except Exception:
+        return {"extracted": 0, "message": "Could not parse extraction output"}
+
+    if not isinstance(patterns, list):
+        return {"extracted": 0, "message": "Unexpected output format"}
+
+    from doppel.brain.db.vector import embed as _embed
+    count = 0
+    for p in patterns[:8]:
+        desc = (p.get("description") or "").strip()
+        if len(desc) < 10:
+            continue
+        try:
+            embedding = await _embed(desc)
+            pid = uuid4()
+            await session.execute(
+                sql_text("""
+                    INSERT INTO procedural_memory
+                      (id, clone_id, pattern_type, description, embedding, examples, confidence, domain)
+                    VALUES
+                      (:id, :clone_id, 'decision_heuristic', :desc, :emb, :examples, :conf, :domain)
+                """),
+                {
+                    "id": str(pid),
+                    "clone_id": clone_id,
+                    "desc": desc,
+                    "emb": "[" + ",".join(str(v) for v in embedding) + "]",
+                    "examples": (p.get("examples") or [])[:2],
+                    "conf": float(p.get("confidence") or 0.7),
+                    "domain": p.get("domain") or "general",
+                },
+            )
+            count += 1
+        except Exception:
+            continue
+
+    if count:
+        await session.commit()
+    return {"extracted": count, "ok": True}
+
+
+# ---------------------------------------------------------------------------
 # Admin — access audit log
 # ---------------------------------------------------------------------------
 

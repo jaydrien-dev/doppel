@@ -1,0 +1,8 @@
+node_modules/
+dist/
+dist-installer/
+out/
+*.exe
+*.dmg
+*.AppImage
+*.snap

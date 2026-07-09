@@ -3,6 +3,7 @@
 import { useState } from "react";
 import useSWR from "swr";
 import { useClone } from "@/lib/hooks/useClone";
+import { SelectMenu } from "@/components/ui/select-menu";
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
@@ -364,25 +365,33 @@ function NewWorkflowModal({
           {/* Trigger */}
           <div>
             <label style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", display: "block", marginBottom: 5 }}>Trigger</label>
-            <select value={triggerType} onChange={(e) => setTriggerType(e.target.value)} style={selectStyle}>
-              <option value="schedule">Schedule</option>
-              <option value="poll_api">Poll API (JSON)</option>
-              <option value="poll_webpage">Poll webpage (text)</option>
-              <option value="webhook">Webhook (POST)</option>
-            </select>
+            <SelectMenu
+              value={triggerType}
+              onChange={setTriggerType}
+              options={[
+                { value: "schedule", label: "Schedule" },
+                { value: "poll_api", label: "Poll API (JSON)" },
+                { value: "poll_webpage", label: "Poll webpage (text)" },
+                { value: "webhook", label: "Webhook (POST)" },
+              ]}
+            />
           </div>
 
           {triggerType === "schedule" && (
             <div>
               <label style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", display: "block", marginBottom: 5 }}>Schedule</label>
-              <select value={schedule} onChange={(e) => setSchedule(e.target.value)} style={selectStyle}>
-                <option value="hourly">Every hour</option>
-                <option value="daily:09:00">Every day at 9 AM</option>
-                <option value="daily:18:00">Every day at 6 PM</option>
-                <option value="weekly:mon:09:00">Every Monday at 9 AM</option>
-                <option value="weekdays:09:00">Every weekday at 9 AM</option>
-                <option value="monthly:1:09:00">1st of each month at 9 AM</option>
-              </select>
+              <SelectMenu
+                value={schedule}
+                onChange={setSchedule}
+                options={[
+                  { value: "hourly", label: "Every hour" },
+                  { value: "daily:09:00", label: "Every day at 9 AM" },
+                  { value: "daily:18:00", label: "Every day at 6 PM" },
+                  { value: "weekly:mon:09:00", label: "Every Monday at 9 AM" },
+                  { value: "weekdays:09:00", label: "Every weekday at 9 AM" },
+                  { value: "monthly:1:09:00", label: "1st of each month at 9 AM" },
+                ]}
+              />
             </div>
           )}
 
@@ -406,15 +415,19 @@ function NewWorkflowModal({
                 </div>
                 <div>
                   <label style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", display: "block", marginBottom: 5 }}>Operator</label>
-                  <select value={conditionOp} onChange={(e) => setConditionOp(e.target.value)} style={{ ...selectStyle, width: "auto" }}>
-                    <option value="changed">changed</option>
-                    <option value="<">&lt;</option>
-                    <option value=">">&gt;</option>
-                    <option value="=">=</option>
-                    <option value="!=">≠</option>
-                    <option value="contains">contains</option>
-                    <option value="matches">matches (regex)</option>
-                  </select>
+                  <SelectMenu
+                    value={conditionOp}
+                    onChange={setConditionOp}
+                    options={[
+                      { value: "changed", label: "changed" },
+                      { value: "<", label: "<" },
+                      { value: ">", label: ">" },
+                      { value: "=", label: "=" },
+                      { value: "!=", label: "≠" },
+                      { value: "contains", label: "contains" },
+                      { value: "matches", label: "matches (regex)" },
+                    ]}
+                  />
                 </div>
                 <div>
                   <label style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", display: "block", marginBottom: 5 }}>Value</label>
@@ -433,11 +446,15 @@ function NewWorkflowModal({
           {/* Action */}
           <div>
             <label style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", display: "block", marginBottom: 5 }}>Action</label>
-            <select value={actionType} onChange={(e) => setActionType(e.target.value)} style={selectStyle}>
-              <option value="notify">Send notification</option>
-              <option value="ai_decide">Let clone decide</option>
-              <option value="connector_action">Connector action (configure after creation)</option>
-            </select>
+            <SelectMenu
+              value={actionType}
+              onChange={setActionType}
+              options={[
+                { value: "notify", label: "Send notification" },
+                { value: "ai_decide", label: "Let clone decide" },
+                { value: "connector_action", label: "Connector action (configure after creation)" },
+              ]}
+            />
           </div>
 
           {actionType === "notify" && (

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useUser } from "@clerk/nextjs";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { SelectMenu } from "@/components/ui/select-menu";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -115,21 +116,16 @@ function MemberRow({
       </div>
 
       {/* Role select */}
-      <select
+      <SelectMenu
+        size="sm"
         value={member.role}
         disabled={changingRole === member.user_id || isSelf}
-        onChange={(e) => onRoleChange(member.user_id, e.target.value as "admin" | "member")}
-        style={{
-          fontSize: 12, padding: "5px 10px", borderRadius: 8,
-          background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)",
-          color: member.role === "admin" ? "rgba(167,139,250,0.85)" : "rgba(255,255,255,0.50)",
-          cursor: isSelf ? "default" : "pointer", fontFamily: "inherit", outline: "none",
-          opacity: changingRole === member.user_id ? 0.5 : 1,
-        }}
-      >
-        <option value="member">Member</option>
-        <option value="admin">Admin</option>
-      </select>
+        onChange={(v) => onRoleChange(member.user_id, v as "admin" | "member")}
+        options={[
+          { value: "member", label: "Member" },
+          { value: "admin", label: "Admin" },
+        ]}
+      />
 
       {/* Remove */}
       {!isSelf && (
@@ -773,18 +769,14 @@ function MembersSection({
               color: "rgba(255,255,255,0.75)", outline: "none", fontFamily: "inherit",
             }}
           />
-          <select
+          <SelectMenu
             value={inviteRole}
-            onChange={(e) => setInviteRole(e.target.value as "admin" | "member")}
-            style={{
-              padding: "9px 12px", borderRadius: 10, fontSize: 12,
-              background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.09)",
-              color: "rgba(255,255,255,0.55)", fontFamily: "inherit", outline: "none", cursor: "pointer",
-            }}
-          >
-            <option value="member">Member</option>
-            <option value="admin">Admin</option>
-          </select>
+            onChange={(v) => setInviteRole(v as "admin" | "member")}
+            options={[
+              { value: "member", label: "Member" },
+              { value: "admin", label: "Admin" },
+            ]}
+          />
           <button
             onClick={handleInvite}
             disabled={inviting || !inviteEmail.trim()}

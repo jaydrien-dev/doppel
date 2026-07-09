@@ -17,6 +17,8 @@ async def record_feedback(session: AsyncSession, feedback: FeedbackSignal) -> No
     """
     Store feedback against the reasoning trace.
     This is the primary data pipeline for future DPO fine-tuning.
+    Also updates the clone's calibration_score via exponential moving average
+    so future confidence scores reflect actual approval history.
     """
     await session.execute(
         text("""
@@ -33,6 +35,23 @@ async def record_feedback(session: AsyncSession, feedback: FeedbackSignal) -> No
             "reason": feedback.correction_reason,
         },
     )
+
+    # Update calibration score using exponential moving average (alpha=0.15)
+    # approved=1.0, edited=0.7, rejected=0.0
+    _signal_values = {"approved": 1.0, "edited": 0.7, "rejected": 0.0}
+    if feedback.signal_type in _signal_values:
+        signal_val = _signal_values[feedback.signal_type]
+        await session.execute(
+            text("""
+                UPDATE clone_identity
+                SET calibration_score = GREATEST(0.0, LEAST(1.0,
+                        0.15 * :signal + 0.85 * calibration_score)),
+                    feedback_count = feedback_count + 1
+                WHERE clone_id = :clone_id
+            """),
+            {"signal": signal_val, "clone_id": str(feedback.clone_id)},
+        )
+
     await session.commit()
 
 

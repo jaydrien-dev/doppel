@@ -1,0 +1,466 @@
+import {
+  app,
+  BrowserWindow,
+  Tray,
+  Menu,
+  globalShortcut,
+  nativeImage,
+  shell,
+  ipcMain,
+  Notification,
+  nativeTheme,
+  net,
+  session,
+} from "electron";
+import { join } from "path";
+import { createServer, type Server } from "http";
+import { readFileSync } from "fs";
+import Store from "electron-store";
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const PROTOCOL = "doppel";
+const CLERK_FAPI = "https://electric-moray-73.clerk.accounts.dev";
+const HOTKEY = "CommandOrControl+Shift+D";
+
+// ─── Store ────────────────────────────────────────────────────────────────────
+
+interface StoreSchema {
+  launchAtStartup: boolean;
+  windowBounds: { width: number; height: number; x?: number; y?: number };
+}
+
+const store = new Store<StoreSchema>({
+  defaults: {
+    launchAtStartup: false,
+    windowBounds: { width: 1280, height: 820 },
+  },
+});
+
+// ─── State ────────────────────────────────────────────────────────────────────
+
+let mainWindow: BrowserWindow | null = null;
+let tray: Tray | null = null;
+let isQuitting = false;
+
+// ─── Single instance lock ─────────────────────────────────────────────────────
+
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) {
+  app.quit();
+} else {
+  app.on("second-instance", (_event, argv) => {
+    const deepLink = argv.find((a) => a.startsWith(`${PROTOCOL}://`));
+    if (deepLink) handleDeepLink(deepLink);
+    showWindow();
+  });
+}
+
+// ─── Window ───────────────────────────────────────────────────────────────────
+
+function createWindow(): void {
+  const bounds = store.get("windowBounds");
+
+  mainWindow = new BrowserWindow({
+    width: bounds.width,
+    height: bounds.height,
+    x: bounds.x,
+    y: bounds.y,
+    minWidth: 860,
+    minHeight: 560,
+    title: "doppel",
+    titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
+    backgroundColor: "#080808",
+    icon: getAppIcon(),
+    webPreferences: {
+      preload: join(__dirname, "../preload/index.js"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      // Disable webSecurity so file:// can call https:// APIs and Clerk can
+      // reach its backend (electric-moray-73.clerk.accounts.dev) without CORS
+      webSecurity: false,
+      sandbox: false,
+    },
+    show: false,
+  });
+
+  // In dev mode electron-vite sets ELECTRON_RENDERER_URL to the vite dev server
+  // (http://localhost:PORT) so Clerk can initialize — file:// is not a valid origin.
+  // In production we fall back to the bundled file.
+  if (process.env["ELECTRON_RENDERER_URL"]) {
+    mainWindow.loadURL(process.env["ELECTRON_RENDERER_URL"]);
+    // Open DevTools automatically in dev so we can see console errors
+    mainWindow.webContents.openDevTools({ mode: "detach" });
+  } else {
+    mainWindow.loadFile(join(__dirname, "../../out/renderer/index.html"));
+  }
+
+  mainWindow.once("ready-to-show", () => {
+    mainWindow?.show();
+  });
+
+  // Allow Clerk OAuth popups (Google, GitHub, etc.) opened by Clerk JS
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.includes("clerk.accounts.dev") || url.includes("clerk.com")) {
+      return { action: "allow" };
+    }
+    shell.openExternal(url);
+    return { action: "deny" };
+  });
+
+  // Allow navigation within the renderer (localhost dev, file://) and Clerk
+  // auth domains (redirect-based sign-in). Block everything else.
+  mainWindow.webContents.on("will-navigate", (_event, url) => {
+    const isLocal = url.startsWith("file://") || url.includes("localhost");
+    const isClerk = url.includes("clerk.accounts.dev") || url.includes("accounts.clerk.com");
+    if (!isLocal && !isClerk) {
+      _event.preventDefault();
+      shell.openExternal(url);
+    }
+  });
+
+  const saveBounds = () => {
+    if (!mainWindow) return;
+    store.set("windowBounds", mainWindow.getBounds());
+  };
+  mainWindow.on("resize", saveBounds);
+  mainWindow.on("move", saveBounds);
+
+  mainWindow.on("close", (e) => {
+    if (!isQuitting && process.platform === "darwin") {
+      e.preventDefault();
+      mainWindow?.hide();
+    }
+  });
+
+  mainWindow.on("closed", () => {
+    mainWindow = null;
+  });
+}
+
+// ─── Tray ─────────────────────────────────────────────────────────────────────
+
+function createTray(): void {
+  const icon = getTrayIcon();
+  tray = new Tray(icon);
+  tray.setToolTip("doppel");
+  rebuildTrayMenu();
+  tray.on("click", () => {
+    if (mainWindow?.isVisible() && mainWindow?.isFocused()) mainWindow.hide();
+    else showWindow();
+  });
+  nativeTheme.on("updated", rebuildTrayMenu);
+}
+
+function rebuildTrayMenu(): void {
+  if (!tray) return;
+  const launchAtStartup = store.get("launchAtStartup");
+  const menu = Menu.buildFromTemplate([
+    { label: "Open doppel", click: () => showWindow() },
+    { type: "separator" },
+    {
+      label: "Launch at startup",
+      type: "checkbox",
+      checked: launchAtStartup,
+      click: () => {
+        const next = !store.get("launchAtStartup");
+        store.set("launchAtStartup", next);
+        app.setLoginItemSettings({ openAtLogin: next, openAsHidden: true });
+        rebuildTrayMenu();
+      },
+    },
+    { type: "separator" },
+    {
+      label: "Quit doppel",
+      accelerator: process.platform === "darwin" ? "Cmd+Q" : "Alt+F4",
+      click: () => { isQuitting = true; app.quit(); },
+    },
+  ]);
+  tray.setContextMenu(menu);
+}
+
+// ─── Hotkey ───────────────────────────────────────────────────────────────────
+
+function registerHotkey(): void {
+  const ok = globalShortcut.register(HOTKEY, () => {
+    if (mainWindow?.isVisible() && mainWindow?.isFocused()) mainWindow.hide();
+    else showWindow();
+  });
+  if (!ok) console.warn(`[doppel] Could not register hotkey ${HOTKEY}`);
+}
+
+// ─── Deep link ────────────────────────────────────────────────────────────────
+
+function handleDeepLink(url: string): void {
+  console.log("[doppel] deep link:", url);
+  showWindow();
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function showWindow(): void {
+  if (!mainWindow) { createWindow(); return; }
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+function getAppIcon(): string | undefined {
+  try {
+    if (process.platform === "win32") return join(__dirname, "../../resources/icon.ico");
+    if (process.platform === "darwin") return join(__dirname, "../../resources/icon.icns");
+    return join(__dirname, "../../resources/icon.png");
+  } catch { return undefined; }
+}
+
+function getTrayIcon(): Electron.NativeImage {
+  try {
+    const img = nativeImage.createFromPath(join(__dirname, "../../resources/tray-icon.png"));
+    if (process.platform === "darwin") img.setTemplateImage(true);
+    return img;
+  } catch { return nativeImage.createEmpty(); }
+}
+
+// ─── IPC ──────────────────────────────────────────────────────────────────────
+
+ipcMain.on("doppel:notify", (_event, { title, body }: { title: string; body: string }) => {
+  if (Notification.isSupported()) {
+    new Notification({ title, body, icon: getAppIcon() ?? undefined }).show();
+  }
+});
+ipcMain.handle("doppel:platform", () => process.platform);
+ipcMain.handle("doppel:set-launch-at-startup", (_event, enabled: boolean) => {
+  store.set("launchAtStartup", enabled);
+  app.setLoginItemSettings({ openAtLogin: enabled, openAsHidden: true });
+});
+ipcMain.handle("doppel:get-launch-at-startup", () => store.get("launchAtStartup"));
+
+// ─── Clerk auth ──────────────────────────────────────────────────────────────
+
+interface AuthInfo {
+  userId: string;
+  firstName: string;
+  lastName: string;
+}
+
+/** Check for an existing Clerk session via the Frontend API cookies. */
+async function getClerkAuth(): Promise<AuthInfo | null> {
+  try {
+    const cookies = await session.defaultSession.cookies.get({ url: CLERK_FAPI });
+    if (!cookies.some((c) => c.name === "__client")) return null;
+
+    const res = await net.fetch(`${CLERK_FAPI}/v1/client`, {
+      credentials: "include",
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as {
+      response?: { sessions?: Array<{
+        status: string;
+        user?: { id: string; first_name?: string; last_name?: string };
+      }> };
+    };
+    const active = (data?.response?.sessions ?? []).find(
+      (s) => s.status === "active"
+    );
+    if (!active?.user) return null;
+    return {
+      userId: active.user.id,
+      firstName: active.user.first_name ?? "",
+      lastName: active.user.last_name ?? "",
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Sign in via Clerk Frontend API with email + password.
+ *  Sets the __client cookie in the default session on success. */
+async function signInWithCredentials(
+  email: string,
+  password: string
+): Promise<{ auth: AuthInfo | null; error?: string }> {
+  try {
+    const res = await net.fetch(`${CLERK_FAPI}/v1/client/sign_ins`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: `identifier=${encodeURIComponent(email)}&strategy=password&password=${encodeURIComponent(password)}`,
+      credentials: "include",
+    });
+
+    const data = (await res.json()) as {
+      response?: {
+        status?: string;
+        created_session_id?: string;
+      };
+      errors?: Array<{ message?: string; long_message?: string; code?: string }>;
+    };
+
+    // API-level errors (wrong password, user not found, etc.)
+    if (data.errors && data.errors.length > 0) {
+      const msg = data.errors[0].long_message || data.errors[0].message || "Sign in failed.";
+      return { auth: null, error: msg };
+    }
+
+    const status = data.response?.status;
+
+    if (status === "needs_second_factor") {
+      return { auth: null, error: "Two-factor authentication is not yet supported in the desktop app." };
+    }
+
+    if (status === "needs_first_factor") {
+      return { auth: null, error: "Could not verify credentials. Please check your email and password." };
+    }
+
+    if (status === "complete") {
+      // Cookie should now be set — read session info
+      const auth = await getClerkAuth();
+      if (auth) return { auth };
+      return { auth: null, error: "Signed in but could not load session. Please try again." };
+    }
+
+    return { auth: null, error: `Unexpected sign-in status: ${status}` };
+  } catch (e) {
+    return { auth: null, error: "Could not reach the sign-in service. Check your internet connection." };
+  }
+}
+
+/** Singleton guard — only one sign-in popup at a time. */
+let signInPromise: Promise<AuthInfo | null> | null = null;
+
+/** Tiny localhost server so Clerk JS gets an HTTP origin (needed for OAuth). */
+function serveSignInPage(): Promise<{ server: Server; port: number }> {
+  return new Promise((resolve, reject) => {
+    const html = readFileSync(
+      join(__dirname, "../../resources/signin.html"),
+      "utf-8"
+    );
+    const server = createServer((_req, res) => {
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      res.end(html);
+    });
+    server.listen(0, "localhost", () => {
+      const addr = server.address();
+      if (addr && typeof addr === "object") {
+        resolve({ server, port: addr.port });
+      } else {
+        reject(new Error("Could not start auth server"));
+      }
+    });
+  });
+}
+
+/** Open the sign-in popup with the full Clerk sign-in UI (Google, email, etc.). */
+function signInPopup(): Promise<AuthInfo | null> {
+  if (signInPromise) return signInPromise;
+
+  signInPromise = (async () => {
+    const existing = await getClerkAuth();
+    if (existing) return existing;
+
+    // Serve from localhost so Clerk JS has an HTTP origin for OAuth
+    const { server, port } = await serveSignInPage();
+
+    return new Promise<AuthInfo | null>((resolve) => {
+      const popup = new BrowserWindow({
+        width: 480,
+        height: 700,
+        parent: mainWindow ?? undefined,
+        modal: false,
+        backgroundColor: "#080808",
+        autoHideMenuBar: true,
+        title: "Sign in to doppel",
+        webPreferences: {
+          preload: join(__dirname, "../preload/index.js"),
+          contextIsolation: true,
+          nodeIntegration: false,
+          // webSecurity must be true (default) — Clerk FAPI requires
+          // the browser to send the Origin header on API requests.
+        },
+      });
+
+      popup.loadURL(`http://localhost:${port}`);
+
+      let resolved = false;
+      const finish = (auth: AuthInfo | null) => {
+        if (resolved) return;
+        resolved = true;
+        signInPromise = null;
+        server.close();
+        resolve(auth);
+      };
+
+      // Clerk JS encodes user info in the title when sign-in completes
+      popup.webContents.on("page-title-updated", (_event, title) => {
+        if (resolved || !title.startsWith("auth:")) return;
+        try {
+          const info = JSON.parse(title.slice(5)) as AuthInfo;
+          if (info.userId) {
+            popup.close();
+            finish(info);
+          }
+        } catch { /* ignore parse errors */ }
+      });
+
+      popup.on("closed", () => {
+        if (!resolved) finish(null);
+      });
+
+      // Allow OAuth popups (Google, GitHub, etc.) opened by Clerk
+      popup.webContents.setWindowOpenHandler(({ url }) => {
+        if (
+          url.includes("clerk") ||
+          url.includes("accounts.dev") ||
+          url.includes("google.com") ||
+          url.includes("googleapis.com") ||
+          url.includes("github.com") ||
+          url.includes("localhost")
+        ) {
+          return { action: "allow" };
+        }
+        shell.openExternal(url);
+        return { action: "deny" };
+      });
+    });
+  })();
+
+  return signInPromise;
+}
+
+ipcMain.handle("doppel:get-auth", () => getClerkAuth());
+ipcMain.handle("doppel:sign-in", () => signInPopup());
+
+// Fallback: direct email+password sign-in via Clerk REST API
+ipcMain.handle(
+  "doppel:submit-credentials",
+  async (_event, email: string, password: string) => {
+    const result = await signInWithCredentials(email, password);
+    if (result.auth) return { auth: result.auth };
+    return { error: result.error ?? "Sign in failed." };
+  }
+);
+
+// ─── App lifecycle ────────────────────────────────────────────────────────────
+
+app.whenReady().then(() => {
+  app.setAsDefaultProtocolClient(PROTOCOL);
+  const launchAtStartup = store.get("launchAtStartup");
+  app.setLoginItemSettings({ openAtLogin: launchAtStartup, openAsHidden: true });
+
+  createWindow();
+  createTray();
+  registerHotkey();
+
+  app.on("open-url", (_event, url) => handleDeepLink(url));
+});
+
+app.on("window-all-closed", () => {
+  if (process.platform !== "darwin") app.quit();
+});
+
+app.on("activate", () => {
+  if (mainWindow === null) createWindow();
+  else showWindow();
+});
+
+app.on("will-quit", () => globalShortcut.unregisterAll());
+app.on("before-quit", () => { isQuitting = true; });

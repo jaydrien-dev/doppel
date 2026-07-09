@@ -127,15 +127,23 @@ class DoppelBrain:
 
         # ── 4b. Uncertainty check — flag if no relevant knowledge found ──────
         knowledge_weak = _is_knowledge_weak(memory)
-        if knowledge_weak and not brain_input.owner_mode:
-            # Log gap so owner can see what people asked about
-            asyncio.create_task(
-                _log_knowledge_gap(self._clone_id, brain_input.message)
-            )
+        if knowledge_weak:
+            if not brain_input.owner_mode:
+                # Log gap so owner can see what people asked about
+                asyncio.create_task(
+                    _log_knowledge_gap(self._clone_id, brain_input.message)
+                )
             # Inject hint so the LLM knows to be honest about the gap
             brain_input = brain_input.model_copy(update={
                 "metadata": {**brain_input.metadata, "_knowledge_gap": True}
             })
+        elif quick is None:
+            # Chunks exist — check if they're a weak similarity match (not really relevant)
+            best_sim = _best_similarity(memory)
+            if best_sim < 0.45:
+                brain_input = brain_input.model_copy(update={
+                    "metadata": {**brain_input.metadata, "_low_retrieval": True}
+                })
 
         # ── 4c. Load MCP tools for this clone (if any enabled) ───────────
         from doppel.brain.tools.mcp_client import load_clone_tools
@@ -201,6 +209,7 @@ class DoppelBrain:
             identity=identity,
             needs_escalation=needs_escalation,
             escalation_reason=escalation_reason,
+            owner_mode=brain_input.owner_mode,
         )
 
         latency_ms = int((time.monotonic() - t_start) * 1000)
@@ -331,13 +340,20 @@ class DoppelBrain:
 
         # Uncertainty check
         knowledge_weak = _is_knowledge_weak(memory)
-        if knowledge_weak and not brain_input.owner_mode:
-            asyncio.create_task(
-                _log_knowledge_gap(self._clone_id, brain_input.message)
-            )
+        if knowledge_weak:
+            if not brain_input.owner_mode:
+                asyncio.create_task(
+                    _log_knowledge_gap(self._clone_id, brain_input.message)
+                )
             brain_input = brain_input.model_copy(update={
                 "metadata": {**brain_input.metadata, "_knowledge_gap": True}
             })
+        elif quick is None:
+            best_sim = _best_similarity(memory)
+            if best_sim < 0.45:
+                brain_input = brain_input.model_copy(update={
+                    "metadata": {**brain_input.metadata, "_low_retrieval": True}
+                })
 
         # ── 4c. Load MCP tools for this clone (if any enabled) ───────────
         from doppel.brain.tools.mcp_client import load_clone_tools
@@ -406,9 +422,12 @@ class DoppelBrain:
             )
             return
 
-        yield f"data: {json.dumps({'event': 'start', 'path': path})}\n\n"
+        # Determine actual execution path before emitting start event so UI shows the right label
+        _use_tool_path = brain_input.agent_mode or _message_needs_tools(brain_input.message)
+        _start_path = "agent" if brain_input.agent_mode else ("tool" if _use_tool_path else path)
+        yield f"data: {json.dumps({'event': 'start', 'path': _start_path})}\n\n"
 
-        if brain_input.agent_mode or _message_needs_tools(brain_input.message):
+        if _use_tool_path:
             gen = _tool_path.run_stream(
                 brain_input=brain_input,
                 identity=identity,
@@ -472,7 +491,7 @@ class DoppelBrain:
         trace.escalation_reason = escalation_reason
         trace.confidence = confidence
 
-        final_response = await finalize(full_text, identity, needs_escalation, escalation_reason)
+        final_response = await finalize(full_text, identity, needs_escalation, escalation_reason, owner_mode=brain_input.owner_mode)
         corrected = final_response if final_response != full_text else None
         latency_ms = int((time.monotonic() - t_start) * 1000)
 
@@ -742,6 +761,24 @@ def _is_knowledge_weak(memory: MemoryContext) -> bool:
     Social/greeting messages never reach here (they get quick-classified).
     """
     return not memory.episodic and not memory.semantic
+
+
+def _best_similarity(memory: MemoryContext) -> float:
+    """
+    Returns the highest similarity score across the top retrieved chunks.
+    Returns 0.0 if no chunks have a score attached.
+    Used to detect retrievals where chunks exist but don't closely match the query.
+    """
+    best = 0.0
+    for chunk in memory.episodic[:3]:
+        score = getattr(chunk, "similarity_score", None)
+        if score is not None:
+            best = max(best, float(score))
+    for chunk in memory.semantic[:2]:
+        score = getattr(chunk, "similarity_score", None)
+        if score is not None:
+            best = max(best, float(score))
+    return best
 
 
 async def _log_knowledge_gap(clone_id: UUID, query: str) -> None:

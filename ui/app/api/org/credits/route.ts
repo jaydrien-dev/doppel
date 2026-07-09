@@ -1,16 +1,16 @@
-import { auth } from "@clerk/nextjs/server";
 import { NextRequest, NextResponse } from "next/server";
 import { backendFetch } from "@/lib/backendFetch";
+import { getUserId } from "@/lib/getAuth";
 
-export async function GET() {
-  const { userId } = await auth();
-  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+export async function GET(req: NextRequest) {
+  const userId = await getUserId(req);
+  if (!userId) return NextResponse.json({ org_id: null, credits: 0 }, { status: 200 });
   const res = await backendFetch("/org/credits", { headers: { "X-User-Id": userId } });
   return NextResponse.json(await res.json(), { status: res.status });
 }
 
 export async function POST(req: NextRequest) {
-  const { userId } = await auth();
+  const userId = await getUserId(req);
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const body = await req.json();
   const res = await backendFetch("/org/credits/add", {

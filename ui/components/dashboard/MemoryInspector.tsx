@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import useSWR from "swr";
 import { patchMemory } from "@/lib/api";
 import type { MemoryChunk } from "@/lib/types";
+import { SelectMenu } from "@/components/ui/select-menu";
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
@@ -696,17 +697,15 @@ export function MemoryInspector({ cloneId }: { cloneId: string }) {
                 </button>
               )}
             </div>
-            <select
+            <SelectMenu
               value={sourceFilter}
-              onChange={(e) => { setSourceFilter(e.target.value as SourceFilter); setPage(0); setSelected(new Set()); }}
-              className="input"
-              style={{ fontSize: 12, width: "auto", minWidth: 110, paddingRight: 28, cursor: "pointer" }}
-            >
-              <option value="">All sources</option>
-              {SOURCES.map(s => (
-                <option key={s} value={s}>{SOURCE_LABEL[s] ?? s.charAt(0).toUpperCase() + s.slice(1)}</option>
-              ))}
-            </select>
+              onChange={(v) => { setSourceFilter(v as SourceFilter); setPage(0); setSelected(new Set()); }}
+              size="sm"
+              options={[
+                { value: "", label: "All sources" },
+                ...SOURCES.map(s => ({ value: s, label: SOURCE_LABEL[s] ?? (s.charAt(0).toUpperCase() + s.slice(1)) })),
+              ]}
+            />
           </div>
         )}
       </div>

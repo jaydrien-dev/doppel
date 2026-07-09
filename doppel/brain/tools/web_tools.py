@@ -98,23 +98,51 @@ async def _search_ddg(query: str, n: int) -> str:
             r.raise_for_status()
             html = r.text
 
-        # Extract result snippets from DDG Lite HTML
+        # Strategy 1: DDG Lite table structure — result-link + result-snippet classes
         snippets = re.findall(
-            r'class="result-link"[^>]*href="([^"]+)"[^>]*>([^<]+)</a>.*?class="result-snippet"[^>]*>(.*?)</td>',
-            html, re.DOTALL
+            r'class="result-link"[^>]*href="([^"]+)"[^>]*>\s*([^<]+)\s*</a>.*?class="result-snippet"[^>]*>(.*?)</td>',
+            html, re.DOTALL,
         )
-        if not snippets:
-            # Fallback: just pull any links + surrounding text
-            links = re.findall(r'href="(https?://[^"]+)"[^>]*>([^<]{10,80})', html)[:n]
-            if links:
-                return "\n".join(f"{i+1}. {title.strip()}\n{url}" for i, (url, title) in enumerate(links))
-            return f"Web search for '{query}' — could not retrieve results."
+        if snippets:
+            lines = []
+            for i, (link, title, snippet) in enumerate(snippets[:n], 1):
+                clean = re.sub(r"<[^>]+>", "", snippet).strip()
+                lines.append(f"{i}. **{title.strip()}**\n{link}\n{clean}")
+            return "\n\n".join(lines)
 
-        lines = []
-        for i, (link, title, snippet) in enumerate(snippets[:n], 1):
-            clean_snippet = re.sub(r"<[^>]+>", "", snippet).strip()
-            lines.append(f"{i}. **{title.strip()}**\n{link}\n{clean_snippet}")
-        return "\n\n".join(lines)
+        # Strategy 2: any external href in the page (DDG Lite often redirects URLs through its own proxy)
+        # Match both direct external links and DDG's redirect links
+        raw_links = re.findall(r'href="(//duckduckgo\.com/l/\?[^"]+|https?://(?!duckduckgo)[^"]+)"', html)
+        resolved: list[tuple[str, str]] = []
+        for raw in raw_links:
+            if raw.startswith("//duckduckgo.com/l/?"):
+                # extract uddg param which holds the actual URL
+                m = re.search(r'uddg=([^&"]+)', raw)
+                if m:
+                    actual = urllib.parse.unquote(m.group(1))
+                    resolved.append((actual, actual))
+            elif raw.startswith("http"):
+                resolved.append((raw, raw))
+        if resolved:
+            seen: set[str] = set()
+            lines = []
+            for url_r, _ in resolved:
+                if url_r in seen:
+                    continue
+                seen.add(url_r)
+                lines.append(f"{len(lines)+1}. {url_r}")
+                if len(lines) >= n:
+                    break
+            if lines:
+                return f"Search results for '{query}':\n" + "\n".join(lines)
+
+        # Strategy 3: <a> tags with substantial anchor text pointing to real domains
+        fallback = re.findall(r'href="(https?://(?!duckduckgo)[^"]+)"[^>]*>([^<]{10,100})<', html)
+        fallback = [(u, t) for u, t in fallback if "privacy" not in u.lower()][:n]
+        if fallback:
+            return "\n".join(f"{i+1}. {t.strip()}\n   {u}" for i, (u, t) in enumerate(fallback))
+
+        return f"Search for '{query}' returned no usable results. Try a different query or a direct URL."
 
     except Exception as exc:
         _log.warning("DDG search failed: %s", exc)

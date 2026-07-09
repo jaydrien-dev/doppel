@@ -18,8 +18,10 @@ from doppel.brain.models.types import (
 from doppel.config import settings
 
 # Thresholds for the 2×2 routing matrix
-_REPR_THRESHOLD  = 0.70   # above → "high representational confidence"
-_CONSQ_THRESHOLD = 0.50   # above → "high consequentiality"
+# Escalation should only trigger when the clone genuinely can't answer —
+# not on routine questions with moderate confidence.
+_REPR_THRESHOLD  = 0.35   # below this → clone truly doesn't know
+_CONSQ_THRESHOLD = 0.65   # above → high-stakes action requiring review
 
 
 class MetacognitionLayer:

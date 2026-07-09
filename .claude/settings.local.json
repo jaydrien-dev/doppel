@@ -53,7 +53,36 @@
       "Bash(grep -l \"whatsapp\\\\|slack\\\\|email\\\\|gmail\\\\|channel\" /c/Users/jaydr/OneDrive/Documents/DOPPEL/doppel/ingestion/connectors/*.py)",
       "Bash(xargs basename:*)",
       "Bash(python -c \"from doppel.brain.metacognition.layer import MetacognitionLayer; from doppel.brain.models.types import ApprovalPath, ApprovalDecision; print\\('OK'\\)\")",
-      "Bash(python -c \"from doppel.brain.orchestrator import DoppelBrain; print\\('OK'\\)\")"
+      "Bash(python -c \"from doppel.brain.orchestrator import DoppelBrain; print\\('OK'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('doppel/brain/tasks/runner.py'\\).read\\(\\)\\); print\\('runner.py OK'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('doppel/brain/tasks/scheduler.py'\\).read\\(\\)\\); print\\('scheduler.py OK'\\)\")",
+      "Bash(grep -r \"8000\\\\|8080\\\\|port\" Makefile Procfile *.toml *.cfg run.sh)",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('doppel/ingestion/connectors/gdrive.py'\\).read\\(\\)\\); print\\('OK'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('doppel/brain/tasks/runner.py'\\).read\\(\\)\\); print\\('OK'\\)\")",
+      "Bash(mkdir -p \"c:/Users/jaydr/OneDrive/Documents/DOPPEL/ui/app/api/clones/[handle]/decisions/[id]\")",
+      "Bash(mkdir -p \"c:/Users/jaydr/OneDrive/Documents/DOPPEL/ui/app/api/clones/[handle]/decisions/extract\")",
+      "Bash(grep -n \"open &&\\\\|dropdown\\\\|Drop\" /c/Users/jaydr/OneDrive/Documents/DOPPEL/ui/components/dashboard/*.tsx)",
+      "Bash(python -c \"import py_compile; py_compile.compile\\('c:/Users/jaydr/OneDrive/Documents/DOPPEL/doppel/brain/reasoning/tool_path.py', doraise=True\\); print\\('OK'\\)\")",
+      "WebFetch(domain:openclaw.ai)",
+      "WebFetch(domain:docs.openclaw.ai)",
+      "WebFetch(domain:clawhub.ai)",
+      "Bash(python3 -c ':*)",
+      "Bash(python c:/Users/jaydr/OneDrive/Documents/DOPPEL/.venv/Scripts/python.exe -c ':*)",
+      "Bash(cmd /c \"python --version 2>&1\")",
+      "Bash(cmd /c \"where python\")",
+      "Bash(node -e \"const m = require\\('c:/Users/jaydr/OneDrive/Documents/DOPPEL/desktop/node_modules/@clerk/clerk-js'\\); console.log\\(Object.keys\\(m\\).slice\\(0,10\\)\\)\")",
+      "Bash(node -e \"const d=require\\('fs'\\).readFileSync\\('/dev/stdin','utf8'\\); const p=JSON.parse\\(d\\); console.log\\(JSON.stringify\\({main:p.main,module:p.module,exports:p.exports},null,2\\)\\)\")",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(json.dumps\\({k:v for k,v in d.items\\(\\) if k!='functions'}, indent=2\\)\\)\")",
+      "Bash(node -e \"const m = require\\('c:/Users/jaydr/OneDrive/Documents/DOPPEL/desktop/node_modules/@clerk/clerk-js/dist/clerk.mjs'\\); console.log\\(Object.keys\\(m\\).slice\\(0,10\\)\\)\")",
+      "Bash(node -e \"const p = require\\('./node_modules/@clerk/clerk-js/package.json'\\); console.log\\('main:', p.main\\); const exp = p.exports; if\\(exp\\) { const keys = Object.keys\\(exp\\); console.log\\('export keys:', keys.slice\\(0,5\\)\\); const dot = exp['.']; if\\(dot\\) console.log\\('exports[.]:', JSON.stringify\\(dot\\).slice\\(0,300\\)\\); }\")",
+      "Bash(node -e \"const p = require\\('./node_modules/@clerk/clerk-js/package.json'\\); console.log\\('main:', p.main\\); const dot = \\(p.exports||{}\\)['.']||{}; console.log\\('exports[.]:', JSON.stringify\\(dot\\).slice\\(0,400\\)\\);\")",
+      "WebFetch(domain:clerk.com)",
+      "WebFetch(domain:clerk-fapi.redoc.ly)",
+      "WebFetch(domain:payloadcms.com)",
+      "WebFetch(domain:blog.openreplay.com)",
+      "WebFetch(domain:www.linkedin.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:electric-moray-73.clerk.accounts.dev)"
     ],
     "additionalDirectories": [
       "c:\\Users\\jaydr\\OneDrive\\Documents\\DOPPEL\\ui\\app\\api\\org\\by-token",
@@ -63,7 +92,11 @@
       "\\tmp",
       "c:\\Users\\jaydr\\OneDrive\\Documents\\DOPPEL\\doppel\\brain\\db",
       "C:\\Users\\jaydr\\AppData\\Roaming\\doppel-desktop",
-      "c:\\Users\\jaydr\\OneDrive\\Documents\\DOPPEL\\ui\\app\\api\\consumer\\brain"
+      "c:\\Users\\jaydr\\OneDrive\\Documents\\DOPPEL\\ui\\app\\api\\consumer\\brain",
+      "c:\\Users\\jaydr\\OneDrive\\Documents\\DOPPEL\\ui\\app\\api\\proposals",
+      "c:\\Users\\jaydr\\OneDrive\\Documents\\DOPPEL\\ui\\app\\api\\tasks",
+      "c:\\Users\\jaydr\\OneDrive\\Documents\\DOPPEL\\ui\\app\\api\\automations",
+      "c:\\Users\\jaydr\\OneDrive\\Documents\\DOPPEL\\ui\\app\\api\\clones\\[handle]\\import-from"
     ]
   }
 }

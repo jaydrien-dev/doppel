@@ -1,0 +1,60 @@
+appId: ai.doppel.desktop
+productName: doppel
+copyright: Copyright © 2026 Doppel AI, Inc.
+
+directories:
+  output: dist-installer
+  buildResources: resources
+
+files:
+  - out/**/*
+  - package.json
+  - node_modules/electron-store/**/*
+  - node_modules/electron-updater/**/*
+  - node_modules/conf/**/*
+  - node_modules/dot-prop/**/*
+  - node_modules/env-paths/**/*
+  - node_modules/json-schema-typed/**/*
+
+# ── Windows ─────────────────────────────────────────────────────────────────
+win:
+  target:
+    - target: nsis
+      arch: [x64, arm64]
+  icon: resources/icon.ico
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: false
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: doppel
+  installerIcon: resources/icon.ico
+  uninstallerIcon: resources/icon.ico
+
+# ── macOS ────────────────────────────────────────────────────────────────────
+mac:
+  target:
+    - target: dmg
+      arch: [x64, arm64]
+  icon: resources/icon.icns
+  category: public.app-category.productivity
+  hardenedRuntime: true
+  entitlements: resources/entitlements.mac.plist
+  entitlementsInherit: resources/entitlements.mac.plist
+
+dmg:
+  title: doppel
+  background: resources/dmg-background.png
+  contents:
+    - x: 130
+      y: 220
+    - x: 410
+      y: 220
+      type: link
+      path: /Applications
+
+# ── Auto-update ──────────────────────────────────────────────────────────────
+publish:
+  provider: generic
+  url: https://doppel.up.railway.app/desktop/releases

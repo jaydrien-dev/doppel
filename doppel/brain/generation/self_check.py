@@ -47,6 +47,28 @@ def run_self_check(
     if "i am an ai assistant" in lower and "clone" not in lower:
         issues.append("Clone may be presenting as generic AI instead of persona")
 
+    # 5. Generic AI opener detection — soft warning, doesn't block but signals persona drift
+    _GENERIC_OPENERS = [
+        "certainly!", "certainly,",
+        "absolutely!", "absolutely,",
+        "of course!", "of course,",
+        "happy to help",
+        "i'd be happy to",
+        "i'd be delighted",
+        "great question",
+        "excellent question",
+        "that's a great question",
+        "i hope this helps",
+        "i hope this information",
+        "as requested,",
+        "sure, here",
+        "sure! here",
+    ]
+    for opener in _GENERIC_OPENERS:
+        if lower.startswith(opener) or lower.startswith(opener.lstrip("!")):
+            issues.append(f"Generic AI opener detected: response starts with '{opener}'")
+            break
+
     # 5. System prompt leakage check — response must not contain internal prompt fragments
     _PROMPT_LEAK_MARKERS = [
         "your personality:",

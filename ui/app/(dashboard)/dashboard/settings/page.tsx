@@ -6,6 +6,8 @@ import Link from "next/link";
 import { useClones } from "@/lib/hooks/useClones";
 import { ClonePicker } from "@/components/dashboard/ClonePicker";
 import { useUser } from "@clerk/nextjs";
+import type { CloneOwnerInfo } from "@/lib/types";
+import { SelectMenu } from "@/components/ui/select-menu";
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
@@ -618,6 +620,79 @@ function GdprPanel({ cloneHandle }: { cloneHandle: string | null }) {
 
 
 // ---------------------------------------------------------------------------
+// Cross-clone import panel
+// ---------------------------------------------------------------------------
+
+function CrossCloneImportPanel({ clones, targetClone }: { clones: CloneOwnerInfo[]; targetClone: CloneOwnerInfo }) {
+  const sources = clones.filter(c => c.clone_id !== targetClone.clone_id);
+  const [sourceHandle, setSourceHandle] = useState(sources[0]?.handle ?? "");
+  const [types, setTypes] = useState<{ decision: boolean; voice: boolean }>({ decision: true, voice: true });
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<{ decision?: number; voice?: number } | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function runImport() {
+    if (!sourceHandle || (!types.decision && !types.voice)) return;
+    setLoading(true); setErr(null); setResult(null);
+    const selectedTypes = Object.entries(types).filter(([, v]) => v).map(([k]) => k);
+    try {
+      const res = await fetch(`/api/clones/${targetClone.handle}/import-from/${sourceHandle}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ types: selectedTypes }),
+      });
+      if (!res.ok) { setErr("Import failed."); return; }
+      const data = await res.json();
+      setResult(data.imported ?? {});
+    } catch { setErr("Network error."); } finally { setLoading(false); }
+  }
+
+  if (sources.length === 0) return null;
+
+  return (
+    <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 14, padding: "16px 18px" }}>
+      <p style={{ fontSize: 12, color: "rgba(255,255,255,0.40)", lineHeight: 1.55, margin: "0 0 14px" }}>
+        Copy decision-making style or communication voice from one of your other clones into <strong style={{ color: "rgba(255,255,255,0.60)" }}>{targetClone.display_name}</strong>.
+        Useful when you create a new focused clone and want it to share your reasoning patterns.
+      </p>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <div>
+          <label style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", display: "block", marginBottom: 5 }}>Import from</label>
+          <SelectMenu
+            value={sourceHandle}
+            onChange={setSourceHandle}
+            options={sources.map(c => ({ value: c.handle, label: c.display_name }))}
+            className="w-full"
+          />
+        </div>
+        <div>
+          <label style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", display: "block", marginBottom: 7 }}>What to import</label>
+          <div style={{ display: "flex", gap: 8 }}>
+            {(["decision", "voice"] as const).map(t => (
+              <button key={t} onClick={() => setTypes(prev => ({ ...prev, [t]: !prev[t] }))}
+                style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 12px", borderRadius: 8, border: `1px solid ${types[t] ? "rgba(255,255,255,0.18)" : "rgba(255,255,255,0.08)"}`, background: types[t] ? "rgba(255,255,255,0.08)" : "transparent", color: types[t] ? "rgba(255,255,255,0.78)" : "rgba(255,255,255,0.30)", fontSize: 12, cursor: "pointer", fontFamily: "inherit", transition: "all 140ms" }}>
+                {types[t] && <svg width="9" height="9" viewBox="0 0 16 16" fill="none"><path d="M3 8l4 4 6-7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                {t === "decision" ? "Decision style" : "Communication voice"}
+              </button>
+            ))}
+          </div>
+        </div>
+        {err && <p style={{ fontSize: 11, color: "rgba(248,113,113,0.70)", margin: 0 }}>{err}</p>}
+        {result && (
+          <p style={{ fontSize: 11, color: "rgba(52,211,153,0.70)", margin: 0 }}>
+            Imported: {Object.entries(result).map(([k, v]) => `${v} ${k} pattern${v !== 1 ? "s" : ""}`).join(", ")}
+          </p>
+        )}
+        <button onClick={runImport} disabled={loading || (!types.decision && !types.voice)}
+          style={{ alignSelf: "flex-start", fontSize: 12, fontWeight: 500, padding: "6px 16px", borderRadius: 9, background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.12)", color: "rgba(255,255,255,0.75)", cursor: "pointer", fontFamily: "inherit", opacity: loading ? 0.5 : 1 }}>
+          {loading ? "Importing…" : "Import"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main settings page
 // ---------------------------------------------------------------------------
 export default function SettingsPage() {
@@ -672,7 +747,16 @@ export default function SettingsPage() {
         {/* Clone-level settings */}
         {clone && (
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <p className="db-eyebrow" style={{ padding: "0 4px 8px", marginBottom: 0 }}>Delegate policies</p>
+
+            {/* Cross-clone import */}
+            {clones.length > 1 && (
+              <>
+                <p className="db-eyebrow" style={{ padding: "0 4px 8px", marginBottom: 0 }}>Import from another clone</p>
+                <CrossCloneImportPanel clones={clones} targetClone={clone} />
+              </>
+            )}
+
+            <p className="db-eyebrow" style={{ padding: clones.length > 1 ? "24px 4px 8px" : "0 4px 8px", marginBottom: 0 }}>Delegate policies</p>
             <AdminPoliciesPanel cloneHandle={clone.handle} />
 
             <p className="db-eyebrow" style={{ padding: "24px 4px 8px", marginBottom: 0 }}>Data retention</p>

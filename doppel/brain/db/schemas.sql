@@ -1018,3 +1018,14 @@ CREATE TABLE IF NOT EXISTS clone_skills (
     updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS clone_skills_clone_idx ON clone_skills (clone_id, status);
+
+-- -------------------------------------------------------------------------
+-- CALIBRATION SCORE — running approval rate per clone (confidence feedback loop)
+-- -------------------------------------------------------------------------
+ALTER TABLE clone_identity ADD COLUMN IF NOT EXISTS calibration_score FLOAT NOT NULL DEFAULT 0.5;
+ALTER TABLE clone_identity ADD COLUMN IF NOT EXISTS feedback_count INT NOT NULL DEFAULT 0;
+
+-- -------------------------------------------------------------------------
+-- DECISION DOMAIN — per-heuristic domain tagging for the Decisions page
+-- -------------------------------------------------------------------------
+ALTER TABLE procedural_memory ADD COLUMN IF NOT EXISTS domain TEXT DEFAULT 'general';

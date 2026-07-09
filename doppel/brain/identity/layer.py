@@ -34,11 +34,12 @@ class IdentityLayer:
     that get injected into every LLM call.
     """
 
-    def __init__(self, style: StyleFingerprint, values: ValueSystem, epistemic: EpistemicProfile, clone_name: str):
+    def __init__(self, style: StyleFingerprint, values: ValueSystem, epistemic: EpistemicProfile, clone_name: str, calibration_score: float = 0.5):
         self.style = style
         self.values = values
         self.epistemic = epistemic
         self.clone_name = clone_name
+        self.calibration_score = calibration_score
 
     @classmethod
     async def load(cls, session: AsyncSession, clone_id: UUID) -> "IdentityLayer":
@@ -50,12 +51,13 @@ class IdentityLayer:
         style, values, epistemic = await _load_all(session, clone_id)
         from sqlalchemy import text
         result = await session.execute(
-            text("SELECT display_name FROM clone_identity WHERE clone_id = :id"),
+            text("SELECT display_name, COALESCE(calibration_score, 0.5) AS calibration_score FROM clone_identity WHERE clone_id = :id"),
             {"id": str(clone_id)},
         )
         row = result.mappings().first()
         name = row["display_name"] if row else "Unknown"
-        identity = cls(style=style, values=values, epistemic=epistemic, clone_name=name)
+        calib = float(row["calibration_score"]) if row else 0.5
+        identity = cls(style=style, values=values, epistemic=epistemic, clone_name=name, calibration_score=calib)
         _IDENTITY_CACHE[key] = (time.monotonic(), identity)
         return identity
 
@@ -83,6 +85,21 @@ class IdentityLayer:
             + render_style_prompt(self.style)
         )
 
+    # Phrases that signal the clone broke persona and is presenting as a generic AI
+    _GENERIC_AI_HARD_BREAKS = [
+        "as an ai language model",
+        "as a large language model",
+        "as an artificial intelligence",
+        "i don't have personal opinions",
+        "i cannot have personal experiences",
+        "i am programmed to",
+        "i'm just an ai",
+        "i am just an ai",
+        "as a chatbot",
+        "i have no personal",
+        "i lack personal",
+    ]
+
     def enforce_boundaries(self, response: str) -> tuple[bool, str | None]:
         """
         Quick check: does the response violate any persona boundary?
@@ -98,6 +115,12 @@ class IdentityLayer:
 
         if any(phrase in lower for phrase in ["i commit to", "i promise to pay", "we will pay"]):
             violations.append("Response may be making unauthorized financial commitments")
+
+        # Detect generic AI identity breaks — clone should never present as a generic assistant
+        for phrase in self._GENERIC_AI_HARD_BREAKS:
+            if phrase in lower:
+                violations.append(f"Generic AI persona leak: '{phrase}'")
+                break
 
         if violations:
             return False, "; ".join(violations)

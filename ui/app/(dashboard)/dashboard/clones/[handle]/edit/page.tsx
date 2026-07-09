@@ -4,6 +4,7 @@ import { useEffect, useState, use } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ImageUpload } from "@/components/ui/ImageUpload";
+import { SelectMenu } from "@/components/ui/select-menu";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -265,18 +266,12 @@ export default function CloneEditPage({ params }: { params: Promise<{ handle: st
 
               <div>
                 <FieldLabel>Category</FieldLabel>
-                <select
+                <SelectMenu
                   value={category}
-                  onChange={(e) => setCategory(e.target.value)}
-                  className="input"
-                  style={{ appearance: "none" }}
-                >
-                  {CATEGORIES.map((c) => (
-                    <option key={c.value} value={c.value} style={{ background: "#141414", color: "rgba(255,255,255,0.70)" }}>
-                      {c.label}
-                    </option>
-                  ))}
-                </select>
+                  onChange={setCategory}
+                  options={CATEGORIES}
+                  className="w-full"
+                />
               </div>
 
               <div>

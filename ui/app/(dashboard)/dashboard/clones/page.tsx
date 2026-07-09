@@ -204,11 +204,26 @@ function DeleteModal({
 // ---------------------------------------------------------------------------
 // Clone card
 // ---------------------------------------------------------------------------
+interface Readiness {
+  knowledge_ok: boolean;
+  decision_making_ok: boolean;
+  voice_ok: boolean;
+  is_ready: boolean;
+}
+
 function CloneCard({ clone, onDeleted }: { clone: CloneRow; onDeleted: () => void }) {
   const color   = deriveColor(clone.display_name);
   const status  = getStatus(clone);
   const avatar  = clone.avatar_url || null;
   const [showDelete, setShowDelete] = useState(false);
+  const [readiness, setReadiness]   = useState<Readiness | null>(null);
+
+  useEffect(() => {
+    fetch(`/api/clones/${clone.handle}/readiness`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d) setReadiness(d); })
+      .catch(() => {});
+  }, [clone.handle]);
 
   return (
     <div
@@ -268,6 +283,31 @@ function CloneCard({ clone, onDeleted }: { clone: CloneRow; onDeleted: () => voi
         <p style={{ fontSize: 12, fontWeight: 500, margin: 0, color: PLAN_COLORS[clone.subscription_tier] ?? "rgba(255,255,255,0.4)" }}>
           {PLAN_LABELS[clone.subscription_tier] ?? clone.subscription_tier}
         </p>
+      </div>
+
+      {/* Readiness checklist */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+        <p style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em", color: "rgba(255,255,255,0.20)", margin: 0 }}>Readiness</p>
+        {readiness === null ? (
+          <div style={{ display: "flex", gap: 4 }}>
+            {[0,1,2].map(i => <div key={i} style={{ height: 14, width: 60, borderRadius: 4, background: "rgba(255,255,255,0.06)", animation: "pulse 2s infinite" }} />)}
+          </div>
+        ) : (
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" as const }}>
+            {[
+              { label: "Knowledge",  ok: readiness.knowledge_ok },
+              { label: "Decisions",  ok: readiness.decision_making_ok },
+              { label: "Voice",      ok: readiness.voice_ok },
+            ].map(c => (
+              <span key={c.label} style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, padding: "2px 8px", borderRadius: 6, background: c.ok ? "rgba(52,211,153,0.06)" : "rgba(255,255,255,0.03)", border: `1px solid ${c.ok ? "rgba(52,211,153,0.15)" : "rgba(255,255,255,0.08)"}`, color: c.ok ? "rgba(52,211,153,0.75)" : "rgba(255,255,255,0.28)" }}>
+                {c.ok
+                  ? <svg width="9" height="9" viewBox="0 0 16 16" fill="none"><path d="M3 8l4 4 6-7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                  : <svg width="9" height="9" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="5.5" stroke="currentColor" strokeWidth="1.5"/></svg>}
+                {c.label}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Actions */}

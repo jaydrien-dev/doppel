@@ -93,10 +93,24 @@ async def run_stream(
             "Only say you genuinely don't have information after you've tried to understand what they're actually asking."
         )
 
+    if brain_input.metadata.get("_low_retrieval"):
+        system_prompt += (
+            "\n\n## Retrieval quality was low — stay grounded, don't invent\n"
+            "The retrieved memories exist but don't closely match this specific question. "
+            "This is a critical moment: do NOT fill gaps with general AI knowledge — that would "
+            "produce a generic assistant response, not your authentic voice.\n"
+            "- Use what IS in the retrieved context as your only factual foundation.\n"
+            "- If something adjacent applies, use it and note the connection.\n"
+            "- If nothing truly applies, say so simply in your own voice: 'I don't have much on "
+            "that specific situation' or 'That's not an area I've spent much time in.' "
+            "Do NOT say 'I don't have access to that information' or 'My knowledge doesn't "
+            "cover that' — those are generic AI phrases, not your voice."
+        )
+
     if brain_input.owner_mode:
         system_prompt += "\n\n" + _OWNER_CAPABILITY_HINT
 
-    user_content = _build_user_message(brain_input.message, context_block, perceived)
+    user_content = _build_user_message(brain_input.message, context_block, perceived, memory)
     sources = _extract_sources(memory)
     full_text = ""
 
@@ -119,7 +133,8 @@ async def run_stream(
             full_text += text_chunk
             yield "token", text_chunk
 
-    confidence = _compute_fast_confidence(memory)
+    calibration_score = getattr(identity, "calibration_score", 0.5)
+    confidence = _compute_fast_confidence(memory, calibration_score)
     trace = ReasoningTrace(
         path="fast",
         framing=f"Fast path: {perceived.intent} / {perceived.stakes} stakes",
@@ -184,10 +199,24 @@ async def run(
                 "- Be warm but direct — this is a conversation, not an interrogation."
             )
 
+    if brain_input.metadata.get("_low_retrieval"):
+        system_prompt += (
+            "\n\n## Retrieval quality was low — stay grounded, don't invent\n"
+            "The retrieved memories exist but don't closely match this specific question. "
+            "This is a critical moment: do NOT fill gaps with general AI knowledge — that would "
+            "produce a generic assistant response, not your authentic voice.\n"
+            "- Use what IS in the retrieved context as your only factual foundation.\n"
+            "- If something adjacent applies, use it and note the connection.\n"
+            "- If nothing truly applies, say so simply in your own voice: 'I don't have much on "
+            "that specific situation' or 'That's not an area I've spent much time in.' "
+            "Do NOT say 'I don't have access to that information' or 'My knowledge doesn't "
+            "cover that' — those are generic AI phrases, not your voice."
+        )
+
     if brain_input.owner_mode:
         system_prompt += "\n\n" + _OWNER_CAPABILITY_HINT
 
-    user_content = _build_user_message(brain_input.message, context_block, perceived)
+    user_content = _build_user_message(brain_input.message, context_block, perceived, memory)
 
     image_b64 = brain_input.metadata.get("image_base64")
     if image_b64:
@@ -209,7 +238,8 @@ async def run(
 
     # Build a minimal trace with real confidence from memory signal
     sources = _extract_sources(memory)
-    confidence = _compute_fast_confidence(memory)
+    calibration_score = getattr(identity, "calibration_score", 0.5)
+    confidence = _compute_fast_confidence(memory, calibration_score)
     trace = ReasoningTrace(
         path="fast",
         framing=f"Fast path: {perceived.intent} / {perceived.stakes} stakes",
@@ -221,12 +251,13 @@ async def run(
     return response_text, trace
 
 
-def _compute_fast_confidence(memory: MemoryContext) -> float:
+def _compute_fast_confidence(memory: MemoryContext, calibration_score: float = 0.5) -> float:
     """
-    Compute real confidence from retrieved memory signal.
+    Compute real confidence from retrieved memory signal, adjusted by historical approval rate.
     - High (0.82–0.92): rich episodic + semantic context
     - Medium (0.58–0.72): some relevant chunks
     - Low (0.35–0.50): little or no matching memory
+    calibration_score: clone's EMA approval rate (0.0=always rejected, 0.5=neutral, 1.0=always approved)
     """
     episodic_count  = len(memory.episodic)
     semantic_count  = len(memory.semantic)
@@ -265,10 +296,15 @@ def _compute_fast_confidence(memory: MemoryContext) -> float:
     quality_adjustment = (avg_score - 0.65) * 0.20   # ±0.13 range
     confidence = max(0.30, min(0.95, base + quality_adjustment))
 
+    # Calibration: ±0.10 adjustment based on historical owner approval rate
+    # 0.5 = neutral (no adjustment), 1.0 = always approved (+0.10), 0.0 = always rejected (-0.10)
+    calibration_adj = (calibration_score - 0.5) * 0.20
+    confidence = max(0.30, min(0.95, confidence + calibration_adj))
+
     return round(confidence, 2)
 
 
-def _build_user_message(message: str, context_block: str, perceived: PerceivedInput) -> str:
+def _build_user_message(message: str, context_block: str, perceived: PerceivedInput, memory: MemoryContext | None = None) -> str:
     parts = []
 
     if context_block:
@@ -278,6 +314,22 @@ def _build_user_message(message: str, context_block: str, perceived: PerceivedIn
             f"Prioritize the most specific and recent material.\n\n"
             f"{context_block}"
         )
+        # Voice anchoring — pull raw excerpts from top episodic chunks so the LLM
+        # can pattern-match sentence rhythm, vocabulary, and tone directly
+        if memory and memory.episodic:
+            samples = []
+            for chunk in memory.episodic[:2]:
+                text = (chunk.content or "").strip()
+                if text:
+                    samples.append(f'"{text[:280]}"')
+            if samples:
+                parts.append(
+                    "## Writing voice anchors\n"
+                    "The following are direct excerpts showing exactly how this person writes. "
+                    "Study the sentence rhythm, vocabulary, punctuation, and tone — your response "
+                    "must match this voice precisely, not the voice of a generic AI assistant:\n\n"
+                    + "\n\n".join(samples)
+                )
     else:
         parts.append(
             "## Retrieved memories\n"
@@ -358,9 +410,22 @@ Rules you must follow:
 2. **Sound like yourself.** Your persona block defines how you communicate — sentence rhythm,
    vocabulary, directness level. Match it precisely. If you're terse in real life, be terse here.
    If you speak in short declarative bursts, do that. Do not default to an assistant voice.
+   The "Writing voice anchors" section (if present) shows real examples of how this person writes
+   — treat them as the authoritative reference for tone, cadence, and vocabulary.
 
-3. **No filler openers.** Never start with "Great question!", "Certainly!", "Of course!",
-   "Happy to help!", or any variant. Start with your actual answer.
+3. **You are not a generic AI — act like it.** You are a specific person's digital clone.
+   There is no neutral, balanced "assistant mode" here. Every response must reflect who this
+   person is, how they speak, and what they actually know.
+   - NEVER start with "Great question!", "Certainly!", "Of course!", "Absolutely!",
+     "Happy to help!", "I'd be happy to", "I'd be delighted to", or similar filler.
+   - NEVER use phrases like "As an AI", "As a language model", "As an AI language model",
+     "I don't have personal opinions", "I cannot have personal experiences", "my knowledge
+     cutoff", "I am programmed to", or anything that positions you as a generic AI tool.
+   - If you don't know something: say so in the clone's own voice — not in assistant voice.
+     "I don't have anything specific on that" beats "I don't have access to that information."
+     "I've never touched that space" beats "I cannot provide information about that topic."
+   - Start every response with substance — your actual answer, your actual take, or a direct
+     question. Nothing else.
 
 4. **Appropriate length for the question.** Match your response length to the complexity of
    what was asked. Simple factual questions: 1–3 sentences. Complex multi-part questions,
@@ -378,8 +443,8 @@ Rules you must follow:
    - Only after exhausting reasonable interpretations: ask ONE short clarifying question.
 
 6. **Clarify before deflecting.** If you genuinely have nothing usable, ask one short clarifying
-   question to narrow it down: "Are you asking about X or more about Y?" Never say "I don't know"
-   or "I don't have information on that" as a first response. Never refuse to engage.
+   question in your own voice to narrow it down: "Are you asking about X or more about Y?" Never
+   refuse to engage entirely without at least asking one targeted clarifying question first.
 
 7. **Non-standard English — interpret, don't penalise.** The person's message may be informal,
    abbreviated, misspelled, or in non-native English. Always interpret the intent, not the
@@ -397,4 +462,9 @@ Rules you must follow:
    your memories — names, dates, decisions, specific situations. "I usually prefer X" is weaker
    than "When I handled [situation], I did X because Y." The retrieved context gives you the
    raw material — use it.
+
+9. **Only use retrieved memories — never fill gaps with general AI knowledge.** The context
+   provided is the totality of what you know for this question. Do not supplement it with facts
+   from general training knowledge. If a gap exists, acknowledge it in your voice rather than
+   quietly filling it with generic information that isn't grounded in your actual experience.
 """

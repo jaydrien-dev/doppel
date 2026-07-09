@@ -12,7 +12,7 @@ const CSP = [
   "frame-src https://clerk.com https://*.clerk.accounts.dev https://*.clerk.dev",
   "object-src 'none'",
   "base-uri 'self'",
-  "form-action 'self'",
+  "form-action 'self' doppel:",
 ].join("; ");
 
 const nextConfig: NextConfig = {

@@ -725,171 +725,6 @@ function ConvSidebar({
 }
 
 // ---------------------------------------------------------------------------
-// Connectors panel (per-clone, used in tab view)
-// ---------------------------------------------------------------------------
-
-type ConnectedTool = { id: string; name: string; tool_names: string[]; enabled: boolean; created_at: string };
-type AuthFlow = "oauth" | "webhook" | "credentials";
-type ConnectorSection = "communication" | "productivity" | "finance";
-interface ConnectorDef { id: string; name: string; subtitle: string; description: string; authFlow: AuthFlow; serviceKey?: string; credentialLabel?: string; credentialHint?: string; skills: string[]; section: ConnectorSection; toolNames: string[]; comingSoon?: boolean }
-
-const CONNECTORS: ConnectorDef[] = [
-  { id: "gmail", name: "Gmail", subtitle: "Inbox · Drafts · Send · Labels", description: "Read your inbox, draft and send emails, search conversations, apply labels and archive.", authFlow: "oauth", serviceKey: "gmail", skills: ["Email triage", "Reply drafting", "Follow-up execution"], section: "communication", toolNames: ["Gmail"] },
-  { id: "gcal", name: "Google Calendar", subtitle: "Events · Invites · Scheduling", description: "Create and reschedule meetings, send invites, read your schedule, and avoid conflicts.", authFlow: "oauth", serviceKey: "gcal", skills: ["Meeting scheduling", "Calendar management"], section: "communication", toolNames: ["Google Calendar"] },
-  { id: "slack", name: "Slack", subtitle: "Messages · Channels · DMs", description: "Post to channels, send direct messages, monitor threads, relay updates.", authFlow: "oauth", serviceKey: "slack", skills: ["Team communication", "Status updates", "Channel summaries"], section: "communication", toolNames: ["Slack"] },
-  { id: "whatsapp", name: "WhatsApp", subtitle: "Messages · Replies · Customer chats", description: "Reads incoming messages and drafts replies — routed through your approval.", authFlow: "credentials", credentialLabel: "Meta API access token", credentialHint: "EAAxxxxxxxxx…", skills: ["Customer support", "FAQ replies"], section: "communication", toolNames: [] },
-  { id: "zoom", name: "Zoom", subtitle: "Meetings · Recordings · Transcripts", description: "Schedule meetings, read transcripts, send post-meeting summaries.", authFlow: "oauth", serviceKey: "zoom", skills: ["Meeting scheduling", "Transcript analysis"], section: "communication", toolNames: [], comingSoon: true },
-  { id: "microsoft365", name: "Microsoft 365", subtitle: "Outlook · Teams · OneDrive", description: "Send Outlook email, post in Teams, manage OneDrive files.", authFlow: "oauth", serviceKey: "microsoft365", skills: ["Email triage", "Teams messaging", "File management"], section: "communication", toolNames: [], comingSoon: true },
-  { id: "facebook_instagram", name: "Facebook & Instagram", subtitle: "Page DMs · Comments · Posts", description: "Reply to DMs, respond to comments, manage your social inbox.", authFlow: "oauth", serviceKey: "facebook", skills: ["Social inbox", "Comment replies"], section: "communication", toolNames: [], comingSoon: true },
-  { id: "gdrive", name: "Google Drive", subtitle: "Files · Docs · Sheets · Slides", description: "Search and read files, create documents and spreadsheets, share and organise your Drive.", authFlow: "oauth", serviceKey: "gdrive", skills: ["File management", "Document writing", "Spreadsheet updates"], section: "productivity", toolNames: ["Google Drive"] },
-  { id: "notion", name: "Notion", subtitle: "Pages · Databases · Workspaces", description: "Read and write pages, update database records, create structured documents.", authFlow: "oauth", serviceKey: "notion", skills: ["Knowledge base updates", "Meeting notes", "Project tracking"], section: "productivity", toolNames: ["Notion"] },
-  { id: "canva", name: "Canva", subtitle: "Designs · Templates · Brand Kit", description: "Create on-brand designs, update existing designs, export as PDF or PNG.", authFlow: "oauth", serviceKey: "canva", skills: ["Flyer creation", "Presentation design", "Social graphics"], section: "productivity", toolNames: [], comingSoon: true },
-  { id: "sql_accounting", name: "SQL Accounting", subtitle: "Invoices · Payments · Cash Flow", description: "Monitor invoices, flag overdue accounts, generate financial summaries.", authFlow: "credentials", credentialLabel: "SQL Account API credentials", credentialHint: "API URL + credentials", skills: ["Invoice tracking", "Financial reporting"], section: "finance", toolNames: [], comingSoon: true },
-];
-
-const CONNECTOR_SECTIONS: { id: ConnectorSection; label: string; desc: string }[] = [
-  { id: "communication", label: "Communication",       desc: "Email, messaging, and meetings." },
-  { id: "productivity",  label: "Files & Productivity", desc: "The apps your delegate reads from and writes to." },
-  { id: "finance",       label: "Finance",              desc: "Your accounting system, delegated." },
-];
-
-function ConnectorIcon({ id }: { id: string }) {
-  const c = "rgba(255,255,255,0.65)";
-  const p: React.SVGProps<SVGSVGElement> = { width: 18, height: 18, fill: "none" };
-  switch (id) {
-    case "gmail":         return <svg {...p} viewBox="0 0 20 20"><rect x="2" y="5" width="16" height="12" rx="2" stroke={c} strokeWidth="1.3"/><path d="M2 7l8 5 8-5" stroke={c} strokeWidth="1.3" strokeLinecap="round"/></svg>;
-    case "gcal":          return <svg {...p} viewBox="0 0 20 20"><rect x="2.5" y="4.5" width="15" height="13" rx="2" stroke={c} strokeWidth="1.3"/><path d="M7 2.5v4M13 2.5v4M2.5 8.5h15" stroke={c} strokeWidth="1.3" strokeLinecap="round"/><circle cx="10" cy="13" r="1.5" fill={c} opacity=".6"/></svg>;
-    case "slack":         return <svg {...p} viewBox="0 0 20 20"><rect x="7" y="2" width="3" height="9" rx="1.5" fill={c}/><rect x="7" y="13" width="3" height="3" rx="1.5" fill={c} opacity=".4"/><rect x="11" y="9" width="7" height="3" rx="1.5" fill={c}/><rect x="2" y="9" width="3" height="3" rx="1.5" fill={c} opacity=".4"/><rect x="10" y="7" width="3" height="9" rx="1.5" fill={c} opacity=".6"/><rect x="7" y="11" width="9" height="3" rx="1.5" fill={c} opacity=".6"/></svg>;
-    case "whatsapp":      return <svg {...p} viewBox="0 0 20 20"><path d="M10 2a8 8 0 0 0-6.93 11.95L2 18l4.17-1.06A8 8 0 1 0 10 2z" stroke={c} strokeWidth="1.3"/><path d="M7.5 8c.4.8 1.2 2 2.5 2.8.3-.3.7-.6 1-.5.5.1 1.2.5 1.2.9 0 .5-.5 1-1 1.2-.9.3-2.4-.3-3.8-1.7S5.8 8.5 6 7.5c.2-.5.7-.9 1.2-.9.3 0 .8.7.8 1z" fill={c}/></svg>;
-    case "zoom":          return <svg {...p} viewBox="0 0 20 20"><rect x="2" y="6" width="11" height="9" rx="2" stroke={c} strokeWidth="1.3"/><path d="M13 9l5-3v8l-5-3V9z" stroke={c} strokeWidth="1.3" strokeLinejoin="round"/></svg>;
-    case "microsoft365":  return <svg {...p} viewBox="0 0 20 20"><rect x="2" y="2" width="7" height="7" rx="1" fill={c}/><rect x="11" y="2" width="7" height="7" rx="1" fill={c} opacity=".60"/><rect x="2" y="11" width="7" height="7" rx="1" fill={c} opacity=".60"/><rect x="11" y="11" width="7" height="7" rx="1" fill={c} opacity=".30"/></svg>;
-    case "facebook_instagram": return <svg {...p} viewBox="0 0 20 20"><rect x="2" y="2" width="7" height="7" rx="2" stroke={c} strokeWidth="1.2"/><circle cx="5.5" cy="5.5" r="1.5" fill={c}/><rect x="11" y="2" width="7" height="16" rx="2" stroke={c} strokeWidth="1.2"/><path d="M14.5 9h-1v-1.5A.5.5 0 0 1 14 7h1" stroke={c} strokeWidth="1.2" strokeLinecap="round"/></svg>;
-    case "gdrive":        return <svg {...p} viewBox="0 0 20 20"><path d="M10 3L2.5 16h5L10 10l2.5 6h5L10 3z" stroke={c} strokeWidth="1.3" strokeLinejoin="round"/><path d="M7 13h6" stroke={c} strokeWidth="1.3" strokeLinecap="round" opacity=".5"/></svg>;
-    case "notion":        return <svg {...p} viewBox="0 0 20 20"><rect x="3" y="2" width="14" height="16" rx="2" stroke={c} strokeWidth="1.3"/><path d="M7 6.5h6M7 10h6M7 13.5h4" stroke={c} strokeWidth="1.3" strokeLinecap="round"/></svg>;
-    case "canva":         return <svg {...p} viewBox="0 0 20 20"><circle cx="10" cy="10" r="7.5" stroke={c} strokeWidth="1.3"/><path d="M7.5 13.5V8l2.5 2.5L12.5 8v5.5" stroke={c} strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>;
-    case "sql_accounting": return <svg {...p} viewBox="0 0 20 20"><ellipse cx="10" cy="5.5" rx="6.5" ry="2.5" stroke={c} strokeWidth="1.3"/><path d="M3.5 5.5v4c0 1.38 2.91 2.5 6.5 2.5s6.5-1.12 6.5-2.5v-4" stroke={c} strokeWidth="1.3"/><path d="M3.5 9.5v4c0 1.38 2.91 2.5 6.5 2.5s6.5-1.12 6.5-2.5v-4" stroke={c} strokeWidth="1.3"/></svg>;
-    default: return <svg {...p} viewBox="0 0 20 20"><circle cx="10" cy="10" r="7.5" stroke={c} strokeWidth="1.3"/></svg>;
-  }
-}
-
-function ConnCredentialsModal({ def, cloneId, onClose, onSaved }: { def: ConnectorDef; cloneId: string; onClose: () => void; onSaved: () => void }) {
-  const [value, setValue] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  async function save() {
-    if (!value.trim()) return;
-    setSaving(true); setErr(null);
-    try {
-      const res = await fetch("/api/tools", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clone_id: cloneId, name: def.name, server_url: `native://${def.id}`, transport: "native", api_key: value.trim() }) });
-      if (!res.ok) { setErr("Failed to save. Check your key and try again."); return; }
-      onSaved(); onClose();
-    } catch { setErr("Network error. Please try again."); }
-    finally { setSaving(false); }
-  }
-  return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(0,0,0,0.70)", backdropFilter: "blur(6px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }} onClick={onClose}>
-      <div style={{ background: "#0f0f0f", border: "1px solid rgba(255,255,255,0.10)", borderRadius: 18, padding: "28px 28px 24px", maxWidth: 420, width: "100%", display: "flex", flexDirection: "column", gap: 16 }} onClick={e => e.stopPropagation()}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ width: 38, height: 38, borderRadius: 10, flexShrink: 0, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)", display: "flex", alignItems: "center", justifyContent: "center" }}><ConnectorIcon id={def.id} /></div>
-          <div><p style={{ fontSize: 14, fontWeight: 500, color: "rgba(255,255,255,0.90)", margin: 0 }}>Connect {def.name}</p><p style={{ fontSize: 11, color: "rgba(255,255,255,0.45)", margin: "2px 0 0" }}>{def.subtitle}</p></div>
-        </div>
-        <div>
-          <label style={{ display: "block", fontSize: 11, fontWeight: 500, color: "rgba(255,255,255,0.55)", marginBottom: 6 }}>{def.credentialLabel}</label>
-          <input type="password" value={value} onChange={e => setValue(e.target.value)} onKeyDown={e => { if (e.key === "Enter") save(); }} placeholder={def.credentialHint ?? ""} autoFocus style={{ width: "100%", padding: "9px 12px", borderRadius: 10, fontSize: 12, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.09)", color: "rgba(255,255,255,0.85)", outline: "none", fontFamily: "monospace", boxSizing: "border-box" as const }} />
-          {err && <p style={{ fontSize: 11, color: "rgba(248,113,113,0.80)", margin: "6px 0 0" }}>{err}</p>}
-        </div>
-        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-          <button onClick={onClose} style={{ padding: "7px 16px", borderRadius: 9, fontSize: 12, cursor: "pointer", background: "transparent", border: "1px solid rgba(255,255,255,0.09)", color: "rgba(255,255,255,0.55)", fontFamily: "inherit" }}>Cancel</button>
-          <button onClick={save} disabled={saving || !value.trim()} style={{ padding: "7px 16px", borderRadius: 9, fontSize: 12, cursor: "pointer", background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.12)", color: "rgba(255,255,255,0.85)", fontFamily: "inherit", opacity: saving || !value.trim() ? 0.4 : 1 }}>{saving ? "Saving…" : "Connect"}</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ConnectorCard({ def, tools, cloneId, userId, onRefresh }: { def: ConnectorDef; tools: ConnectedTool[]; cloneId: string; userId: string; onRefresh: () => void }) {
-  const matchingTools = tools.filter(t => def.toolNames.includes(t.name) || t.name === def.name);
-  const isConnected = matchingTools.length > 0;
-  const [disconnecting, setDisconnecting] = useState(false);
-  const [showModal, setShowModal] = useState(false);
-
-  async function handleDisconnect() {
-    setDisconnecting(true);
-    await Promise.all(matchingTools.map(t => fetch(`/api/tools/${t.id}?clone_id=${cloneId}`, { method: "DELETE" })));
-    onRefresh(); setDisconnecting(false);
-  }
-  function handleConnect() {
-    if (def.authFlow === "credentials") setShowModal(true);
-    else window.location.href = `/api/oauth-start?service=${def.serviceKey}&clone_id=${cloneId}&user_id=${userId}`;
-  }
-
-  return (
-    <>
-      {showModal && <ConnCredentialsModal def={def} cloneId={cloneId} onClose={() => setShowModal(false)} onSaved={() => { onRefresh(); setShowModal(false); }} />}
-      <div style={{ borderRadius: 14, border: `1px solid ${isConnected ? "rgba(52,211,153,0.13)" : "rgba(255,255,255,0.07)"}`, background: isConnected ? "rgba(52,211,153,0.018)" : "rgba(255,255,255,0.018)", padding: "16px 18px", display: "flex", flexDirection: "column", gap: 10, opacity: def.comingSoon ? 0.40 : 1 }}>
-        <div style={{ display: "flex", alignItems: "flex-start", gap: 11 }}>
-          <div style={{ width: 36, height: 36, borderRadius: 10, flexShrink: 0, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)", display: "flex", alignItems: "center", justifyContent: "center" }}><ConnectorIcon id={def.id} /></div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" as const }}>
-              <span style={{ fontSize: 13, fontWeight: 500, color: "rgba(255,255,255,0.90)" }}>{def.name}</span>
-              {def.comingSoon ? <span style={{ fontSize: 10, padding: "1px 7px", borderRadius: 999, color: "rgba(255,255,255,0.35)", border: "1px solid rgba(255,255,255,0.09)" }}>Soon</span>
-                : isConnected ? <span style={{ fontSize: 10, padding: "1px 7px", borderRadius: 999, color: "rgba(52,211,153,0.85)", background: "rgba(52,211,153,0.07)", border: "1px solid rgba(52,211,153,0.18)" }}>Connected</span>
-                : null}
-            </div>
-            <p style={{ fontSize: 11, color: "rgba(255,255,255,0.45)", margin: "2px 0 0" }}>{def.subtitle}</p>
-          </div>
-        </div>
-        <p style={{ fontSize: 12, color: "rgba(255,255,255,0.55)", margin: 0, lineHeight: 1.6 }}>{def.description}</p>
-        <div style={{ display: "flex", flexWrap: "wrap" as const, gap: 4 }}>
-          {def.skills.map(s => <span key={s} style={{ fontSize: 10, padding: "2px 7px", borderRadius: 6, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.45)" }}>{s}</span>)}
-        </div>
-        {!def.comingSoon && def.authFlow !== "webhook" && (
-          <div style={{ display: "flex", justifyContent: "flex-end" }}>
-            {isConnected
-              ? <button onClick={handleDisconnect} disabled={disconnecting} style={{ padding: "4px 12px", borderRadius: 8, fontSize: 11, background: "transparent", border: "1px solid rgba(248,113,113,0.15)", color: "rgba(248,113,113,0.65)", cursor: "pointer", fontFamily: "inherit", opacity: disconnecting ? 0.4 : 1 }} onMouseEnter={e => { e.currentTarget.style.borderColor = "rgba(248,113,113,0.30)"; e.currentTarget.style.color = "rgba(248,113,113,0.90)"; }} onMouseLeave={e => { e.currentTarget.style.borderColor = "rgba(248,113,113,0.15)"; e.currentTarget.style.color = "rgba(248,113,113,0.65)"; }}>{disconnecting ? "Removing…" : "Disconnect"}</button>
-              : <button onClick={handleConnect} style={{ padding: "4px 12px", borderRadius: 8, fontSize: 11, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.10)", color: "rgba(255,255,255,0.70)", cursor: "pointer", fontFamily: "inherit" }} onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,255,255,0.09)"; e.currentTarget.style.color = "rgba(255,255,255,0.95)"; }} onMouseLeave={e => { e.currentTarget.style.background = "rgba(255,255,255,0.05)"; e.currentTarget.style.color = "rgba(255,255,255,0.70)"; }}>Connect →</button>
-            }
-          </div>
-        )}
-      </div>
-    </>
-  );
-}
-
-function ConnectorsPanel({ cloneId }: { cloneId: string }) {
-  const { user } = useUser();
-  const { data, mutate } = useSWR(`/api/tools?clone_id=${cloneId}`, swrFetcher, { refreshInterval: 30_000 });
-  const tools: ConnectedTool[] = Array.isArray(data) ? data : [];
-  const userId = user?.id ?? "";
-  return (
-    <div style={{ flex: 1, overflowY: "auto", padding: "24px 20px" }}>
-      <div style={{ maxWidth: 800, margin: "0 auto" }}>
-        <div style={{ marginBottom: 24 }}>
-          <h2 style={{ fontSize: 20, fontWeight: 300, color: "rgba(255,255,255,0.92)", margin: 0 }}>Connectors</h2>
-          <p style={{ fontSize: 12, color: "rgba(255,255,255,0.50)", marginTop: 4 }}>Connect the tools your clone acts in. Every action routes through your approval.</p>
-        </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 28 }}>
-          {CONNECTOR_SECTIONS.map(sec => {
-            const connectors = CONNECTORS.filter(c => c.section === sec.id);
-            return (
-              <div key={sec.id}>
-                <div style={{ marginBottom: 12 }}>
-                  <p style={{ fontSize: 10, textTransform: "uppercase" as const, letterSpacing: "0.09em", color: "rgba(255,255,255,0.40)", margin: "0 0 2px" }}>{sec.label}</p>
-                  <p style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", margin: 0 }}>{sec.desc}</p>
-                </div>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 8 }}>
-                  {connectors.map(def => <ConnectorCard key={def.id} def={def} tools={tools} cloneId={cloneId} userId={userId} onRefresh={() => mutate()} />)}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Tasks + Automations panels (per-clone, used in tab view)
 // ---------------------------------------------------------------------------
 
@@ -1334,7 +1169,7 @@ function ActivityPanel({ cloneId }: { cloneId: string }) {
 // ---------------------------------------------------------------------------
 // Chat view (right panel when a conversation is selected)
 // ---------------------------------------------------------------------------
-type HomeTab = "chat" | "activity" | "connectors";
+type HomeTab = "chat" | "activity";
 
 function ConvChatView({
   conv,
@@ -1347,7 +1182,7 @@ function ConvChatView({
   const color = catColor(conv.category);
   const initial = conv.display_name[0]?.toUpperCase() ?? "?";
 
-  // Reset to chat when clone changes
+  // Reset to chat when clone changes (sidebar navigation, not URL-driven)
   useEffect(() => { setActiveTab("chat"); }, [conv.clone_id]);
 
   return (
@@ -1433,9 +1268,9 @@ function ConvChatView({
 
       {/* Tab bar */}
       <div style={{ display: "flex", borderBottom: "1px solid rgba(255,255,255,0.07)", padding: "0 16px", flexShrink: 0 }}>
-        {(["chat", "activity", "connectors"] as HomeTab[]).map(tab => {
+        {(["chat", "activity"] as HomeTab[]).map(tab => {
           const isActive = activeTab === tab;
-          const label = tab === "chat" ? "Chat" : tab === "activity" ? "Activity" : "Connectors";
+          const label = tab === "chat" ? "Chat" : "Activity";
           return (
             <button key={tab} onClick={() => setActiveTab(tab)} style={{ fontSize: 13, fontWeight: isActive ? 500 : 400, color: isActive ? "rgba(255,255,255,0.85)" : "rgba(255,255,255,0.35)", background: "none", border: "none", cursor: "pointer", padding: "10px 14px", fontFamily: "inherit", borderBottom: `2px solid ${isActive ? "rgba(255,255,255,0.50)" : "transparent"}`, marginBottom: -1, transition: "all 200ms" }}
               onMouseEnter={e => { if (!isActive) e.currentTarget.style.color = "rgba(255,255,255,0.55)"; }}
@@ -1461,10 +1296,8 @@ function ConvChatView({
               sessionId={conv.session_id}
             />
           </div>
-        ) : activeTab === "activity" ? (
-          <ActivityPanel cloneId={conv.clone_id} />
         ) : (
-          <ConnectorsPanel cloneId={conv.clone_id} />
+          <ActivityPanel cloneId={conv.clone_id} />
         )}
       </div>
     </motion.div>

@@ -13,7 +13,12 @@ interface ChatMessage {
   role: "user" | "clone";
   content: string;
   isStreaming?: boolean;
+  trace_id?: string;
+  confidence?: number;
+  needs_escalation?: boolean;
 }
+
+type FeedbackSignal = "approved" | "rejected" | "edited";
 
 type ResponseMode = "fast" | "pro" | "extended";
 
@@ -221,7 +226,17 @@ function useWebChat({
             setIsThinking(false);
             console.log("[doppel] done event", evt);
             const final = (evt.corrected_response as string | null) ?? accText;
-            setMessages(prev => prev.map(m => m.id === cloneMsgId ? { ...m, content: final, isStreaming: false } : m));
+            const traceId = evt.trace_id as string | undefined;
+            const confidence = evt.confidence as number | undefined;
+            const needsEscalation = evt.needs_escalation as boolean | undefined;
+            setMessages(prev => prev.map(m => m.id === cloneMsgId ? {
+              ...m,
+              content: final,
+              isStreaming: false,
+              trace_id: traceId,
+              confidence,
+              needs_escalation: needsEscalation,
+            } : m));
             // fallback: done event may still carry workflow_draft from older backend
             const wfDraft = evt.workflow_draft as WorkflowDraft | undefined;
             if (wfDraft?.name) {
@@ -315,14 +330,41 @@ function WorkflowDraftCard({ draft, cloneId, onActivated }: {
 
 // ─── MessageBubble ────────────────────────────────────────────────────────────
 
-function MessageBubble({ msg, cloneColor, cloneInitial, avatarUrl, cloneId, workflowDraft, onWorkflowActivated }: {
+function MessageBubble({ msg, cloneColor, cloneInitial, avatarUrl, cloneId, workflowDraft, onWorkflowActivated, ownerMode, onFeedbackSubmitted }: {
   msg: ChatMessage; cloneColor: string; cloneInitial: string; avatarUrl?: string | null;
   cloneId: string;
   workflowDraft?: WorkflowDraft | null;
   onWorkflowActivated?: (name: string) => void;
+  ownerMode?: boolean;
+  onFeedbackSubmitted?: (msgId: string, signal: FeedbackSignal) => void;
 }) {
+  const [feedbackDone, setFeedbackDone] = useState<FeedbackSignal | null>(null);
+  const [editMode,     setEditMode]     = useState(false);
+  const [editText,     setEditText]     = useState(msg.content);
+  const [submitting,   setSubmitting]   = useState(false);
+
   // Strip any legacy inline <!--wf:...--> comments from content
   const displayContent = msg.content.replace(/<!--wf:[\s\S]*?-->/g, "").trim();
+
+  async function submitFeedback(signal: FeedbackSignal, corrected?: string) {
+    if (!msg.trace_id || submitting) return;
+    setSubmitting(true);
+    try {
+      await fetch("/api/brain/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          trace_id: msg.trace_id,
+          clone_id: cloneId,
+          signal_type: signal,
+          corrected_response: corrected ?? null,
+        }),
+      });
+      setFeedbackDone(signal);
+      setEditMode(false);
+      onFeedbackSubmitted?.(msg.id, signal);
+    } catch { /* non-fatal */ } finally { setSubmitting(false); }
+  }
 
   if (msg.role === "user") {
     return (
@@ -350,6 +392,66 @@ function MessageBubble({ msg, cloneColor, cloneInitial, avatarUrl, cloneId, work
             <MarkdownRenderer content={displayContent} />
           )}
         </div>
+
+        {/* Owner feedback row — always visible, not hover-reveal */}
+        {ownerMode && !msg.isStreaming && msg.content && msg.trace_id && (
+          <div style={{ maxWidth: "82%", marginTop: 6 }}>
+            {feedbackDone ? (
+              <span style={{ fontSize: 11, color: feedbackDone === "approved" ? "rgba(52,211,153,0.65)" : feedbackDone === "rejected" ? "rgba(248,113,113,0.55)" : "rgba(255,255,255,0.35)", display: "inline-flex", alignItems: "center", gap: 5 }}>
+                {feedbackDone === "approved" && <svg width="11" height="11" viewBox="0 0 16 16" fill="none"><path d="M3 8l4 4 6-7" stroke="rgba(52,211,153,0.80)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                {feedbackDone === "approved" ? "Approved" : feedbackDone === "rejected" ? "Rejected" : "Saved"}
+              </span>
+            ) : editMode ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                <textarea
+                  value={editText}
+                  onChange={e => setEditText(e.target.value)}
+                  style={{ width: "100%", minHeight: 80, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.14)", borderRadius: 10, padding: "8px 10px", fontSize: 13, color: "rgba(255,255,255,0.80)", fontFamily: "inherit", resize: "vertical" as const, outline: "none", boxSizing: "border-box" as const, lineHeight: 1.55 }}
+                />
+                <div style={{ display: "flex", gap: 6 }}>
+                  <button onClick={() => submitFeedback("edited", editText)} disabled={submitting || !editText.trim()}
+                    style={{ fontSize: 11, fontWeight: 500, padding: "4px 12px", borderRadius: 7, background: "rgba(255,255,255,0.09)", border: "1px solid rgba(255,255,255,0.14)", color: "rgba(255,255,255,0.75)", cursor: "pointer", fontFamily: "inherit", opacity: submitting ? 0.5 : 1 }}>
+                    {submitting ? "Saving…" : "Save correction"}
+                  </button>
+                  <button onClick={() => setEditMode(false)}
+                    style={{ fontSize: 11, padding: "4px 10px", borderRadius: 7, background: "none", border: "1px solid rgba(255,255,255,0.07)", color: "rgba(255,255,255,0.30)", cursor: "pointer", fontFamily: "inherit" }}>
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                <button onClick={() => submitFeedback("approved")} disabled={submitting}
+                  style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, padding: "3px 10px", borderRadius: 6, background: "rgba(52,211,153,0.06)", border: "1px solid rgba(52,211,153,0.14)", color: "rgba(52,211,153,0.65)", cursor: "pointer", fontFamily: "inherit", transition: "all 140ms" }}
+                  onMouseEnter={e => { e.currentTarget.style.background = "rgba(52,211,153,0.12)"; e.currentTarget.style.borderColor = "rgba(52,211,153,0.25)"; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = "rgba(52,211,153,0.06)"; e.currentTarget.style.borderColor = "rgba(52,211,153,0.14)"; }}>
+                  <svg width="10" height="10" viewBox="0 0 16 16" fill="none"><path d="M3 8l4 4 6-7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                  Approve
+                </button>
+                <button onClick={() => setEditMode(true)} disabled={submitting}
+                  style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, padding: "3px 10px", borderRadius: 6, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.09)", color: "rgba(255,255,255,0.38)", cursor: "pointer", fontFamily: "inherit", transition: "all 140ms" }}
+                  onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,255,255,0.07)"; e.currentTarget.style.color = "rgba(255,255,255,0.60)"; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = "rgba(255,255,255,0.04)"; e.currentTarget.style.color = "rgba(255,255,255,0.38)"; }}>
+                  <svg width="10" height="10" viewBox="0 0 16 16" fill="none"><path d="M11 2.5a1.4 1.4 0 012 2L5.5 12 2 13l1-3.5L11 2.5z" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                  Edit
+                </button>
+                <button onClick={() => submitFeedback("rejected")} disabled={submitting}
+                  style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, padding: "3px 10px", borderRadius: 6, background: "rgba(248,113,113,0.04)", border: "1px solid rgba(248,113,113,0.10)", color: "rgba(248,113,113,0.50)", cursor: "pointer", fontFamily: "inherit", transition: "all 140ms" }}
+                  onMouseEnter={e => { e.currentTarget.style.background = "rgba(248,113,113,0.09)"; e.currentTarget.style.borderColor = "rgba(248,113,113,0.22)"; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = "rgba(248,113,113,0.04)"; e.currentTarget.style.borderColor = "rgba(248,113,113,0.10)"; }}>
+                  <svg width="10" height="10" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/></svg>
+                  Reject
+                </button>
+                {msg.confidence !== undefined && (
+                  <span style={{ marginLeft: 4, fontSize: 10, color: "rgba(255,255,255,0.20)" }}>
+                    {Math.round(msg.confidence * 100)}% confidence
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
         {workflowDraft && !msg.isStreaming && (
           <div style={{ maxWidth: "82%" }}>
             <WorkflowDraftCard draft={workflowDraft} cloneId={cloneId} onActivated={name => onWorkflowActivated?.(name)} />
@@ -611,6 +713,7 @@ function CloneChat({ clone, userId }: { clone: CloneOwnerInfo; userId: string })
   const [showAutomateModal,  setShowAutomateModal]  = useState(false);
   const [automateInstruction, setAutomateInstruction] = useState("");
   const [knowledgeAreas,  setKnowledgeAreas]  = useState<{ area: string; depth: string }[]>([]);
+  const [readiness,       setReadiness]       = useState<{ is_ready: boolean; knowledge_ok: boolean; decision_making_ok: boolean; voice_ok: boolean; missing: string[] } | null>(null);
   const [autoSuggestions, setAutoSuggestions] = useState<string[]>([]);
   const [autoLoading,     setAutoLoading]     = useState(false);
   const [agentEvents,     setAgentEvents]     = useState<AgentEvent[]>([]);
@@ -680,6 +783,14 @@ function CloneChat({ clone, userId }: { clone: CloneOwnerInfo; userId: string })
     fetch(`/api/clones/${clone.handle}/knowledge-map`)
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d?.areas?.length) setKnowledgeAreas(d.areas); })
+      .catch(() => {});
+  }, [clone.handle]);
+
+  // Clone readiness check (owner only)
+  useEffect(() => {
+    fetch(`/api/clones/${clone.handle}/readiness`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d) setReadiness(d); })
       .catch(() => {});
   }, [clone.handle]);
 
@@ -806,6 +917,7 @@ function CloneChat({ clone, userId }: { clone: CloneOwnerInfo; userId: string })
   const isReturning  = profile?.exists && (profile.total_sessions ?? 0) > 1;
   const showConsent  = !!userId && consent === null;
   const inputIsAction = isActionMessage(input.trim());
+  const cloneNotReady = readiness !== null && !readiness.is_ready;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#080808", color: "rgba(255,255,255,0.82)", fontFamily: "inherit", position: "relative", overflow: "hidden" }}>
@@ -939,6 +1051,44 @@ function CloneChat({ clone, userId }: { clone: CloneOwnerInfo; userId: string })
         </div>
       )}
 
+      {/* Clone readiness gate — owner sees this when clone isn't trained enough */}
+      {readiness && !readiness.is_ready && (
+        <div style={{ margin: "10px 16px 0", maxWidth: 860, alignSelf: "center", width: "calc(100% - 32px)", flexShrink: 0, animation: "banner-in 340ms ease both" }}>
+          <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.09)", borderRadius: 14, padding: "14px 16px" }}>
+            <div style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 10 }}>
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0, marginTop: 1 }}><circle cx="8" cy="8" r="6.5" stroke="rgba(255,255,255,0.30)" strokeWidth="1.3"/><path d="M8 5v4M8 11v.5" stroke="rgba(255,255,255,0.30)" strokeWidth="1.5" strokeLinecap="round"/></svg>
+              <div>
+                <p style={{ margin: "0 0 2px", fontSize: 13, fontWeight: 500, color: "rgba(255,255,255,0.78)" }}>This clone needs more training before it can respond</p>
+                <p style={{ margin: 0, fontSize: 11, color: "rgba(255,255,255,0.38)", lineHeight: 1.55 }}>
+                  Each clone should have a <strong style={{ color: "rgba(255,255,255,0.55)" }}>specific purpose</strong> — not all your knowledge in one place. A focused clone responds with far more precision and accuracy.
+                </p>
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" as const, marginBottom: 12 }}>
+              {[
+                { label: "Knowledge", ok: readiness.knowledge_ok, hint: "5+ memory chunks" },
+                { label: "Decision style", ok: readiness.decision_making_ok, hint: "how you reason" },
+                { label: "Voice", ok: readiness.voice_ok, hint: "emails or messages" },
+              ].map(c => (
+                <div key={c.label} style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 10px", borderRadius: 8, background: c.ok ? "rgba(52,211,153,0.05)" : "rgba(255,255,255,0.03)", border: `1px solid ${c.ok ? "rgba(52,211,153,0.15)" : "rgba(255,255,255,0.08)"}` }}>
+                  {c.ok
+                    ? <svg width="10" height="10" viewBox="0 0 16 16" fill="none"><path d="M3 8l4 4 6-7" stroke="rgba(52,211,153,0.75)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                    : <div style={{ width: 6, height: 6, borderRadius: "50%", background: "rgba(255,255,255,0.18)" }} />}
+                  <span style={{ fontSize: 11, color: c.ok ? "rgba(52,211,153,0.70)" : "rgba(255,255,255,0.40)" }}>{c.label}</span>
+                  <span style={{ fontSize: 10, color: "rgba(255,255,255,0.22)" }}>{c.hint}</span>
+                </div>
+              ))}
+            </div>
+            <a href="/dashboard/train" style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 500, padding: "5px 14px", borderRadius: 8, background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.12)", color: "rgba(255,255,255,0.72)", textDecoration: "none", transition: "all 140ms" }}
+              onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,255,255,0.12)"; }}
+              onMouseLeave={e => { e.currentTarget.style.background = "rgba(255,255,255,0.08)"; }}>
+              Train this clone
+              <svg width="10" height="10" viewBox="0 0 16 16" fill="none"><path d="M6 4l4 4-4 4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            </a>
+          </div>
+        </div>
+      )}
+
       {/* Messages */}
       <div className="chat-scroll" ref={scrollRef} style={{ flex: 1, width: "100%", maxWidth: 860, margin: "0 auto", padding: isEmpty ? "24px 20px 16px" : "24px 20px 140px", display: "flex", flexDirection: "column", gap: 18, overflowY: "auto", boxSizing: "border-box" }}>
         {isEmpty ? (
@@ -972,7 +1122,10 @@ function CloneChat({ clone, userId }: { clone: CloneOwnerInfo; userId: string })
           </div>
         ) : (
           messages.map(msg => msg.isStreaming && !msg.content ? null : (
-            <MessageBubble key={msg.id} msg={msg} cloneColor={cloneColor} cloneInitial={cloneInitial} avatarUrl={clone.avatar_url} cloneId={clone.clone_id} workflowDraft={workflowDrafts[msg.id] ?? null} onWorkflowActivated={name => {
+            <MessageBubble key={msg.id} msg={msg} cloneColor={cloneColor} cloneInitial={cloneInitial} avatarUrl={clone.avatar_url} cloneId={clone.clone_id} workflowDraft={workflowDrafts[msg.id] ?? null} ownerMode={true} onFeedbackSubmitted={(msgId, signal) => {
+              // Local optimistic update: mark approved messages in the list
+              setMessages(prev => prev.map(m => m.id === msgId ? { ...m } : m));
+            }} onWorkflowActivated={name => {
               const id = uuid();
               setMessages(prev => [...prev, { id, role: "clone" as const, content: `Workflow **${name}** is now active. It will run automatically — check the **Activity** tab to track it.`, isStreaming: false }]);
             }} />
@@ -1027,8 +1180,8 @@ function CloneChat({ clone, userId }: { clone: CloneOwnerInfo; userId: string })
                 placeholder={`Ask ${cloneName} anything, or give a task…`} rows={1}
                 style={{ flex: 1, border: "none", outline: "none", resize: "none" as const, background: "transparent", color: "rgba(255,255,255,0.93)", fontSize: 14, lineHeight: 1.5, fontFamily: "inherit", minHeight: 22, maxHeight: 180, overflowY: "auto" }}
               />
-              <button className="composer-send" onClick={handleSend} disabled={!input.trim() || isLoading}
-                style={{ width: 36, height: 36, borderRadius: 12, background: (!input.trim() || isLoading) ? "rgba(255,255,255,0.07)" : inputIsAction ? "rgba(52,211,153,0.18)" : DOPPEL_BLUE, color: (!input.trim() || isLoading) ? "rgba(255,255,255,0.30)" : "#fff", border: "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: (!input.trim() || isLoading) ? "not-allowed" : "pointer", flexShrink: 0 }}>
+              <button className="composer-send" onClick={handleSend} disabled={!input.trim() || isLoading || cloneNotReady}
+                style={{ width: 36, height: 36, borderRadius: 12, background: (!input.trim() || isLoading || cloneNotReady) ? "rgba(255,255,255,0.07)" : inputIsAction ? "rgba(52,211,153,0.18)" : DOPPEL_BLUE, color: (!input.trim() || isLoading || cloneNotReady) ? "rgba(255,255,255,0.30)" : "#fff", border: "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: (!input.trim() || isLoading || cloneNotReady) ? "not-allowed" : "pointer", flexShrink: 0 }}>
                 {isLoading ? <div style={{ width: 14, height: 14, borderRadius: "50%", border: "2px solid rgba(255,255,255,0.30)", borderTopColor: "rgba(255,255,255,0.80)", animation: "spin 0.8s linear infinite" }} /> : <ISend />}
               </button>
             </div>
