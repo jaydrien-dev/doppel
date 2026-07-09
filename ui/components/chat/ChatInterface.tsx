@@ -1001,7 +1001,7 @@ function WorkflowDraftCard({ draft, cloneId, onActivated }: { draft: WorkflowDra
         <div style={{ marginBottom: 8 }}>
           <p style={{ margin: "0 0 4px", fontSize: 9, color: "rgba(255,255,255,0.25)", textTransform: "uppercase" as const, letterSpacing: "0.08em" }}>Trigger</p>
           <p style={{ margin: 0, fontSize: 12, color: "rgba(255,255,255,0.65)" }}>{triggerLine}</p>
-          {tType === "poll_api" && tCfg.url && (
+          {tType === "poll_api" && !!tCfg.url && (
             <p style={{ margin: "2px 0 0", fontSize: 10, color: "rgba(255,255,255,0.28)", fontFamily: "monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>{String(tCfg.url)}</p>
           )}
         </div>
