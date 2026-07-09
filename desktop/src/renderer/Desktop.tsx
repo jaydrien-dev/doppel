@@ -919,9 +919,186 @@ function CloneChat({ clone, userId }: { clone: Clone; userId: string }) {
   );
 }
 
+// ── SettingsPanel ──────────────────────────────────────────────────────────────
+
+function SettingsPanel({ clone, onBack }: { clone: Clone; onBack: () => void }) {
+  const [blockedTopics, setBlockedTopics] = useState<string[]>([]);
+  const [escalationThreshold, setEscalationThreshold] = useState(50);
+  const [requireHumanReview, setRequireHumanReview] = useState(false);
+  const [topicDraft, setTopicDraft] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const [saveOk, setSaveOk] = useState(false);
+
+  useEffect(() => {
+    api(`/identity?user_id=${_userId}&clone_id=${clone.clone_id}`)
+      .then(r => r.json())
+      .then(d => {
+        const p = d.admin_policies ?? {};
+        setBlockedTopics(p.blocked_topics ?? []);
+        setEscalationThreshold(p.escalation_threshold ?? 50);
+        setRequireHumanReview(p.require_human_review ?? false);
+        setLoaded(true);
+      })
+      .catch(() => setLoaded(true));
+  }, [clone.clone_id]);
+
+  async function save() {
+    setSaving(true); setSaveOk(false);
+    try {
+      await api("/identity/policies", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: _userId,
+          policies: { blocked_topics: blockedTopics, escalation_threshold: escalationThreshold, require_human_review: requireHumanReview },
+        }),
+      });
+      setSaveOk(true);
+      setTimeout(() => setSaveOk(false), 2000);
+    } finally { setSaving(false); }
+  }
+
+  function addTopic() {
+    const t = topicDraft.trim();
+    if (t && !blockedTopics.includes(t)) { setBlockedTopics(prev => [...prev, t]); setTopicDraft(""); }
+  }
+
+  function openExternal(url: string) { window.open(url, "_blank"); }
+
+  return (
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+      {/* Header */}
+      <header style={{ flexShrink: 0, borderBottom: "1px solid rgba(255,255,255,0.07)", padding: "16px 20px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, maxWidth: 640, margin: "0 auto" }}>
+          <button onClick={onBack} style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 10px", borderRadius: 8, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.45)", cursor: "pointer", fontSize: 11, fontFamily: "inherit", transition: "all 180ms" }}
+            onMouseEnter={e => { e.currentTarget.style.color = "rgba(255,255,255,0.80)"; e.currentTarget.style.background = "rgba(255,255,255,0.08)"; }}
+            onMouseLeave={e => { e.currentTarget.style.color = "rgba(255,255,255,0.45)"; e.currentTarget.style.background = "rgba(255,255,255,0.04)"; }}>
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M10 3L5 8l5 5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
+            Back
+          </button>
+          <h2 style={{ fontSize: 15, fontWeight: 500, color: "rgba(255,255,255,0.85)", margin: 0, flex: 1 }}>Settings</h2>
+        </div>
+      </header>
+
+      {/* Content */}
+      <div style={{ flex: 1, overflowY: "auto", padding: "24px 20px 40px" }}>
+        <div style={{ maxWidth: 640, margin: "0 auto", display: "flex", flexDirection: "column", gap: 24 }}>
+
+          {/* Clone indicator */}
+          <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", borderRadius: 12, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)" }}>
+            <div style={{ width: 32, height: 32, borderRadius: 8, background: clone.avatar_url ? "transparent" : deriveColor(clone.display_name), display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 500, color: "rgba(255,255,255,0.80)", overflow: "hidden", flexShrink: 0 }}>
+              {clone.avatar_url ? <img src={clone.avatar_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : clone.display_name[0]?.toUpperCase()}
+            </div>
+            <div>
+              <p style={{ fontSize: 13, fontWeight: 500, color: "rgba(255,255,255,0.75)", margin: 0 }}>{clone.display_name}</p>
+              <p style={{ fontSize: 11, color: "rgba(255,255,255,0.30)", margin: "1px 0 0" }}>@{clone.handle}</p>
+            </div>
+          </div>
+
+          {/* Delegate policies */}
+          <div>
+            <p style={{ fontSize: 10, textTransform: "uppercase" as const, letterSpacing: "0.12em", color: "rgba(255,255,255,0.25)", marginBottom: 12 }}>Delegate policies</p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 16, padding: "18px 20px", borderRadius: 14, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)" }}>
+              <p style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", lineHeight: 1.6, margin: 0 }}>
+                Control what your clone will and won't respond to. These policies apply to all surfaces.
+              </p>
+
+              {/* Blocked topics */}
+              {loaded && (
+                <>
+                  <div>
+                    <p style={{ fontSize: 12, fontWeight: 500, color: "rgba(255,255,255,0.50)", marginBottom: 6 }}>Blocked topics</p>
+                    <p style={{ fontSize: 11, color: "rgba(255,255,255,0.25)", marginBottom: 10 }}>
+                      Your clone will decline any question touching these topics.
+                    </p>
+                    {blockedTopics.length > 0 && (
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
+                        {blockedTopics.map(t => (
+                          <span key={t} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: "rgba(255,255,255,0.55)", background: "rgba(248,113,113,0.07)", border: "1px solid rgba(248,113,113,0.15)", borderRadius: 8, padding: "4px 10px" }}>
+                            {t}
+                            <button onClick={() => setBlockedTopics(prev => prev.filter(x => x !== t))} style={{ background: "none", border: "none", cursor: "pointer", color: "rgba(255,255,255,0.25)", padding: 0, fontSize: 12, lineHeight: 1, fontFamily: "inherit" }}>x</button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <input type="text" value={topicDraft} onChange={e => setTopicDraft(e.target.value)} onKeyDown={e => e.key === "Enter" && addTopic()} placeholder="e.g. salary, competitors, legal advice"
+                        style={{ flex: 1, padding: "7px 12px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.70)", fontSize: 12, fontFamily: "inherit", outline: "none" }} />
+                      <button onClick={addTopic} style={{ padding: "6px 14px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.05)", color: "rgba(255,255,255,0.50)", fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}
+                        onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,255,255,0.09)"; e.currentTarget.style.color = "rgba(255,255,255,0.75)"; }}
+                        onMouseLeave={e => { e.currentTarget.style.background = "rgba(255,255,255,0.05)"; e.currentTarget.style.color = "rgba(255,255,255,0.50)"; }}>
+                        Add
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Escalation threshold */}
+                  <div>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                      <p style={{ fontSize: 12, fontWeight: 500, color: "rgba(255,255,255,0.50)", margin: 0 }}>Escalation threshold</p>
+                      <span style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", fontFamily: "ui-monospace, Menlo, monospace" }}>{escalationThreshold}%</span>
+                    </div>
+                    <p style={{ fontSize: 11, color: "rgba(255,255,255,0.25)", marginBottom: 10 }}>
+                      Responses below this confidence level will be flagged for human review.
+                    </p>
+                    <input type="range" min={10} max={90} value={escalationThreshold} onChange={e => setEscalationThreshold(Number(e.target.value))}
+                      style={{ width: "100%", accentColor: "rgba(255,255,255,0.50)" }} />
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "rgba(255,255,255,0.20)", marginTop: 4 }}>
+                      <span>10% (rarely escalate)</span>
+                      <span>90% (almost always)</span>
+                    </div>
+                  </div>
+
+                  {/* Require human review */}
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <div>
+                      <p style={{ fontSize: 12, fontWeight: 500, color: "rgba(255,255,255,0.50)", marginBottom: 3 }}>Require human review for all responses</p>
+                      <p style={{ fontSize: 11, color: "rgba(255,255,255,0.25)", margin: 0 }}>Clone drafts but never auto-sends — you approve every response.</p>
+                    </div>
+                    <button onClick={() => setRequireHumanReview(v => !v)} style={{ position: "relative", width: 36, height: 20, borderRadius: 10, flexShrink: 0, background: requireHumanReview ? "rgba(255,255,255,0.30)" : "rgba(255,255,255,0.08)", border: "none", cursor: "pointer", transition: "background 180ms" }}>
+                      <span style={{ position: "absolute", top: 2, width: 16, height: 16, borderRadius: "50%", background: "#fff", transition: "transform 180ms", transform: requireHumanReview ? "translateX(18px)" : "translateX(2px)" }} />
+                    </button>
+                  </div>
+
+                  {/* Save button */}
+                  <button onClick={save} disabled={saving} style={{ width: "100%", padding: "8px 0", borderRadius: 10, border: "1px solid rgba(255,255,255,0.12)", background: saveOk ? "rgba(52,211,153,0.08)" : "rgba(255,255,255,0.06)", color: saveOk ? "rgba(52,211,153,0.80)" : "rgba(255,255,255,0.65)", fontSize: 12, fontWeight: 500, cursor: saving ? "not-allowed" : "pointer", fontFamily: "inherit", transition: "all 180ms", opacity: saving ? 0.5 : 1 }}
+                    onMouseEnter={e => { if (!saving && !saveOk) { e.currentTarget.style.background = "rgba(255,255,255,0.10)"; e.currentTarget.style.color = "rgba(255,255,255,0.85)"; } }}
+                    onMouseLeave={e => { if (!saveOk) { e.currentTarget.style.background = "rgba(255,255,255,0.06)"; e.currentTarget.style.color = "rgba(255,255,255,0.65)"; } }}>
+                    {saving ? "Saving..." : saveOk ? "Saved" : "Save policies"}
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* Open full dashboard link */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
+            <p style={{ fontSize: 10, textTransform: "uppercase" as const, letterSpacing: "0.12em", color: "rgba(255,255,255,0.25)", marginBottom: 4 }}>More</p>
+            {[
+              { label: "Connectors", desc: "Connect Gmail, Slack, Drive, and more.", href: "https://doppel.ai/dashboard/settings" },
+              { label: "Full dashboard", desc: "Profile, billing, data retention, and more.", href: "https://doppel.ai/dashboard" },
+            ].map(item => (
+              <button key={item.label} onClick={() => openExternal(item.href)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 18px", borderRadius: 14, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", cursor: "pointer", fontFamily: "inherit", textAlign: "left", transition: "all 180ms" }}
+                onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,255,255,0.06)"; e.currentTarget.style.borderColor = "rgba(255,255,255,0.12)"; }}
+                onMouseLeave={e => { e.currentTarget.style.background = "rgba(255,255,255,0.03)"; e.currentTarget.style.borderColor = "rgba(255,255,255,0.08)"; }}>
+                <div>
+                  <p style={{ fontSize: 13, fontWeight: 500, color: "rgba(255,255,255,0.70)", margin: 0 }}>{item.label}</p>
+                  <p style={{ fontSize: 11, color: "rgba(255,255,255,0.30)", margin: "3px 0 0" }}>{item.desc}</p>
+                </div>
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="none" style={{ flexShrink: 0, color: "rgba(255,255,255,0.25)" }}><path d="M6 4l4 4-4 4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Sidebar ────────────────────────────────────────────────────────────────────
 
-function Sidebar({ open, clones, orgClones, active, userName, userInitial, onSelect, onToggle }: {
+function Sidebar({ open, clones, orgClones, active, userName, userInitial, onSelect, onToggle, onOpenSettings }: {
   open: boolean;
   clones: Clone[];
   orgClones: OrgClone[];
@@ -930,6 +1107,7 @@ function Sidebar({ open, clones, orgClones, active, userName, userInitial, onSel
   userInitial: string;
   onSelect: (c: Clone) => void;
   onToggle: () => void;
+  onOpenSettings: () => void;
 }) {
   const [search, setSearch] = useState("");
   const filtered = search
@@ -1071,13 +1249,13 @@ function Sidebar({ open, clones, orgClones, active, userName, userInitial, onSel
             <p style={{ fontSize: 12, fontWeight: 500, color:"rgba(255,255,255,0.65)", margin: 0 }}>{userName}</p>
           </div>
           <button
-            onClick={() => openExternal(`https://doppel.ai/dashboard`)}
-            style={{ display:"flex", alignItems:"center", gap: 5, padding:"5px 10px", borderRadius: 8, background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.08)", color:"rgba(255,255,255,0.40)", cursor:"pointer", fontSize: 11, fontFamily:"inherit", transition:"all 180ms", textDecoration:"none" }}
+            onClick={onOpenSettings}
+            title="Settings"
+            style={{ width: 30, height: 30, borderRadius: 8, display:"flex", alignItems:"center", justifyContent:"center", background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.08)", color:"rgba(255,255,255,0.40)", cursor:"pointer", transition:"all 180ms" }}
             onMouseEnter={e=>{e.currentTarget.style.color="rgba(255,255,255,0.75)";e.currentTarget.style.background="rgba(255,255,255,0.09)"}}
             onMouseLeave={e=>{e.currentTarget.style.color="rgba(255,255,255,0.40)";e.currentTarget.style.background="rgba(255,255,255,0.05)"}}
           >
-            <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><rect x="1" y="1" width="4.2" height="4.2" rx="1.2" fill="currentColor" opacity="0.9"/><rect x="6.8" y="1" width="4.2" height="4.2" rx="1.2" fill="currentColor" opacity="0.5"/><rect x="1" y="6.8" width="4.2" height="4.2" rx="1.2" fill="currentColor" opacity="0.5"/></svg>
-            Dashboard
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M6.86 1.45a1.14 1.14 0 0 1 2.28 0l.12.72a.57.57 0 0 0 .78.38l.66-.32a1.14 1.14 0 0 1 1.62 1.14l-.1.73a.57.57 0 0 0 .48.63l.72.12a1.14 1.14 0 0 1 .57 1.97l-.52.5a.57.57 0 0 0 0 .79l.52.5a1.14 1.14 0 0 1-.57 1.97l-.72.12a.57.57 0 0 0-.48.63l.1.73a1.14 1.14 0 0 1-1.62 1.14l-.66-.32a.57.57 0 0 0-.78.38l-.12.72a1.14 1.14 0 0 1-2.28 0l-.12-.72a.57.57 0 0 0-.78-.38l-.66.32a1.14 1.14 0 0 1-1.62-1.14l.1-.73a.57.57 0 0 0-.48-.63l-.72-.12a1.14 1.14 0 0 1-.57-1.97l.52-.5a.57.57 0 0 0 0-.79l-.52-.5A1.14 1.14 0 0 1 2.58 4.6l.72-.12a.57.57 0 0 0 .48-.63l-.1-.73A1.14 1.14 0 0 1 5.3 1.98l.66.32a.57.57 0 0 0 .78-.38l.12-.47Z" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/><circle cx="8" cy="8" r="2.25" stroke="currentColor" strokeWidth="1.2"/></svg>
           </button>
         </div>
       </div>
@@ -1095,14 +1273,15 @@ function Sidebar({ open, clones, orgClones, active, userName, userInitial, onSel
 // ── Main ───────────────────────────────────────────────────────────────────────
 
 export default function Desktop() {
-  const [clones,      setClones]      = useState<Clone[]>([]);
-  const [orgClones,   setOrgClones]   = useState<OrgClone[]>([]);
-  const [active,      setActive]      = useState<Clone | null>(null);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [userId,      setUserId]      = useState("");
-  const [userName,    setUserName]    = useState("You");
-  const [userInitial, setUserInitial] = useState("?");
-  const [loading,     setLoading]     = useState(true);
+  const [clones,       setClones]       = useState<Clone[]>([]);
+  const [orgClones,    setOrgClones]    = useState<OrgClone[]>([]);
+  const [active,       setActive]       = useState<Clone | null>(null);
+  const [sidebarOpen,  setSidebarOpen]  = useState(true);
+  const [showSettings, setShowSettings] = useState(false);
+  const [userId,       setUserId]       = useState("");
+  const [userName,     setUserName]     = useState("You");
+  const [userInitial,  setUserInitial]  = useState("?");
+  const [loading,      setLoading]      = useState(true);
 
   async function initWithAuth(auth: { userId: string; firstName: string; lastName: string }) {
     _userId = auth.userId;
@@ -1181,11 +1360,14 @@ export default function Desktop() {
         active={active}
         userName={userName}
         userInitial={userInitial}
-        onSelect={c=>{if(c.clone_id!==active?.clone_id)setActive(c)}}
+        onSelect={c=>{if(c.clone_id!==active?.clone_id){setActive(c);setShowSettings(false)}}}
         onToggle={()=>setSidebarOpen(o=>!o)}
+        onOpenSettings={()=>setShowSettings(true)}
       />
       <div style={{ flex:1,overflow:"hidden",display:"flex",flexDirection:"column",minWidth:0 }}>
-        {active
+        {showSettings && active
+          ? <SettingsPanel key={`settings-${active.clone_id}`} clone={active} onBack={()=>setShowSettings(false)} />
+          : active
           ? <CloneChat key={active.clone_id} clone={active} userId={userId} />
           : <div style={{ flex:1,display:"flex",alignItems:"center",justifyContent:"center",color:"rgba(255,255,255,0.22)",fontSize:13 }}>Select a clone to start.</div>}
       </div>
