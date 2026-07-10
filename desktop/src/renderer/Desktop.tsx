@@ -1031,6 +1031,325 @@ function ConnectorsPanel({ cloneId }: { cloneId: string }) {
   );
 }
 
+// ── MyBrainPanel ──────────────────────────────────────────────────────────────
+
+type BrainCategory = "role" | "background" | "expertise" | "goal" | "preference";
+interface BrainMemory { id: string; content: string; category: BrainCategory; source: string; created_at: string; }
+
+const BRAIN_CATEGORIES: { value: BrainCategory; label: string; description: string }[] = [
+  { value: "role",       label: "Role",        description: "Your title, seniority, team" },
+  { value: "background", label: "Background",  description: "Experience, career history, context" },
+  { value: "expertise",  label: "Expertise",   description: "Domains you know deeply" },
+  { value: "goal",       label: "Goals",       description: "What you're trying to achieve" },
+  { value: "preference", label: "Preferences", description: "How you like information delivered" },
+];
+
+const BCAT_COLOR: Record<BrainCategory, string> = { role:"rgba(96,165,250,0.70)", background:"rgba(167,139,250,0.70)", expertise:"rgba(52,211,153,0.70)", goal:"rgba(251,191,36,0.70)", preference:"rgba(251,146,60,0.70)" };
+const BCAT_BG: Record<BrainCategory, string>    = { role:"rgba(96,165,250,0.08)", background:"rgba(167,139,250,0.08)", expertise:"rgba(52,211,153,0.08)", goal:"rgba(251,191,36,0.08)", preference:"rgba(251,146,60,0.08)" };
+const BCAT_BORDER: Record<BrainCategory, string> = { role:"rgba(96,165,250,0.18)", background:"rgba(167,139,250,0.18)", expertise:"rgba(52,211,153,0.18)", goal:"rgba(251,191,36,0.18)", preference:"rgba(251,146,60,0.18)" };
+
+const ONBOARDING_PROMPTS: { category: BrainCategory; question: string; placeholder: string }[] = [
+  { category: "role",       question: "What's your role?",                        placeholder: "e.g. Head of Product at a 50-person SaaS startup." },
+  { category: "background", question: "What's your background?",                  placeholder: "e.g. 8 years in B2B software, started as a consultant." },
+  { category: "expertise",  question: "What do you know deeply?",                 placeholder: "e.g. Go-to-market strategy, SQL, hiring for early-stage teams." },
+  { category: "goal",       question: "What are you working toward right now?",   placeholder: "e.g. Closing Series A, scaling my team from 5 to 15." },
+  { category: "preference", question: "How do you like information delivered?",    placeholder: "e.g. Short, direct answers. No bullet points unless I ask." },
+];
+
+function MyBrainPanel({ onBack }: { onBack: () => void }) {
+  const [memories, setMemories] = useState<BrainMemory[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [filter, setFilter] = useState<BrainCategory | "all">("all");
+  const [addContent, setAddContent] = useState("");
+  const [addCat, setAddCat] = useState<BrainCategory>("background");
+  const [addSaving, setAddSaving] = useState(false);
+  // Onboarding state
+  const [obAnswers, setObAnswers] = useState<string[]>(ONBOARDING_PROMPTS.map(() => ""));
+  const [obStep, setObStep] = useState(0);
+  const [obSaving, setObSaving] = useState(false);
+
+  function loadMemories() {
+    api("/consumer/brain").then(r => r.ok ? r.json() : { memories: [] }).then(d => {
+      const list: BrainMemory[] = d.memories ?? [];
+      setMemories(list);
+      if (list.length === 0) setShowOnboarding(true);
+      setLoading(false);
+    }).catch(() => setLoading(false));
+  }
+  useEffect(() => { loadMemories(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function deleteMemory(id: string) {
+    setMemories(prev => prev.filter(m => m.id !== id));
+    await api(`/consumer/brain/${id}`, { method: "DELETE" });
+  }
+
+  async function addMemory() {
+    const trimmed = addContent.trim();
+    if (!trimmed || addSaving) return;
+    setAddSaving(true);
+    try {
+      const res = await api("/consumer/brain", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content: trimmed, category: addCat }) });
+      if (res.ok) { const m = await res.json(); setMemories(prev => [{ id: m.id, content: trimmed, category: addCat, source: "manual", created_at: m.created_at }, ...prev]); setAddContent(""); }
+    } finally { setAddSaving(false); }
+  }
+
+  async function finishOnboarding() {
+    const filled = ONBOARDING_PROMPTS.map((p, i) => ({ ...p, answer: obAnswers[i].trim() })).filter(x => x.answer.length > 0);
+    if (filled.length === 0) { setShowOnboarding(false); return; }
+    setObSaving(true);
+    try { await Promise.all(filled.map(x => api("/consumer/brain", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content: x.answer, category: x.category }) }))); } catch {}
+    setObSaving(false); setShowOnboarding(false); loadMemories();
+  }
+
+  function obNext() { if (obStep < ONBOARDING_PROMPTS.length - 1) setObStep(obStep + 1); else finishOnboarding(); }
+
+  const filtered = filter === "all" ? memories : memories.filter(m => m.category === filter);
+
+  // Header component for reuse
+  const header = (
+    <header style={{ flexShrink:0, borderBottom:"1px solid rgba(255,255,255,0.07)", padding:"16px 20px" }}>
+      <div style={{ display:"flex", alignItems:"center", gap:10, maxWidth:560, margin:"0 auto" }}>
+        <button onClick={onBack} style={{ display:"flex",alignItems:"center",gap:5,padding:"5px 10px",borderRadius:8,background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",color:"rgba(255,255,255,0.45)",cursor:"pointer",fontSize:11,fontFamily:"inherit",transition:"all 180ms" }}
+          onMouseEnter={e=>{e.currentTarget.style.color="rgba(255,255,255,0.80)";e.currentTarget.style.background="rgba(255,255,255,0.08)"}}
+          onMouseLeave={e=>{e.currentTarget.style.color="rgba(255,255,255,0.45)";e.currentTarget.style.background="rgba(255,255,255,0.04)"}}>
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M10 3L5 8l5 5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>
+          Back
+        </button>
+        <h2 style={{ fontSize:15, fontWeight:500, color:"rgba(255,255,255,0.85)", margin:0, flex:1 }}>My Brain</h2>
+        {memories.length > 0 && !showOnboarding && (
+          <button onClick={() => { setShowOnboarding(true); setObStep(0); setObAnswers(ONBOARDING_PROMPTS.map(() => "")); }}
+            style={{ fontSize:11, padding:"5px 12px", borderRadius:8, background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.10)", color:"rgba(255,255,255,0.50)", cursor:"pointer", fontFamily:"inherit" }}>
+            Re-run setup
+          </button>
+        )}
+      </div>
+    </header>
+  );
+
+  if (loading) return <div style={{ flex:1, display:"flex", flexDirection:"column" }}>{header}<div style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center" }}><div style={{ width:18, height:18, borderRadius:"50%", border:"2px solid rgba(255,255,255,0.08)", borderTopColor:"rgba(255,255,255,0.40)", animation:"spin 0.8s linear infinite" }} /></div></div>;
+
+  if (showOnboarding) {
+    const prompt = ONBOARDING_PROMPTS[obStep];
+    const isLast = obStep === ONBOARDING_PROMPTS.length - 1;
+    const answer = obAnswers[obStep];
+    return (
+      <div style={{ flex:1, display:"flex", flexDirection:"column" }}>
+        {header}
+        <div style={{ flex:1, overflowY:"auto", padding:"24px 20px 40px" }}>
+          <div style={{ maxWidth:560, margin:"0 auto" }}>
+            <p style={{ fontSize:13, color:"rgba(255,255,255,0.40)", lineHeight:1.6, marginBottom:24 }}>Tell your clones who they're talking to. This takes 2 minutes.</p>
+            {/* Progress rail */}
+            <div style={{ display:"flex", gap:5, marginBottom:32 }}>
+              {ONBOARDING_PROMPTS.map((_, i) => <div key={i} style={{ flex:1, height:3, borderRadius:999, background:i <= obStep ? "rgba(255,255,255,0.55)" : "rgba(255,255,255,0.09)", transition:"background 300ms" }} />)}
+            </div>
+            <p style={{ fontSize:10, textTransform:"uppercase", letterSpacing:"0.12em", color:BCAT_COLOR[prompt.category], marginBottom:10 }}>{BRAIN_CATEGORIES.find(c => c.value === prompt.category)?.label}</p>
+            <h3 style={{ fontSize:20, fontWeight:300, color:"rgba(255,255,255,0.90)", margin:"0 0 8px" }}>{prompt.question}</h3>
+            <p style={{ fontSize:12, color:"rgba(255,255,255,0.30)", marginBottom:20, lineHeight:1.5 }}>A CEO gets a different answer than a grad student — this is what makes that work.</p>
+            <textarea value={answer} onChange={e => { const n = [...obAnswers]; n[obStep] = e.target.value; setObAnswers(n); }}
+              onKeyDown={e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) obNext(); }}
+              placeholder={prompt.placeholder} rows={4}
+              style={{ width:"100%", boxSizing:"border-box", background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.10)", borderRadius:14, padding:"14px 16px", fontSize:13, color:"rgba(255,255,255,0.82)", fontFamily:"inherit", outline:"none", resize:"none", lineHeight:1.65 }}
+              onFocus={e => e.currentTarget.style.borderColor = "rgba(255,255,255,0.22)"} onBlur={e => e.currentTarget.style.borderColor = "rgba(255,255,255,0.10)"} />
+            <div style={{ display:"flex", gap:10, marginTop:14, alignItems:"center" }}>
+              <button onClick={obNext} disabled={obSaving} style={{ padding:"9px 22px", borderRadius:10, fontSize:12, fontWeight:500, background:answer.trim()?"rgba(255,255,255,0.10)":"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.14)", color:answer.trim()?"rgba(255,255,255,0.85)":"rgba(255,255,255,0.35)", cursor:"pointer", fontFamily:"inherit" }}>
+                {obSaving ? "Saving..." : isLast ? "Done →" : "Next →"}
+              </button>
+              <button onClick={obNext} style={{ padding:"9px 14px", borderRadius:10, fontSize:12, background:"none", border:"none", color:"rgba(255,255,255,0.25)", cursor:"pointer", fontFamily:"inherit" }}>Skip</button>
+              {obStep > 0 && <button onClick={() => setObStep(obStep - 1)} style={{ marginLeft:"auto", padding:"9px 14px", fontSize:11, background:"none", border:"none", color:"rgba(255,255,255,0.22)", cursor:"pointer", fontFamily:"inherit" }}>← Back</button>}
+            </div>
+            <p style={{ fontSize:10, color:"rgba(255,255,255,0.18)", marginTop:12 }}>Ctrl+Enter to continue · All fields optional</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ flex:1, display:"flex", flexDirection:"column" }}>
+      {header}
+      <div style={{ flex:1, overflowY:"auto", padding:"24px 20px 40px" }}>
+        <div style={{ maxWidth:560, margin:"0 auto", display:"flex", flexDirection:"column", gap:16 }}>
+          {/* Info card */}
+          <div style={{ padding:"14px 18px", borderRadius:13, background:"rgba(255,255,255,0.02)", border:"1px solid rgba(255,255,255,0.07)", display:"flex", gap:12, alignItems:"flex-start" }}>
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" style={{ flexShrink:0, marginTop:2, color:"rgba(255,255,255,0.30)" }}><circle cx="8" cy="8" r="6.5" stroke="currentColor" strokeWidth="1.3"/><path d="M8 7v5M8 5h.01" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/></svg>
+            <div>
+              <p style={{ margin:"0 0 3px", fontSize:13, fontWeight:500, color:"rgba(255,255,255,0.65)" }}>Your profile shapes how every clone responds to you</p>
+              <p style={{ margin:0, fontSize:12, color:"rgba(255,255,255,0.35)", lineHeight:1.55 }}>When you chat with any clone, they see your role, background and expertise — so a CEO gets a boardroom-ready answer and a junior dev gets an explanation with code examples.</p>
+            </div>
+          </div>
+
+          {/* Filter pills */}
+          <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+            {[{ label:"all", count:memories.length }, ...BRAIN_CATEGORIES.map(c => ({ label:c.label, count:memories.filter(m => m.category === c.value).length, value:c.value }))].map(s => {
+              const val = s.label === "all" ? "all" : (s as { value?: BrainCategory }).value ?? "all";
+              const active = filter === val;
+              return <button key={s.label} onClick={() => setFilter(val as BrainCategory | "all")} style={{ padding:"5px 14px", borderRadius:999, fontSize:11, background:active?"rgba(255,255,255,0.10)":"rgba(255,255,255,0.03)", border:`1px solid ${active?"rgba(255,255,255,0.18)":"rgba(255,255,255,0.07)"}`, color:active?"rgba(255,255,255,0.85)":"rgba(255,255,255,0.38)", cursor:"pointer", fontFamily:"inherit", transition:"all 130ms" }}>
+                {s.label.charAt(0).toUpperCase() + s.label.slice(1)} · {s.count}
+              </button>;
+            })}
+          </div>
+
+          {/* Memory list */}
+          {filtered.length > 0 ? (
+            <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+              {filtered.map(m => {
+                const cat = m.category as BrainCategory;
+                const color = BCAT_COLOR[cat] ?? "rgba(255,255,255,0.50)";
+                const bg = BCAT_BG[cat] ?? "rgba(255,255,255,0.04)";
+                const border = BCAT_BORDER[cat] ?? "rgba(255,255,255,0.09)";
+                return (
+                  <div key={m.id} style={{ display:"flex", gap:12, alignItems:"flex-start", padding:"14px 16px", borderRadius:13, background:bg, border:`1px solid ${border}` }}>
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <div style={{ display:"flex", alignItems:"center", gap:7, marginBottom:6 }}>
+                        <span style={{ fontSize:10, padding:"2px 7px", borderRadius:999, background:bg, border:`1px solid ${border}`, color, fontWeight:500, textTransform:"uppercase", letterSpacing:"0.06em" }}>
+                          {BRAIN_CATEGORIES.find(c => c.value === cat)?.label ?? cat}
+                        </span>
+                      </div>
+                      <p style={{ margin:0, fontSize:13, color:"rgba(255,255,255,0.78)", lineHeight:1.6 }}>{m.content}</p>
+                    </div>
+                    <button onClick={() => deleteMemory(m.id)} style={{ flexShrink:0, background:"none", border:"none", color:"rgba(255,255,255,0.20)", cursor:"pointer", fontSize:16, lineHeight:1, padding:"2px 4px" }}
+                      onMouseEnter={e=>{e.currentTarget.style.color="rgba(248,113,113,0.60)"}} onMouseLeave={e=>{e.currentTarget.style.color="rgba(255,255,255,0.20)"}}>×</button>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div style={{ padding:"32px 20px", textAlign:"center", border:"1px dashed rgba(255,255,255,0.08)", borderRadius:14, color:"rgba(255,255,255,0.25)", fontSize:13 }}>
+              No {filter === "all" ? "" : filter + " "}entries yet — add one below.
+            </div>
+          )}
+
+          {/* Add form */}
+          <div style={{ padding:"18px 20px", borderRadius:14, background:"rgba(255,255,255,0.03)", border:"1px solid rgba(255,255,255,0.08)" }}>
+            <p style={{ fontSize:10, textTransform:"uppercase", letterSpacing:"0.10em", color:"rgba(255,255,255,0.28)", marginBottom:12 }}>Add entry</p>
+            <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginBottom:12 }}>
+              {BRAIN_CATEGORIES.map(c => {
+                const active = addCat === c.value;
+                return <button key={c.value} onClick={() => setAddCat(c.value)} style={{ padding:"5px 12px", borderRadius:999, fontSize:11, fontWeight:500, background:active?BCAT_BG[c.value]:"rgba(255,255,255,0.03)", border:`1px solid ${active?BCAT_BORDER[c.value]:"rgba(255,255,255,0.08)"}`, color:active?BCAT_COLOR[c.value]:"rgba(255,255,255,0.38)", cursor:"pointer", fontFamily:"inherit" }}>{c.label}</button>;
+              })}
+            </div>
+            <textarea value={addContent} onChange={e => setAddContent(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) addMemory(); }}
+              placeholder={BRAIN_CATEGORIES.find(c => c.value === addCat)?.description + "..."} rows={3}
+              style={{ width:"100%", boxSizing:"border-box", background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.09)", borderRadius:11, padding:"11px 13px", fontSize:13, color:"rgba(255,255,255,0.82)", fontFamily:"inherit", outline:"none", resize:"none", lineHeight:1.6, marginBottom:10 }}
+              onFocus={e => e.currentTarget.style.borderColor = "rgba(255,255,255,0.20)"} onBlur={e => e.currentTarget.style.borderColor = "rgba(255,255,255,0.09)"} />
+            <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+              <button onClick={addMemory} disabled={!addContent.trim() || addSaving} style={{ padding:"8px 20px", borderRadius:10, fontSize:12, fontWeight:500, background:addContent.trim()?"rgba(255,255,255,0.09)":"rgba(255,255,255,0.03)", border:"1px solid rgba(255,255,255,0.12)", color:addContent.trim()?"rgba(255,255,255,0.80)":"rgba(255,255,255,0.25)", cursor:addContent.trim()?"pointer":"not-allowed", fontFamily:"inherit" }}>
+                {addSaving ? "Saving..." : "Add →"}
+              </button>
+              <span style={{ fontSize:10, color:"rgba(255,255,255,0.18)", marginLeft:"auto" }}>Ctrl+Enter</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── OrgPanel ──────────────────────────────────────────────────────────────────
+
+interface OrgCloneDetail { clone_id: string; display_name: string; handle: string; avatar_url: string | null; category: string | null; description: string; total_queries: number; is_verified: boolean; member_role: "admin" | "member"; }
+
+const ORG_CAT_COLOR: Record<string, string> = { business:"#1A73E8", engineering:"#7B1FA2", design:"#E91E63", marketing:"#F57C00", finance:"#2E7D32", legal:"#546E7A", healthcare:"#C2185B", education:"#F9A825", science:"#00838F", other:"#8E24AA" };
+function orgCatColor(c: string | null) { return ORG_CAT_COLOR[c ?? "other"] ?? "#8E24AA"; }
+function orgHexToRgba(hex: string, alpha: number) { const r = parseInt(hex.slice(1, 3), 16); const g = parseInt(hex.slice(3, 5), 16); const b = parseInt(hex.slice(5, 7), 16); return `rgba(${r},${g},${b},${alpha})`; }
+
+function OrgPanel({ onBack }: { onBack: () => void }) {
+  const [clones, setClones] = useState<OrgCloneDetail[]>([]);
+  const [orgName, setOrgName] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+
+  useEffect(() => {
+    api("/org/clones").then(r => r.ok ? r.json() : { clones: [] }).then(d => { setClones(d.clones ?? []); setOrgName(d.org_name ?? null); setLoading(false); }).catch(() => setLoading(false));
+  }, []);
+
+  const filtered = clones.filter(c => !search || c.display_name.toLowerCase().includes(search.toLowerCase()) || (c.category ?? "").toLowerCase().includes(search.toLowerCase()) || c.description.toLowerCase().includes(search.toLowerCase()));
+
+  return (
+    <div style={{ flex:1, display:"flex", flexDirection:"column", overflow:"hidden" }}>
+      {/* Header */}
+      <header style={{ flexShrink:0, borderBottom:"1px solid rgba(255,255,255,0.07)", padding:"16px 20px" }}>
+        <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+          <button onClick={onBack} style={{ display:"flex",alignItems:"center",gap:5,padding:"5px 10px",borderRadius:8,background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",color:"rgba(255,255,255,0.45)",cursor:"pointer",fontSize:11,fontFamily:"inherit",transition:"all 180ms" }}
+            onMouseEnter={e=>{e.currentTarget.style.color="rgba(255,255,255,0.80)";e.currentTarget.style.background="rgba(255,255,255,0.08)"}}
+            onMouseLeave={e=>{e.currentTarget.style.color="rgba(255,255,255,0.45)";e.currentTarget.style.background="rgba(255,255,255,0.04)"}}>
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M10 3L5 8l5 5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            Back
+          </button>
+          <h2 style={{ fontSize:15, fontWeight:500, color:"rgba(255,255,255,0.85)", margin:0, flex:1 }}>{orgName ?? "My Organisation"}</h2>
+          {/* Search */}
+          <div style={{ position:"relative" }}>
+            <svg width="12" height="12" viewBox="0 0 14 14" fill="none" style={{ position:"absolute", left:10, top:"50%", transform:"translateY(-50%)", color:"rgba(255,255,255,0.25)", pointerEvents:"none" }}><circle cx="6" cy="6" r="4.5" stroke="currentColor" strokeWidth="1.3"/><path d="M9.5 9.5L12 12" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/></svg>
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search clones..." style={{ width:180, padding:"7px 12px 7px 30px", background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.09)", borderRadius:10, fontSize:12, color:"rgba(255,255,255,0.70)", outline:"none", fontFamily:"inherit" }} />
+          </div>
+        </div>
+      </header>
+
+      <div style={{ flex:1, overflowY:"auto", padding:"24px 20px 40px" }}>
+        {loading ? (
+          <div style={{ display:"flex", justifyContent:"center", padding:48 }}><div style={{ width:18, height:18, borderRadius:"50%", border:"2px solid rgba(255,255,255,0.08)", borderTopColor:"rgba(255,255,255,0.40)", animation:"spin 0.8s linear infinite" }} /></div>
+        ) : filtered.length === 0 ? (
+          <div style={{ textAlign:"center", padding:"80px 40px" }}>
+            <div style={{ width:64, height:64, borderRadius:20, margin:"0 auto 20px", background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.08)", display:"flex", alignItems:"center", justifyContent:"center" }}>
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none"><circle cx="9" cy="7" r="4" stroke="rgba(255,255,255,0.25)" strokeWidth="1.5"/><path d="M3 21c0-3.3 2.7-6 6-6h6c3.3 0 6 2.7 6 6" stroke="rgba(255,255,255,0.25)" strokeWidth="1.5" strokeLinecap="round"/><circle cx="17" cy="7" r="3" stroke="rgba(255,255,255,0.15)" strokeWidth="1.5"/></svg>
+            </div>
+            <p style={{ fontSize:15, color:"rgba(255,255,255,0.50)", fontWeight:500, marginBottom:8 }}>No org clones yet</p>
+            <p style={{ fontSize:13, color:"rgba(255,255,255,0.25)", lineHeight:1.6, maxWidth:320, margin:"0 auto" }}>Your org admin hasn't shared any clones yet, or you're not part of an org.</p>
+          </div>
+        ) : (
+          <>
+            <p style={{ fontSize:12, color:"rgba(255,255,255,0.25)", marginBottom:20 }}>{filtered.length} clone{filtered.length !== 1 ? "s" : ""} available to your team</p>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(280px, 1fr))", gap:16 }}>
+              {filtered.map(clone => {
+                const color = orgCatColor(clone.category);
+                const initial = clone.display_name[0]?.toUpperCase() ?? "?";
+                return (
+                  <div key={clone.clone_id} style={{ borderRadius:18, overflow:"hidden", background:"rgba(255,255,255,0.035)", border:"1px solid rgba(255,255,255,0.08)", transition:"border-color 200ms, box-shadow 200ms" }}
+                    onMouseEnter={e=>{e.currentTarget.style.borderColor=orgHexToRgba(color,0.35);e.currentTarget.style.boxShadow=`0 12px 40px rgba(0,0,0,0.4), 0 0 30px ${orgHexToRgba(color,0.12)}`}}
+                    onMouseLeave={e=>{e.currentTarget.style.borderColor="rgba(255,255,255,0.08)";e.currentTarget.style.boxShadow="none"}}>
+                    {/* Color strip */}
+                    <div style={{ height:3, background:`linear-gradient(90deg, ${orgHexToRgba(color,0.9)}, ${orgHexToRgba(color,0.3)})` }} />
+                    <div style={{ padding:"20px 20px 18px" }}>
+                      {/* Header */}
+                      <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", marginBottom:14 }}>
+                        <div style={{ width:48, height:48, borderRadius:14, flexShrink:0, background:clone.avatar_url?"transparent":orgHexToRgba(color,0.2), border:`1.5px solid ${orgHexToRgba(color,0.4)}`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:18, fontWeight:500, color:"#fff", overflow:"hidden", boxShadow:`0 4px 16px ${orgHexToRgba(color,0.25)}` }}>
+                          {clone.avatar_url ? <img src={clone.avatar_url} alt="" style={{ width:"100%", height:"100%", objectFit:"cover" }} /> : initial}
+                        </div>
+                        <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end", gap:4 }}>
+                          {clone.is_verified && <span style={{ display:"inline-flex", alignItems:"center", gap:4, fontSize:10, fontWeight:500, padding:"3px 8px", borderRadius:999, background:"rgba(52,211,153,0.10)", border:"1px solid rgba(52,211,153,0.25)", color:"rgba(52,211,153,0.85)" }}>
+                            <svg width="8" height="8" viewBox="0 0 8 8" fill="none"><path d="M1.5 4l2 2 3-3.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/></svg>Verified</span>}
+                          {clone.member_role === "admin" && <span style={{ fontSize:10, fontWeight:500, padding:"3px 8px", borderRadius:999, background:"rgba(167,139,250,0.10)", border:"1px solid rgba(167,139,250,0.25)", color:"rgba(167,139,250,0.80)" }}>Admin</span>}
+                          {clone.category && <span style={{ fontSize:10, padding:"3px 8px", borderRadius:999, background:orgHexToRgba(color,0.10), border:`1px solid ${orgHexToRgba(color,0.22)}`, color:orgHexToRgba(color,0.80), textTransform:"capitalize" }}>{clone.category}</span>}
+                        </div>
+                      </div>
+                      {/* Name */}
+                      <p style={{ fontSize:14, fontWeight:500, color:"rgba(255,255,255,0.90)", margin:"0 0 2px" }}>{clone.display_name}</p>
+                      <p style={{ fontSize:11, color:"rgba(255,255,255,0.35)", margin:"0 0 10px" }}>@{clone.handle}</p>
+                      {/* Description */}
+                      <p style={{ fontSize:12, color:"rgba(255,255,255,0.45)", lineHeight:1.6, margin:"0 0 14px", minHeight:32, display:"-webkit-box", WebkitLineClamp:2, WebkitBoxOrient:"vertical", overflow:"hidden" } as React.CSSProperties}>{clone.description || "No description."}</p>
+                      {/* Stats */}
+                      <p style={{ fontSize:11, color:"rgba(255,255,255,0.30)", margin:"0 0 14px" }}>{clone.total_queries.toLocaleString()} queries</p>
+                      {/* Chat CTA */}
+                      <button onClick={() => window.open(`https://doppel-pi.vercel.app/c/${clone.handle}`, "_blank")}
+                        style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:6, width:"100%", padding:"9px 0", borderRadius:12, fontSize:12, fontWeight:500, background:"rgba(255,255,255,0.06)", border:"1px solid rgba(255,255,255,0.09)", color:"rgba(255,255,255,0.60)", cursor:"pointer", fontFamily:"inherit", transition:"all 200ms" }}
+                        onMouseEnter={e=>{e.currentTarget.style.background=orgHexToRgba(color,0.18);e.currentTarget.style.borderColor=orgHexToRgba(color,0.40);e.currentTarget.style.color=orgHexToRgba(color,0.95)}}
+                        onMouseLeave={e=>{e.currentTarget.style.background="rgba(255,255,255,0.06)";e.currentTarget.style.borderColor="rgba(255,255,255,0.09)";e.currentTarget.style.color="rgba(255,255,255,0.60)"}}>
+                        <svg width="13" height="13" viewBox="0 0 14 14" fill="none"><path d="M2 7h10M7 2l5 5-5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                        Chat
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── SynthesisPanel ─────────────────────────────────────────────────────────────
 
 interface SynthClone { id: string; handle: string; name: string; avatar_url?: string; }
@@ -1626,7 +1945,7 @@ function SettingsPanel({ clone, onBack }: { clone: Clone; onBack: () => void }) 
 
 // ── Sidebar ────────────────────────────────────────────────────────────────────
 
-function Sidebar({ open, clones, orgClones, active, userName, userInitial, onSelect, onToggle, onOpenSettings, onOpenSynthesis }: {
+function Sidebar({ open, clones, orgClones, active, userName, userInitial, onSelect, onToggle, onOpenSettings, onOpenSynthesis, onOpenMyBrain, onOpenOrg }: {
   open: boolean;
   clones: Clone[];
   orgClones: OrgClone[];
@@ -1637,6 +1956,8 @@ function Sidebar({ open, clones, orgClones, active, userName, userInitial, onSel
   onToggle: () => void;
   onOpenSettings: () => void;
   onOpenSynthesis: () => void;
+  onOpenMyBrain: () => void;
+  onOpenOrg: () => void;
 }) {
   const [search, setSearch] = useState("");
   const filtered = search
@@ -1690,7 +2011,7 @@ function Sidebar({ open, clones, orgClones, active, userName, userInitial, onSel
         {/* My Brain + My Organisation shortcut cards */}
         <div style={{ padding:"0 8px 6px", display:"flex", flexDirection:"column", gap: 4 }}>
           <button
-            onClick={() => openExternal(`https://doppel-pi.vercel.app/dashboard/my-brain`)}
+            onClick={onOpenMyBrain}
             style={{ display:"flex", alignItems:"center", gap: 10, padding:"11px 16px", borderRadius: 12, background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.09)", color:"rgba(255,255,255,0.70)", fontSize: 13, fontWeight: 500, cursor:"pointer", textAlign:"left" as const, fontFamily:"inherit", transition:"all 150ms", width:"100%" }}
             onMouseEnter={e=>{e.currentTarget.style.background="rgba(255,255,255,0.09)";e.currentTarget.style.color="rgba(255,255,255,0.90)";e.currentTarget.style.borderColor="rgba(255,255,255,0.16)"}}
             onMouseLeave={e=>{e.currentTarget.style.background="rgba(255,255,255,0.05)";e.currentTarget.style.color="rgba(255,255,255,0.70)";e.currentTarget.style.borderColor="rgba(255,255,255,0.09)"}}
@@ -1702,7 +2023,7 @@ function Sidebar({ open, clones, orgClones, active, userName, userInitial, onSel
             My Brain
           </button>
           <button
-            onClick={() => openExternal(`https://doppel-pi.vercel.app/org`)}
+            onClick={onOpenOrg}
             style={{ display:"flex", alignItems:"center", gap: 10, padding:"11px 16px", borderRadius: 12, background:"rgba(26,115,232,0.07)", border:"1px solid rgba(26,115,232,0.18)", color:"rgba(107,174,255,0.75)", fontSize: 13, fontWeight: 500, cursor:"pointer", textAlign:"left" as const, fontFamily:"inherit", transition:"all 150ms", width:"100%" }}
             onMouseEnter={e=>{e.currentTarget.style.background="rgba(26,115,232,0.14)";e.currentTarget.style.color="rgba(107,174,255,0.95)";e.currentTarget.style.borderColor="rgba(26,115,232,0.34)"}}
             onMouseLeave={e=>{e.currentTarget.style.background="rgba(26,115,232,0.07)";e.currentTarget.style.color="rgba(107,174,255,0.75)";e.currentTarget.style.borderColor="rgba(26,115,232,0.18)"}}
@@ -1817,6 +2138,8 @@ export default function Desktop() {
   const [sidebarOpen,  setSidebarOpen]  = useState(true);
   const [showSettings,  setShowSettings]  = useState(false);
   const [showSynthesis, setShowSynthesis] = useState(false);
+  const [showMyBrain,   setShowMyBrain]   = useState(false);
+  const [showOrg,       setShowOrg]       = useState(false);
   const [userId,       setUserId]       = useState("");
   const [userName,     setUserName]     = useState("You");
   const [userInitial,  setUserInitial]  = useState("?");
@@ -1899,13 +2222,19 @@ export default function Desktop() {
         active={active}
         userName={userName}
         userInitial={userInitial}
-        onSelect={c=>{if(c.clone_id!==active?.clone_id){setActive(c);setShowSettings(false);setShowSynthesis(false)}}}
+        onSelect={c=>{if(c.clone_id!==active?.clone_id){setActive(c);setShowSettings(false);setShowSynthesis(false);setShowMyBrain(false);setShowOrg(false)}}}
         onToggle={()=>setSidebarOpen(o=>!o)}
-        onOpenSettings={()=>{setShowSettings(true);setShowSynthesis(false)}}
-        onOpenSynthesis={()=>{setShowSynthesis(true);setShowSettings(false)}}
+        onOpenSettings={()=>{setShowSettings(true);setShowSynthesis(false);setShowMyBrain(false);setShowOrg(false)}}
+        onOpenSynthesis={()=>{setShowSynthesis(true);setShowSettings(false);setShowMyBrain(false);setShowOrg(false)}}
+        onOpenMyBrain={()=>{setShowMyBrain(true);setShowSettings(false);setShowSynthesis(false);setShowOrg(false)}}
+        onOpenOrg={()=>{setShowOrg(true);setShowSettings(false);setShowSynthesis(false);setShowMyBrain(false)}}
       />
       <div style={{ flex:1,overflow:"hidden",display:"flex",flexDirection:"column",minWidth:0 }}>
-        {showSynthesis
+        {showMyBrain
+          ? <MyBrainPanel onBack={()=>setShowMyBrain(false)} />
+          : showOrg
+          ? <OrgPanel onBack={()=>setShowOrg(false)} />
+          : showSynthesis
           ? <SynthesisPanel clones={clones} onBack={()=>setShowSynthesis(false)} />
           : showSettings && active
           ? <SettingsPanel key={`settings-${active.clone_id}`} clone={active} onBack={()=>setShowSettings(false)} />
