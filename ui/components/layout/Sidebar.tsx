@@ -80,18 +80,6 @@ const CLONE: NavItem[] = [
       </svg>
     ),
   },
-  {
-    href: "/dashboard/synthesis",
-    label: "Synthesis",
-    icon: (
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-        <circle cx="4" cy="8" r="2" fill="currentColor" opacity="0.7"/>
-        <circle cx="12" cy="5" r="1.6" fill="currentColor" opacity="0.5"/>
-        <circle cx="12" cy="11" r="1.6" fill="currentColor" opacity="0.5"/>
-        <path d="M6 7.5L10.3 5.5M6 8.5L10.3 10.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" opacity="0.45"/>
-      </svg>
-    ),
-  },
 ];
 
 const MARKETPLACE: NavItem[] = [

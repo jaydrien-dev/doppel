@@ -465,7 +465,7 @@ export default function DecisionsPage() {
               <p style={{ fontSize: 12, color: "rgba(255,255,255,0.22)", margin: 0, lineHeight: 1.6 }}>
                 Connect sources and run Extract, or add rules manually below.
                 {" "}
-                <Link href={`/home?tab=connectors&clone=${primary.handle}`} style={{ color: "rgba(255,255,255,0.40)", textDecoration: "underline" }}>
+                <Link href="/dashboard/settings" style={{ color: "rgba(255,255,255,0.40)", textDecoration: "underline" }}>
                   Manage connectors
                 </Link>
               </p>

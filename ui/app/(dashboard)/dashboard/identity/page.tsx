@@ -350,7 +350,7 @@ export default function VoicePage() {
                 )}
               </div>
               <Link
-                href={`/home?tab=connectors&clone=${primary.handle}`}
+                href="/dashboard/settings"
                 style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", textDecoration: "none",
                   background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)",
                   borderRadius: 8, padding: "4px 10px" }}
@@ -369,7 +369,7 @@ export default function VoicePage() {
                   cloneId={primary.clone_id}
                   syncing={syncing === c.key}
                   onSync={() => c.syncPath && syncConnector(c.key, c.syncPath)}
-                  connectHref={`/home?tab=connectors&clone=${primary.handle}`}
+                  connectHref="/dashboard/settings"
                 />
               ))}
             </div>

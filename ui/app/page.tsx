@@ -92,7 +92,7 @@ function Nav() {
         <div className="nav__cta-group">
           {isSignedIn ? (
             <>
-              <Link href="/home" className="btn btn--primary">Open app {I.arrowS}</Link>
+              <Link href="/dashboard" className="btn btn--primary">Open app {I.arrowS}</Link>
             </>
           ) : (
             <>
@@ -281,7 +281,7 @@ function Hero() {
           </p>
 
           <div className="hero__ctas">
-            <Link href={isSignedIn ? "/home" : "/sign-up"} className="btn btn--primary btn--lg">
+            <Link href={isSignedIn ? "/dashboard" : "/sign-up"} className="btn btn--primary btn--lg">
               {isSignedIn ? <>Open app {I.arrow}</> : <>Build your clone {I.arrow}</>}
             </Link>
             <Link href="/contact" className="btn btn--ghost-light btn--lg">
@@ -989,7 +989,7 @@ function FinalCTA() {
         </h2>
         <p className="cta__sub">Built from you. Acts like you. Accountable to you. Free to start.</p>
         <div className="cta__row">
-          <Link href={isSignedIn ? "/home" : "/sign-up"} className="btn btn--primary btn--lg">
+          <Link href={isSignedIn ? "/dashboard" : "/sign-up"} className="btn btn--primary btn--lg">
             {isSignedIn ? <>Open app {I.arrow}</> : <>Build your clone {I.arrow}</>}
           </Link>
           <Link href="/contact" className="btn btn--ghost-light btn--lg">Talk to us</Link>

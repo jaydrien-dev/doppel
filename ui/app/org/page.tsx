@@ -216,7 +216,7 @@ function CloneCard({ clone, index }: { clone: OrgClone; index: number }) {
 
           {/* CTA */}
           <Link
-            href={`/home?clone=${clone.handle}`}
+            href={`/c/${clone.handle}`}
             style={{
               display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
               width: "100%", padding: "10px 0",
@@ -365,7 +365,7 @@ export default function OrgPage() {
         position: "sticky", top: 0,
         background: "rgba(8,8,8,0.92)", backdropFilter: "blur(12px)", zIndex: 10,
       }}>
-        <Link href="/home" style={{
+        <Link href="/dashboard" style={{
           display: "flex", alignItems: "center", gap: 6,
           textDecoration: "none", color: "rgba(255,255,255,0.38)",
           fontSize: 12, transition: "color 150ms",
