@@ -1347,6 +1347,10 @@ function SettingsPanel({ clone, onBack }: { clone: Clone; onBack: () => void }) 
   const [profileSaved, setProfileSaved] = useState(false);
   const [profileLoaded, setProfileLoaded] = useState(false);
 
+  // Credits state
+  const [credits, setCredits] = useState<{ plan_credits: number; bought_credits: number; weekly_allowance: number; total: number } | null>(null);
+  const [packs, setPacks] = useState<{ id: string; credits: number; label: string; price_cents: number }[]>([]);
+
   // Delegate policies state
   const [blockedTopics, setBlockedTopics] = useState<string[]>([]);
   const [escalationThreshold, setEscalationThreshold] = useState(50);
@@ -1364,6 +1368,17 @@ function SettingsPanel({ clone, onBack }: { clone: Clone; onBack: () => void }) 
       setProfileLoaded(true);
     }).catch(() => setProfileLoaded(true));
   }, []);
+
+  // Load credits
+  useEffect(() => {
+    api("/credits/balance").then(r => r.ok ? r.json() : null).then(d => { if (d) setCredits(d); }).catch(() => {});
+    api("/credits/packs").then(r => r.ok ? r.json() : null).then(d => { if (d?.packs) setPacks(d.packs); }).catch(() => {});
+  }, []);
+
+  async function buyPack(packId: string) {
+    const res = await api("/credits/checkout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pack_id: packId }) });
+    if (res.ok) { const d = await res.json(); if (d.checkout_url) window.open(d.checkout_url, "_blank"); }
+  }
 
   // Load policies
   useEffect(() => {
@@ -1482,6 +1497,59 @@ function SettingsPanel({ clone, onBack }: { clone: Clone; onBack: () => void }) 
                 </button>
               </div>
             </>
+          )}
+
+          {/* ── Credits ───────────────────────────────────────── */}
+          <p style={{ ...eyebrowStyle, marginBottom:12 }}>Credits</p>
+
+          {credits && (
+            <div style={{ ...cardStyle, marginBottom:20 }}>
+              {/* Balance */}
+              <div style={{ display:"flex",alignItems:"baseline",gap:8,marginBottom:4 }}>
+                <span style={{ fontSize:36,fontWeight:300,color:"rgba(255,255,255,0.85)",lineHeight:1 }}>{credits.total.toLocaleString()}</span>
+                <span style={{ fontSize:12,color:"rgba(255,255,255,0.30)" }}>credits remaining</span>
+              </div>
+
+              {/* Plan vs top-up breakdown */}
+              <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginTop:8 }}>
+                <div style={{ padding:"12px 14px",borderRadius:12,background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.06)" }}>
+                  <p style={{ fontSize:10,color:"rgba(255,255,255,0.25)",textTransform:"uppercase",letterSpacing:"0.08em",margin:"0 0 6px" }}>Weekly plan</p>
+                  <p style={{ fontSize:16,fontWeight:400,color:"rgba(255,255,255,0.75)",margin:"0 0 6px" }}>{credits.plan_credits} <span style={{ fontSize:11,color:"rgba(255,255,255,0.25)" }}>/ {credits.weekly_allowance}</span></p>
+                  <div style={{ height:3,borderRadius:2,background:"rgba(255,255,255,0.06)",overflow:"hidden" }}>
+                    <div style={{ height:"100%",borderRadius:2,background:"rgba(255,255,255,0.35)",width:`${credits.weekly_allowance > 0 ? Math.round((credits.plan_credits / credits.weekly_allowance) * 100) : 0}%`,transition:"width 400ms" }} />
+                  </div>
+                </div>
+                <div style={{ padding:"12px 14px",borderRadius:12,background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.06)" }}>
+                  <p style={{ fontSize:10,color:"rgba(255,255,255,0.25)",textTransform:"uppercase",letterSpacing:"0.08em",margin:"0 0 6px" }}>Top-up</p>
+                  <p style={{ fontSize:16,fontWeight:400,color:"rgba(255,255,255,0.75)",margin:"0 0 6px" }}>{credits.bought_credits}</p>
+                  <p style={{ fontSize:10,color:"rgba(255,255,255,0.18)",margin:0 }}>no expiry</p>
+                </div>
+              </div>
+
+              <p style={{ fontSize:10,color:"rgba(255,255,255,0.18)",margin:"10px 0 0",lineHeight:1.5 }}>1 credit ≈ 1 query. Plan credits reset weekly. Top-up credits never expire.</p>
+            </div>
+          )}
+
+          {/* Top-up packs */}
+          {packs.length > 0 && (
+            <div style={{ ...cardStyle, marginBottom:32 }}>
+              <p style={eyebrowStyle}>Top up</p>
+              <div style={{ display:"flex",flexDirection:"column",gap:8 }}>
+                {packs.map(pack => (
+                  <div key={pack.id} style={{ display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 14px",borderRadius:10,background:"rgba(255,255,255,0.02)",border:"1px solid rgba(255,255,255,0.06)" }}>
+                    <div>
+                      <span style={{ fontSize:14,fontWeight:500,color:"rgba(255,255,255,0.75)" }}>{pack.credits.toLocaleString()} credits</span>
+                      <span style={{ fontSize:11,color:"rgba(255,255,255,0.25)",marginLeft:8 }}>{pack.label}</span>
+                    </div>
+                    <button onClick={() => buyPack(pack.id)} style={{ padding:"5px 14px",borderRadius:8,fontSize:11,fontWeight:500,background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.10)",color:"rgba(255,255,255,0.55)",cursor:"pointer",fontFamily:"inherit",transition:"all 150ms" }}
+                      onMouseEnter={e=>{e.currentTarget.style.background="rgba(255,255,255,0.10)";e.currentTarget.style.color="rgba(255,255,255,0.80)"}}
+                      onMouseLeave={e=>{e.currentTarget.style.background="rgba(255,255,255,0.06)";e.currentTarget.style.color="rgba(255,255,255,0.55)"}}>
+                      ${(pack.price_cents / 100).toFixed(0)}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
           )}
 
           {/* ── Clone settings ──────────────────────────────────── */}

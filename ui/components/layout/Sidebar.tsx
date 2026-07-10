@@ -127,16 +127,6 @@ const MARKETPLACE: NavItem[] = [
 
 const ACCOUNT: NavItem[] = [
   {
-    href: "/dashboard/my-brain",
-    label: "My Brain",
-    icon: (
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-        <path d="M8 2C5.2 2 3 4.2 3 7c0 1.7.8 3.2 2 4.1V13h6v-1.9c1.2-.9 2-2.4 2-4.1 0-2.8-2.2-5-5-5z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" opacity="0.85"/>
-        <path d="M6 13h4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" opacity="0.6"/>
-      </svg>
-    ),
-  },
-  {
     href: "/dashboard/profile",
     label: "Profile",
     icon: (
