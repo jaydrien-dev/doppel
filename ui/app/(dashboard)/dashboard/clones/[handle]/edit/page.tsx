@@ -192,9 +192,6 @@ export default function CloneEditPage({ params }: { params: Promise<{ handle: st
               Verified
             </span>
           )}
-          <Link href={`/c/${handle}`} className="btn btn--sm">
-            Preview chat ↗
-          </Link>
         </div>
       </div>
 

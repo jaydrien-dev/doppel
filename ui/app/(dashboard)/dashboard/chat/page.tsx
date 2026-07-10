@@ -836,7 +836,7 @@ function CloneChat({ clone, userId }: { clone: CloneOwnerInfo; userId: string })
   }
 
   function handleShare() {
-    const url = `https://doppel.ai/c/${clone.handle}`;
+    const url = `https://doppel-pi.vercel.app/c/${clone.handle}`;
     navigator.clipboard.writeText(url).catch(() => {});
     setShareCopied(true);
     setTimeout(() => setShareCopied(false), 2000);
@@ -999,7 +999,7 @@ function CloneChat({ clone, userId }: { clone: CloneOwnerInfo; userId: string })
               {moreOpen && (
                 <div style={{ position: "absolute", top: "calc(100% + 4px)", right: 0, zIndex: 50, background: "rgba(12,12,12,0.98)", border: "1px solid rgba(255,255,255,0.10)", borderRadius: 10, padding: 4, minWidth: 176, backdropFilter: "blur(20px)", boxShadow: "0 12px 40px rgba(0,0,0,0.65)", transformOrigin: "top right", animation: "menu-in 260ms cubic-bezier(0.34,1.56,0.64,1) both" }}>
                   {[
-                    { label: "Open profile", icon: <svg width="12" height="12" viewBox="0 0 14 14" fill="none"><path d="M6 2H2.5A1.5 1.5 0 001 3.5v8A1.5 1.5 0 002.5 13h8A1.5 1.5 0 0012 11.5V8M8 1h5v5M13 1L7 7" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>, action: () => { window.open(`https://doppel.ai/c/${clone.handle}`, "_blank"); setMoreOpen(false); } },
+                    { label: "Open profile", icon: <svg width="12" height="12" viewBox="0 0 14 14" fill="none"><path d="M6 2H2.5A1.5 1.5 0 001 3.5v8A1.5 1.5 0 002.5 13h8A1.5 1.5 0 0012 11.5V8M8 1h5v5M13 1L7 7" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>, action: () => { window.open(`https://doppel-pi.vercel.app/c/${clone.handle}`, "_blank"); setMoreOpen(false); } },
                     { divider: true },
                     { label: "Clear history", icon: <svg width="12" height="12" viewBox="0 0 14 14" fill="none"><path d="M2 4h10M5 4V2.5h4V4M5.5 10.5V6M8.5 10.5V6M3 4l.8 8h6.4L11 4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>, action: () => { startNewConversation(); setMoreOpen(false); }, danger: true },
                   ].map((item: any, i) => item.divider

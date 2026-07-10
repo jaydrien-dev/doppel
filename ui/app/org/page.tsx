@@ -214,26 +214,6 @@ function CloneCard({ clone, index }: { clone: OrgClone; index: number }) {
             </span>
           </div>
 
-          {/* CTA */}
-          <Link
-            href={`/c/${clone.handle}`}
-            style={{
-              display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-              width: "100%", padding: "10px 0",
-              borderRadius: 12, fontSize: 13, fontWeight: 500,
-              background: hovered ? hexToRgba(color, 0.18) : "rgba(255,255,255,0.06)",
-              border: `1px solid ${hovered ? hexToRgba(color, 0.40) : "rgba(255,255,255,0.09)"}`,
-              color: hovered ? hexToRgba(color, 0.95) : "rgba(255,255,255,0.60)",
-              textDecoration: "none",
-              transition: "all 200ms ease",
-              transform: "translateZ(6px)",
-            }}
-          >
-            <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
-              <path d="M2 7h10M7 2l5 5-5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
-            Chat
-          </Link>
         </div>
       </div>
     </motion.div>

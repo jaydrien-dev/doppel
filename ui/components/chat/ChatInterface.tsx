@@ -886,7 +886,7 @@ function ExpertMatchModal({ onClose }: { onClose: () => void }) {
           {!loading && results.map((r) => (
             <button
               key={r.clone_id}
-              onClick={() => { window.location.href = `/c/${r.handle}`; }}
+              onClick={() => {}}
               style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 14px", borderRadius: 12, width: "100%", border: "1px solid rgba(255,255,255,0.07)", background: "rgba(255,255,255,0.03)", cursor: "pointer", textAlign: "left", fontFamily: "inherit", transition: "all 130ms" }}
               onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.06)"; e.currentTarget.style.borderColor = "rgba(255,255,255,0.12)"; }}
               onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.03)"; e.currentTarget.style.borderColor = "rgba(255,255,255,0.07)"; }}

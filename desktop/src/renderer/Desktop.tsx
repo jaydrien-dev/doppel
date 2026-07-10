@@ -1254,7 +1254,7 @@ const ORG_CAT_COLOR: Record<string, string> = { business:"#1A73E8", engineering:
 function orgCatColor(c: string | null) { return ORG_CAT_COLOR[c ?? "other"] ?? "#8E24AA"; }
 function orgHexToRgba(hex: string, alpha: number) { const r = parseInt(hex.slice(1, 3), 16); const g = parseInt(hex.slice(3, 5), 16); const b = parseInt(hex.slice(5, 7), 16); return `rgba(${r},${g},${b},${alpha})`; }
 
-function OrgPanel({ onBack }: { onBack: () => void }) {
+function OrgPanel({ onBack, onChatClone }: { onBack: () => void; onChatClone: (cloneId: string) => void }) {
   const [clones, setClones] = useState<OrgCloneDetail[]>([]);
   const [orgName, setOrgName] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1331,7 +1331,7 @@ function OrgPanel({ onBack }: { onBack: () => void }) {
                       {/* Stats */}
                       <p style={{ fontSize:11, color:"rgba(255,255,255,0.30)", margin:"0 0 14px" }}>{clone.total_queries.toLocaleString()} queries</p>
                       {/* Chat CTA */}
-                      <button onClick={() => window.open(`https://doppel-pi.vercel.app/c/${clone.handle}`, "_blank")}
+                      <button onClick={() => onChatClone(clone.clone_id)}
                         style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:6, width:"100%", padding:"9px 0", borderRadius:12, fontSize:12, fontWeight:500, background:"rgba(255,255,255,0.06)", border:"1px solid rgba(255,255,255,0.09)", color:"rgba(255,255,255,0.60)", cursor:"pointer", fontFamily:"inherit", transition:"all 200ms" }}
                         onMouseEnter={e=>{e.currentTarget.style.background=orgHexToRgba(color,0.18);e.currentTarget.style.borderColor=orgHexToRgba(color,0.40);e.currentTarget.style.color=orgHexToRgba(color,0.95)}}
                         onMouseLeave={e=>{e.currentTarget.style.background="rgba(255,255,255,0.06)";e.currentTarget.style.borderColor="rgba(255,255,255,0.09)";e.currentTarget.style.color="rgba(255,255,255,0.60)"}}>
@@ -2233,7 +2233,7 @@ export default function Desktop() {
         {showMyBrain
           ? <MyBrainPanel onBack={()=>setShowMyBrain(false)} />
           : showOrg
-          ? <OrgPanel onBack={()=>setShowOrg(false)} />
+          ? <OrgPanel onBack={()=>setShowOrg(false)} onChatClone={(id)=>{const c=[...clones,...orgClones.map(o=>o as Clone)].find(x=>x.clone_id===id);if(c){setActive(c);setShowOrg(false)}}} />
           : showSynthesis
           ? <SynthesisPanel clones={clones} onBack={()=>setShowSynthesis(false)} />
           : showSettings && active

@@ -312,9 +312,6 @@ function CloneCard({ clone, onDeleted }: { clone: CloneRow; onDeleted: () => voi
 
       {/* Actions */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, paddingTop: 4, borderTop: "1px solid rgba(255,255,255,0.06)" }}>
-        <Link href={`/c/${clone.handle}`} className="btn btn--sm" style={{ flex: 1, justifyContent: "center" }}>
-          Chat
-        </Link>
         <Link href={`/dashboard/clones/${clone.handle}/edit`} className="btn btn--sm" style={{ flex: 1, justifyContent: "center" }}>
           Edit
         </Link>
