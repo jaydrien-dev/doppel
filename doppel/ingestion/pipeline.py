@@ -228,14 +228,19 @@ async def _store_chunk_with_embedding(
     entities = item.metadata.get("entities", [])
     topics = item.metadata.get("topics", [])
 
+    # observation_source may come from item field or metadata (set by observation engine)
+    obs_source = item.observation_source or item.metadata.get("_observation_source")
+
     await session.execute(
         text("""
             INSERT INTO episodic_memory
               (id, clone_id, content, embedding, source, authored_by_user,
-               context_type, entities, topics, formality_score, created_at, source_ref)
+               context_type, entities, topics, formality_score, created_at, source_ref,
+               observation_source)
             VALUES
               (:id, :clone_id, :content, :embedding, :source, :authored_by_user,
-               :context_type, :entities, :topics, :formality_score, :created_at, :source_ref)
+               :context_type, :entities, :topics, :formality_score, :created_at, :source_ref,
+               :observation_source)
         """),
         {
             "id": str(chunk_id),
@@ -250,5 +255,6 @@ async def _store_chunk_with_embedding(
             "formality_score": formality,
             "created_at": item.created_at,
             "source_ref": item.source_ref,
+            "observation_source": obs_source,
         },
     )

@@ -86,6 +86,7 @@ async def lifespan(app: FastAPI):
     from doppel.brain.db.connection import engine
     _log = logging.getLogger(__name__)
     from doppel.brain.tasks.scheduler import scheduler as _automation_scheduler
+    from doppel.observation.scheduler import observation_scheduler as _observation_scheduler
 
     try:
         schema_sql = _SCHEMA_FILE.read_text()
@@ -113,11 +114,13 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         _log.warning("Schema migration failed entirely: %s", exc)
 
-    # Start automation scheduler
+    # Start background schedulers
     _automation_scheduler.start()
+    _observation_scheduler.start()
     try:
         yield
     finally:
+        await _observation_scheduler.stop()
         await _automation_scheduler.stop()
 
 
@@ -12498,3 +12501,486 @@ async def list_skills(
             s["created_at"] = s["created_at"].isoformat()
         skills.append(s)
     return {"skills": skills}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PASSIVE OBSERVATION — source management, trigger, activity, insights
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class ObservationSourceCreate(BaseModel):
+    clone_id: UUID
+    source_type: str  # gmail|slack|gdrive|notion|github|gcal
+    enabled: bool = False
+    frequency: str = "hourly"
+    mode: str = "poll"
+    exclusion_rules: dict = {}
+    observation_config: dict = {}
+
+
+@app.get("/observation/sources")
+async def list_observation_sources(
+    clone_id: UUID = Query(...),
+    request: Request = None,
+    session: AsyncSession = Depends(get_session),
+):
+    """List all observation source configs for a clone."""
+    caller = request.headers.get("X-User-Id") if request else None
+    await _assert_clone_owner(clone_id, caller, session)
+
+    rows = await session.execute(
+        sql_text("""
+            SELECT id, source_type, enabled, mode, frequency, last_observed_at,
+                   last_observed_cursor, items_observed, items_ingested,
+                   exclusion_rules, observation_config, error_message, error_count,
+                   status, next_poll_at, created_at, updated_at
+            FROM observation_sources
+            WHERE clone_id = :cid
+            ORDER BY source_type
+        """),
+        {"cid": str(clone_id)},
+    )
+    sources = []
+    for r in rows.mappings().all():
+        s = dict(r)
+        s["id"] = str(s["id"])
+        for dt_field in ("last_observed_at", "next_poll_at", "created_at", "updated_at"):
+            if s.get(dt_field):
+                s[dt_field] = s[dt_field].isoformat()
+        sources.append(s)
+    return {"sources": sources}
+
+
+@app.post("/observation/sources")
+async def upsert_observation_source(
+    body: ObservationSourceCreate,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+):
+    """Create or update an observation source config."""
+    caller = request.headers.get("X-User-Id")
+    await _assert_clone_owner(body.clone_id, caller, session)
+
+    from doppel.brain.tasks.scheduler import compute_next_run
+    next_poll = compute_next_run(body.frequency) if body.enabled and body.mode == "poll" else None
+
+    await session.execute(
+        sql_text("""
+            INSERT INTO observation_sources
+              (clone_id, source_type, enabled, mode, frequency, exclusion_rules,
+               observation_config, next_poll_at)
+            VALUES
+              (:cid, :stype, :enabled, :mode, :freq, :excl::jsonb,
+               :config::jsonb, :next_poll)
+            ON CONFLICT (clone_id, source_type)
+            DO UPDATE SET
+              enabled = EXCLUDED.enabled,
+              mode = EXCLUDED.mode,
+              frequency = EXCLUDED.frequency,
+              exclusion_rules = EXCLUDED.exclusion_rules,
+              observation_config = EXCLUDED.observation_config,
+              next_poll_at = EXCLUDED.next_poll_at,
+              status = CASE WHEN EXCLUDED.enabled THEN 'idle' ELSE 'paused' END,
+              updated_at = NOW()
+        """),
+        {
+            "cid": str(body.clone_id),
+            "stype": body.source_type,
+            "enabled": body.enabled,
+            "mode": body.mode,
+            "freq": body.frequency,
+            "excl": json.dumps(body.exclusion_rules),
+            "config": json.dumps(body.observation_config),
+            "next_poll": next_poll,
+        },
+    )
+    await session.commit()
+    return {"ok": True, "source_type": body.source_type, "enabled": body.enabled}
+
+
+class ObservationSourcePatch(BaseModel):
+    enabled: bool | None = None
+    frequency: str | None = None
+    exclusion_rules: dict | None = None
+    observation_config: dict | None = None
+
+
+@app.patch("/observation/sources/{source_type}")
+async def patch_observation_source(
+    source_type: str,
+    body: ObservationSourcePatch,
+    clone_id: UUID = Query(...),
+    request: Request = None,
+    session: AsyncSession = Depends(get_session),
+):
+    """Toggle on/off, change frequency, or update exclusion rules."""
+    caller = request.headers.get("X-User-Id") if request else None
+    await _assert_clone_owner(clone_id, caller, session)
+
+    updates = []
+    params: dict = {"cid": str(clone_id), "stype": source_type}
+
+    if body.enabled is not None:
+        updates.append("enabled = :enabled")
+        updates.append(f"status = CASE WHEN :enabled THEN 'idle' ELSE 'paused' END")
+        params["enabled"] = body.enabled
+    if body.frequency is not None:
+        updates.append("frequency = :freq")
+        params["freq"] = body.frequency
+    if body.exclusion_rules is not None:
+        updates.append("exclusion_rules = :excl::jsonb")
+        params["excl"] = json.dumps(body.exclusion_rules)
+    if body.observation_config is not None:
+        updates.append("observation_config = :config::jsonb")
+        params["config"] = json.dumps(body.observation_config)
+
+    if not updates:
+        return {"ok": True}
+
+    updates.append("updated_at = NOW()")
+    set_clause = ", ".join(updates)
+
+    await session.execute(
+        sql_text(f"UPDATE observation_sources SET {set_clause} WHERE clone_id = :cid AND source_type = :stype"),
+        params,
+    )
+
+    # Recompute next_poll_at if frequency or enabled changed
+    if body.frequency is not None or body.enabled is not None:
+        row = await session.execute(
+            sql_text("SELECT enabled, mode, frequency FROM observation_sources WHERE clone_id = :cid AND source_type = :stype"),
+            {"cid": str(clone_id), "stype": source_type},
+        )
+        src = row.mappings().first()
+        if src and src["enabled"] and src["mode"] == "poll":
+            from doppel.brain.tasks.scheduler import compute_next_run
+            next_poll = compute_next_run(src["frequency"])
+            await session.execute(
+                sql_text("UPDATE observation_sources SET next_poll_at = :np WHERE clone_id = :cid AND source_type = :stype"),
+                {"np": next_poll, "cid": str(clone_id), "stype": source_type},
+            )
+
+    await session.commit()
+    return {"ok": True}
+
+
+@app.delete("/observation/sources/{source_type}")
+async def delete_observation_source(
+    source_type: str,
+    clone_id: UUID = Query(...),
+    request: Request = None,
+    session: AsyncSession = Depends(get_session),
+):
+    """Remove an observation source config (does NOT delete observed memories)."""
+    caller = request.headers.get("X-User-Id") if request else None
+    await _assert_clone_owner(clone_id, caller, session)
+
+    await session.execute(
+        sql_text("DELETE FROM observation_sources WHERE clone_id = :cid AND source_type = :stype"),
+        {"cid": str(clone_id), "stype": source_type},
+    )
+    await session.commit()
+    return {"ok": True}
+
+
+@app.post("/observation/trigger", status_code=202)
+async def trigger_observation(
+    clone_id: UUID = Query(...),
+    source_type: str = Query(...),
+    background_tasks: BackgroundTasks = None,
+    request: Request = None,
+    session: AsyncSession = Depends(get_session),
+):
+    """Force an immediate observation run (bypasses schedule)."""
+    caller = request.headers.get("X-User-Id") if request else None
+    await _assert_clone_owner(clone_id, caller, session)
+
+    background_tasks.add_task(_run_observation_background, clone_id, source_type)
+    return {"status": "queued", "clone_id": str(clone_id), "source_type": source_type}
+
+
+async def _run_observation_background(clone_id: UUID, source_type: str) -> None:
+    """Background task for manual observation trigger."""
+    from doppel.brain.db.connection import AsyncSessionLocal
+    from doppel.observation.engine import run_observation
+
+    async with AsyncSessionLocal() as session:
+        from doppel.brain.context import load_clone_keys
+        await load_clone_keys(session, clone_id)
+        await run_observation(clone_id, source_type, session)
+
+
+@app.get("/observation/activity")
+async def observation_activity(
+    clone_id: UUID = Query(...),
+    limit: int = Query(50, le=200),
+    offset: int = Query(0),
+    request: Request = None,
+    session: AsyncSession = Depends(get_session),
+):
+    """Paginated audit log of observation runs."""
+    caller = request.headers.get("X-User-Id") if request else None
+    await _assert_clone_owner(clone_id, caller, session)
+
+    rows = await session.execute(
+        sql_text("""
+            SELECT id, source_type, items_fetched, items_ingested, items_skipped,
+                   insights_extracted, duration_ms, error_message, started_at, completed_at
+            FROM observation_log
+            WHERE clone_id = :cid
+            ORDER BY started_at DESC
+            LIMIT :lim OFFSET :off
+        """),
+        {"cid": str(clone_id), "lim": limit, "off": offset},
+    )
+    activity = []
+    for r in rows.mappings().all():
+        a = dict(r)
+        a["id"] = str(a["id"])
+        for dt_field in ("started_at", "completed_at"):
+            if a.get(dt_field):
+                a[dt_field] = a[dt_field].isoformat()
+        activity.append(a)
+    return {"activity": activity}
+
+
+@app.get("/observation/stats")
+async def observation_stats(
+    clone_id: UUID = Query(...),
+    request: Request = None,
+    session: AsyncSession = Depends(get_session),
+):
+    """Aggregate observation statistics for a clone."""
+    caller = request.headers.get("X-User-Id") if request else None
+    await _assert_clone_owner(clone_id, caller, session)
+
+    # Per-source stats
+    rows = await session.execute(
+        sql_text("""
+            SELECT source_type, enabled, items_observed, items_ingested,
+                   last_observed_at, status
+            FROM observation_sources
+            WHERE clone_id = :cid
+        """),
+        {"cid": str(clone_id)},
+    )
+    sources = []
+    total_observed = 0
+    total_ingested = 0
+    for r in rows.mappings().all():
+        s = dict(r)
+        if s.get("last_observed_at"):
+            s["last_observed_at"] = s["last_observed_at"].isoformat()
+        sources.append(s)
+        total_observed += s.get("items_observed", 0)
+        total_ingested += s.get("items_ingested", 0)
+
+    # Pending insights count
+    pending_row = await session.execute(
+        sql_text("SELECT COUNT(*) as cnt FROM pending_insights WHERE clone_id = :cid AND status = 'pending'"),
+        {"cid": str(clone_id)},
+    )
+    pending_count = pending_row.scalar() or 0
+
+    return {
+        "total_observed": total_observed,
+        "total_ingested": total_ingested,
+        "pending_insights": pending_count,
+        "sources": sources,
+    }
+
+
+# ── Insight review endpoints ──────────────────────────────────────────────
+
+@app.get("/observation/insights")
+async def list_insights(
+    clone_id: UUID = Query(...),
+    status: str = Query("pending"),
+    limit: int = Query(20, le=100),
+    request: Request = None,
+    session: AsyncSession = Depends(get_session),
+):
+    """List pending (or approved/rejected) insights for review."""
+    caller = request.headers.get("X-User-Id") if request else None
+    await _assert_clone_owner(clone_id, caller, session)
+
+    rows = await session.execute(
+        sql_text("""
+            SELECT id, insight_type, content, confidence, source_type,
+                   source_episode_ids, status, metadata, created_at
+            FROM pending_insights
+            WHERE clone_id = :cid AND status = :status
+            ORDER BY created_at DESC
+            LIMIT :lim
+        """),
+        {"cid": str(clone_id), "status": status, "lim": limit},
+    )
+    insights = []
+    for r in rows.mappings().all():
+        i = dict(r)
+        i["id"] = str(i["id"])
+        if i.get("source_episode_ids"):
+            i["source_episode_ids"] = [str(eid) for eid in i["source_episode_ids"]]
+        if i.get("created_at"):
+            i["created_at"] = i["created_at"].isoformat()
+        insights.append(i)
+    return {"insights": insights}
+
+
+class InsightAction(BaseModel):
+    action: str  # 'approve' | 'reject'
+    edited_content: str | None = None
+
+
+@app.patch("/observation/insights/{insight_id}")
+async def review_insight(
+    insight_id: UUID,
+    body: InsightAction,
+    request: Request = None,
+    session: AsyncSession = Depends(get_session),
+):
+    """Approve or reject a single insight."""
+    # Look up insight to get clone_id
+    row = await session.execute(
+        sql_text("SELECT clone_id, insight_type, content, confidence, metadata FROM pending_insights WHERE id = :iid"),
+        {"iid": str(insight_id)},
+    )
+    insight = row.mappings().first()
+    if not insight:
+        raise HTTPException(status_code=404, detail="Insight not found")
+
+    caller = request.headers.get("X-User-Id") if request else None
+    await _assert_clone_owner(UUID(str(insight["clone_id"])), caller, session)
+
+    new_status = "approved" if body.action == "approve" else "rejected"
+    final_content = body.edited_content or insight["content"]
+
+    await session.execute(
+        sql_text("""
+            UPDATE pending_insights
+            SET status = :status, content = :content, reviewed_at = NOW()
+            WHERE id = :iid
+        """),
+        {"status": new_status, "content": final_content, "iid": str(insight_id)},
+    )
+
+    # If approved, store in the appropriate memory table
+    if body.action == "approve":
+        await _commit_insight(
+            session=session,
+            clone_id=UUID(str(insight["clone_id"])),
+            insight_type=insight["insight_type"],
+            content=final_content,
+            confidence=insight["confidence"],
+            metadata=insight["metadata"] or {},
+        )
+
+    await session.commit()
+    return {"ok": True, "status": new_status}
+
+
+class BulkInsightAction(BaseModel):
+    insight_ids: list[str]
+    action: str  # 'approve' | 'reject'
+
+
+@app.post("/observation/insights/bulk-action")
+async def bulk_review_insights(
+    body: BulkInsightAction,
+    request: Request = None,
+    session: AsyncSession = Depends(get_session),
+):
+    """Batch approve or reject multiple insights."""
+    if not body.insight_ids:
+        return {"ok": True, "processed": 0}
+
+    # Verify ownership via first insight
+    first_row = await session.execute(
+        sql_text("SELECT clone_id FROM pending_insights WHERE id = :iid"),
+        {"iid": body.insight_ids[0]},
+    )
+    first = first_row.mappings().first()
+    if not first:
+        raise HTTPException(status_code=404, detail="Insight not found")
+
+    caller = request.headers.get("X-User-Id") if request else None
+    await _assert_clone_owner(UUID(str(first["clone_id"])), caller, session)
+
+    new_status = "approved" if body.action == "approve" else "rejected"
+    processed = 0
+
+    for iid in body.insight_ids:
+        row = await session.execute(
+            sql_text("SELECT clone_id, insight_type, content, confidence, metadata FROM pending_insights WHERE id = :iid AND status = 'pending'"),
+            {"iid": iid},
+        )
+        insight = row.mappings().first()
+        if not insight:
+            continue
+
+        await session.execute(
+            sql_text("UPDATE pending_insights SET status = :status, reviewed_at = NOW() WHERE id = :iid"),
+            {"status": new_status, "iid": iid},
+        )
+
+        if body.action == "approve":
+            await _commit_insight(
+                session=session,
+                clone_id=UUID(str(insight["clone_id"])),
+                insight_type=insight["insight_type"],
+                content=insight["content"],
+                confidence=insight["confidence"],
+                metadata=insight["metadata"] or {},
+            )
+        processed += 1
+
+    await session.commit()
+    return {"ok": True, "processed": processed, "status": new_status}
+
+
+async def _commit_insight(
+    session: AsyncSession,
+    clone_id: UUID,
+    insight_type: str,
+    content: str,
+    confidence: float,
+    metadata: dict,
+) -> None:
+    """Store an approved insight in the appropriate memory table."""
+    from uuid import uuid4
+
+    if insight_type == "semantic_fact":
+        domain = metadata.get("domain", "general")
+        await session.execute(
+            sql_text("""
+                INSERT INTO semantic_memory (id, clone_id, fact, domain, confidence)
+                VALUES (:id, :cid, :fact, :domain, :conf)
+            """),
+            {"id": str(uuid4()), "cid": str(clone_id), "fact": content, "domain": domain, "conf": confidence},
+        )
+    elif insight_type == "procedural_pattern":
+        pattern_type = metadata.get("pattern_type", "decision_heuristics")
+        await session.execute(
+            sql_text("""
+                INSERT INTO procedural_memory (id, clone_id, pattern_type, description, confidence)
+                VALUES (:id, :cid, :ptype, :desc, :conf)
+            """),
+            {"id": str(uuid4()), "cid": str(clone_id), "ptype": pattern_type, "desc": content, "conf": confidence},
+        )
+    elif insight_type == "relational_update":
+        contact = metadata.get("contact_identifier", "unknown")
+        await session.execute(
+            sql_text("""
+                INSERT INTO relational_memory (id, clone_id, contact_identifier, relationship_type, interaction_history)
+                VALUES (:id, :cid, :contact, :rel_type, :history)
+                ON CONFLICT (clone_id, contact_identifier)
+                DO UPDATE SET interaction_history = relational_memory.interaction_history || ' ' || :history,
+                              updated_at = NOW()
+            """),
+            {
+                "id": str(uuid4()),
+                "cid": str(clone_id),
+                "contact": contact,
+                "rel_type": metadata.get("relationship_type", "colleague"),
+                "history": content,
+            },
+        )

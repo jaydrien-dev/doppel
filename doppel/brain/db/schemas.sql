@@ -1029,3 +1029,80 @@ ALTER TABLE clone_identity ADD COLUMN IF NOT EXISTS feedback_count INT NOT NULL 
 -- DECISION DOMAIN — per-heuristic domain tagging for the Decisions page
 -- -------------------------------------------------------------------------
 ALTER TABLE procedural_memory ADD COLUMN IF NOT EXISTS domain TEXT DEFAULT 'general';
+
+
+-- ---------------------------------------------------------------------------
+-- PASSIVE OBSERVATION — observation_sources
+-- Per-clone configuration for each observed data source.
+-- Tracks cursor position, frequency, and exclusion rules.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS observation_sources (
+    id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    clone_id            UUID NOT NULL REFERENCES clone_identity(clone_id) ON DELETE CASCADE,
+    source_type         TEXT NOT NULL,                   -- 'gmail'|'slack'|'gdrive'|'notion'|'github'|'gcal'
+    enabled             BOOLEAN NOT NULL DEFAULT FALSE,  -- OFF by default (privacy)
+    mode                TEXT NOT NULL DEFAULT 'poll',     -- 'push'|'poll'
+    frequency           TEXT NOT NULL DEFAULT 'hourly',   -- 'realtime'|'hourly'|'daily'
+    last_observed_at    TIMESTAMPTZ,
+    last_observed_cursor TEXT,                            -- source-specific cursor (Gmail historyId, etc.)
+    items_observed      BIGINT NOT NULL DEFAULT 0,
+    items_ingested      BIGINT NOT NULL DEFAULT 0,
+    exclusion_rules     JSONB NOT NULL DEFAULT '{}',     -- {channels:[], contacts:[], topics:[], keywords:[]}
+    observation_config  JSONB NOT NULL DEFAULT '{}',     -- source-specific config
+    error_message       TEXT,
+    error_count         INT NOT NULL DEFAULT 0,
+    status              TEXT NOT NULL DEFAULT 'idle',    -- 'idle'|'running'|'error'|'paused'
+    next_poll_at        TIMESTAMPTZ,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (clone_id, source_type)
+);
+CREATE INDEX IF NOT EXISTS obs_sources_clone_idx ON observation_sources (clone_id, enabled);
+CREATE INDEX IF NOT EXISTS obs_sources_poll_idx ON observation_sources (next_poll_at) WHERE enabled = TRUE AND mode = 'poll';
+
+
+-- ---------------------------------------------------------------------------
+-- PASSIVE OBSERVATION — observation_log
+-- Audit trail of every observation run (what was fetched, ingested, skipped).
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS observation_log (
+    id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    clone_id            UUID NOT NULL REFERENCES clone_identity(clone_id) ON DELETE CASCADE,
+    source_type         TEXT NOT NULL,
+    items_fetched       INT NOT NULL DEFAULT 0,
+    items_ingested      INT NOT NULL DEFAULT 0,
+    items_skipped       INT NOT NULL DEFAULT 0,
+    insights_extracted  INT NOT NULL DEFAULT 0,
+    duration_ms         INT,
+    error_message       TEXT,
+    started_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    completed_at        TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS obs_log_clone_idx ON observation_log (clone_id, started_at DESC);
+
+
+-- ---------------------------------------------------------------------------
+-- PASSIVE OBSERVATION — pending_insights
+-- Extracted knowledge awaiting owner review before becoming permanent memory.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS pending_insights (
+    id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    clone_id            UUID NOT NULL REFERENCES clone_identity(clone_id) ON DELETE CASCADE,
+    insight_type        TEXT NOT NULL,                   -- 'semantic_fact'|'procedural_pattern'|'relational_update'|'topic_expertise'
+    content             TEXT NOT NULL,
+    confidence          FLOAT NOT NULL DEFAULT 0.7,
+    source_type         TEXT NOT NULL,
+    source_episode_ids  UUID[],
+    status              TEXT NOT NULL DEFAULT 'pending', -- 'pending'|'approved'|'rejected'|'auto_approved'
+    metadata            JSONB NOT NULL DEFAULT '{}',
+    reviewed_at         TIMESTAMPTZ,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS pending_insights_clone_idx ON pending_insights (clone_id, status, created_at DESC);
+
+-- Observation source tag on episodic memories
+ALTER TABLE episodic_memory ADD COLUMN IF NOT EXISTS observation_source TEXT;
+
+-- Observation master toggle + auto-approve threshold on clone identity
+ALTER TABLE clone_identity ADD COLUMN IF NOT EXISTS observation_enabled BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE clone_identity ADD COLUMN IF NOT EXISTS auto_approve_threshold FLOAT NOT NULL DEFAULT 0.85;

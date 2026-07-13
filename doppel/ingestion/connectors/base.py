@@ -24,6 +24,7 @@ class RawItem(BaseModel):
     created_at: datetime
     metadata: dict = {}                 # subject, recipients, thread_id, etc.
     source_ref: str | None = None       # filename for uploads, thread_id for slack, etc.
+    observation_source: str | None = None  # e.g. 'observation:gmail' — set by passive observation engine
 
 
 class BaseConnector(ABC):

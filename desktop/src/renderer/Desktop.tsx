@@ -587,7 +587,7 @@ function CloneChat({ clone, userId }: { clone: Clone; userId: string }) {
   const [input,               setInput]               = useState("");
   const [shareCopied,         setShareCopied]         = useState(false);
   const [moreOpen,            setMoreOpen]            = useState(false);
-  const [activeView,          setActiveView]          = useState<"chat"|"activity"|"connectors">("chat");
+  const [activeView,          setActiveView]          = useState<"chat"|"activity"|"connectors"|"observations">("chat");
   const [showAutomateModal,   setShowAutomateModal]   = useState(false);
   const [automateInstruction, setAutomateInstruction] = useState("");
   const [knowledgeAreas,      setKnowledgeAreas]      = useState<{area:string;depth:string}[]>([]);
@@ -740,7 +740,7 @@ function CloneChat({ clone, userId }: { clone: Clone; userId: string }) {
         </div>
         {/* Tab bar */}
         <div style={{ maxWidth:1080,margin:"0 auto",padding:"0 16px 10px",display:"flex",gap:2 }}>
-          {(["chat","activity","connectors"] as const).map(v => (
+          {(["chat","activity","connectors","observations"] as const).map(v => (
             <button key={v} onClick={()=>setActiveView(v)} style={{ fontSize:12,fontWeight:500,padding:"5px 14px",borderRadius:8,border:"none",background:activeView===v?"rgba(255,255,255,0.09)":"transparent",color:activeView===v?"rgba(255,255,255,0.82)":"rgba(255,255,255,0.30)",cursor:"pointer",fontFamily:"inherit",transition:"all 180ms",textTransform:"capitalize" }}>{v}</button>
           ))}
         </div>
@@ -880,6 +880,8 @@ function CloneChat({ clone, userId }: { clone: Clone; userId: string }) {
         </>
       ) : activeView==="connectors" ? (
         <ConnectorsPanel cloneId={clone.clone_id} />
+      ) : activeView==="observations" ? (
+        <ObservationsPanel cloneId={clone.clone_id} />
       ) : (
         <ActivityPanel cloneId={clone.clone_id} />
       )}
@@ -1027,6 +1029,145 @@ function ConnectorsPanel({ cloneId }: { cloneId: string }) {
       })}
 
       {loading && <p style={{ fontSize:12,color:"rgba(255,255,255,0.25)",textAlign:"center",padding:"12px 0" }}>Loading...</p>}
+    </div>
+  );
+}
+
+// ── ObservationsPanel ─────────────────────────────────────────────────────────
+
+interface ObsSource { source_type: string; enabled: boolean; items_observed: number; items_ingested: number; last_observed_at: string | null; status: string; }
+interface ObsActivity { id: string; source_type: string; items_fetched: number; items_ingested: number; items_skipped: number; insights_extracted: number; duration_ms: number | null; error_message: string | null; started_at: string; }
+interface PendingInsight { id: string; insight_type: string; content: string; confidence: number; source_type: string; created_at: string; metadata: Record<string, unknown>; }
+
+const OBS_SOURCE_LABELS: Record<string, string> = { gmail: "Gmail", slack: "Slack", gdrive: "Google Drive", github: "GitHub", notion: "Notion", gcal: "Calendar" };
+const OBS_SOURCE_LIST = ["gmail", "slack", "gdrive", "github", "notion", "gcal"];
+
+function ObservationsPanel({ cloneId }: { cloneId: string }) {
+  const [sources, setSources] = useState<ObsSource[]>([]);
+  const [activity, setActivity] = useState<ObsActivity[]>([]);
+  const [insights, setInsights] = useState<PendingInsight[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    try {
+      const [srcRes, actRes, insRes] = await Promise.all([
+        api(`/observation/sources?clone_id=${cloneId}`),
+        api(`/observation/activity?clone_id=${cloneId}&limit=20`),
+        api(`/observation/insights?clone_id=${cloneId}&status=pending&limit=20`),
+      ]);
+      if (srcRes.ok) { const d = await srcRes.json(); setSources(d.sources || []); }
+      if (actRes.ok) { const d = await actRes.json(); setActivity(d.activity || []); }
+      if (insRes.ok) { const d = await insRes.json(); setInsights(d.insights || []); }
+    } catch {}
+    setLoading(false);
+  }, [cloneId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const toggleSource = async (sourceType: string, currentlyEnabled: boolean) => {
+    const existing = sources.find(s => s.source_type === sourceType);
+    if (existing) {
+      await api(`/observation/sources/${sourceType}?clone_id=${cloneId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled: !currentlyEnabled }) });
+    } else {
+      await api(`/observation/sources`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clone_id: cloneId, source_type: sourceType, enabled: true, frequency: "hourly" }) });
+    }
+    load();
+  };
+
+  const triggerSync = async (sourceType: string) => {
+    await api(`/observation/trigger?clone_id=${cloneId}&source_type=${sourceType}`, { method: "POST" });
+    load();
+  };
+
+  const reviewInsight = async (insightId: string, action: "approve" | "reject") => {
+    await api(`/observation/insights/${insightId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action }) });
+    setInsights(prev => prev.filter(i => i.id !== insightId));
+  };
+
+  const timeAgo = (iso: string | null) => {
+    if (!iso) return "—";
+    const diff = Date.now() - new Date(iso).getTime();
+    if (diff < 60000) return "just now";
+    if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
+    if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
+    return `${Math.floor(diff / 86400000)}d ago`;
+  };
+
+  return (
+    <div style={{ flex: 1, overflow: "auto", padding: "20px 24px" }}>
+      <div style={{ maxWidth: 720, margin: "0 auto" }}>
+
+        {/* Sources */}
+        <p style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.12em", color: "rgba(255,255,255,0.25)", margin: "0 0 12px" }}>Sources</p>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 28 }}>
+          {OBS_SOURCE_LIST.map(stype => {
+            const src = sources.find(s => s.source_type === stype);
+            const enabled = src?.enabled ?? false;
+            const status = src?.status ?? "idle";
+            return (
+              <div key={stype} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", borderRadius: 12, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)" }}>
+                <div style={{ width: 6, height: 6, borderRadius: "50%", background: enabled && status !== "error" ? "rgba(52,211,153,0.70)" : "rgba(255,255,255,0.18)", flexShrink: 0 }} />
+                <span style={{ fontSize: 13, color: "rgba(255,255,255,0.75)", flex: 1, fontWeight: 500 }}>{OBS_SOURCE_LABELS[stype] || stype}</span>
+                {src && <span style={{ fontSize: 11, color: "rgba(255,255,255,0.30)" }}>{timeAgo(src.last_observed_at)}</span>}
+                {src && <span style={{ fontSize: 11, color: "rgba(255,255,255,0.25)" }}>{src.items_ingested.toLocaleString()} learned</span>}
+                {enabled && (
+                  <button onClick={() => triggerSync(stype)} style={{ fontSize: 10, padding: "3px 10px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.45)", cursor: "pointer", fontFamily: "inherit" }}>Sync</button>
+                )}
+                <button onClick={() => toggleSource(stype, enabled)} style={{ fontSize: 10, padding: "3px 10px", borderRadius: 6, border: `1px solid ${enabled ? "rgba(52,211,153,0.25)" : "rgba(255,255,255,0.10)"}`, background: enabled ? "rgba(52,211,153,0.08)" : "rgba(255,255,255,0.04)", color: enabled ? "rgba(52,211,153,0.75)" : "rgba(255,255,255,0.40)", cursor: "pointer", fontFamily: "inherit" }}>
+                  {enabled ? "On" : "Off"}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Pending insights */}
+        {insights.length > 0 && (
+          <>
+            <p style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.12em", color: "rgba(255,255,255,0.25)", margin: "0 0 12px" }}>
+              Pending review <span style={{ color: "rgba(255,255,255,0.40)" }}>({insights.length})</span>
+            </p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 28 }}>
+              {insights.map(insight => (
+                <div key={insight.id} style={{ padding: "12px 14px", borderRadius: 12, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)" }}>
+                  <p style={{ margin: "0 0 6px", fontSize: 13, color: "rgba(255,255,255,0.75)", lineHeight: 1.5 }}>"{insight.content}"</p>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 10, color: "rgba(255,255,255,0.25)" }}>from: {OBS_SOURCE_LABELS[insight.source_type] || insight.source_type}</span>
+                    <span style={{ fontSize: 10, color: "rgba(255,255,255,0.25)" }}>confidence: {(insight.confidence * 100).toFixed(0)}%</span>
+                    <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 4, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.35)" }}>{insight.insight_type.replace(/_/g, " ")}</span>
+                    <div style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
+                      <button onClick={() => reviewInsight(insight.id, "approve")} style={{ fontSize: 10, padding: "3px 10px", borderRadius: 6, border: "1px solid rgba(52,211,153,0.25)", background: "rgba(52,211,153,0.08)", color: "rgba(52,211,153,0.75)", cursor: "pointer", fontFamily: "inherit" }}>Approve</button>
+                      <button onClick={() => reviewInsight(insight.id, "reject")} style={{ fontSize: 10, padding: "3px 10px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.40)", cursor: "pointer", fontFamily: "inherit" }}>Reject</button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+
+        {/* Activity feed */}
+        <p style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.12em", color: "rgba(255,255,255,0.25)", margin: "0 0 12px" }}>Activity</p>
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          {activity.length === 0 && !loading && (
+            <p style={{ fontSize: 12, color: "rgba(255,255,255,0.25)", textAlign: "center", padding: "20px 0" }}>No observation activity yet. Enable a source above to start.</p>
+          )}
+          {activity.map(a => (
+            <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 14px", borderRadius: 10, background: a.error_message ? "rgba(248,113,113,0.04)" : "rgba(255,255,255,0.02)", border: `1px solid ${a.error_message ? "rgba(248,113,113,0.12)" : "rgba(255,255,255,0.05)"}` }}>
+              <div style={{ width: 4, height: 4, borderRadius: "50%", background: a.error_message ? "rgba(248,113,113,0.60)" : "rgba(255,255,255,0.20)", flexShrink: 0 }} />
+              <span style={{ fontSize: 12, color: "rgba(255,255,255,0.55)", flex: 1 }}>
+                {a.error_message
+                  ? `Error observing ${OBS_SOURCE_LABELS[a.source_type] || a.source_type}`
+                  : `Observed ${a.items_fetched} items from ${OBS_SOURCE_LABELS[a.source_type] || a.source_type}, ingested ${a.items_ingested}${a.insights_extracted > 0 ? `, ${a.insights_extracted} insights` : ""}`}
+              </span>
+              <span style={{ fontSize: 10, color: "rgba(255,255,255,0.20)", flexShrink: 0 }}>{timeAgo(a.started_at)}</span>
+              {a.duration_ms != null && <span style={{ fontSize: 10, color: "rgba(255,255,255,0.15)" }}>{(a.duration_ms / 1000).toFixed(1)}s</span>}
+            </div>
+          ))}
+        </div>
+
+        {loading && <p style={{ fontSize: 12, color: "rgba(255,255,255,0.25)", textAlign: "center", padding: "12px 0" }}>Loading...</p>}
+      </div>
     </div>
   );
 }
