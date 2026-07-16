@@ -1941,44 +1941,70 @@ function TrainingPanel({ cloneId, handle }: { cloneId: string; handle: string })
     }
   }, []);
 
+  const [obsMsg, setObsMsg] = useState<{ text: string; type: "ok" | "err" } | null>(null);
+  const showObsMsg = (text: string, type: "ok" | "err" = "ok") => { setObsMsg({ text, type }); setTimeout(() => setObsMsg(null), 4000); };
+
   const toggleSource = async (sourceType: string, currentlyEnabled: boolean) => {
-    // Screenwatch: also start/stop the desktop capture timer
-    if (sourceType === "screenwatch" && doppel) {
-      if (currentlyEnabled) {
-        await doppel.stopScreenwatch();
-        setSwStatus(prev => prev ? { ...prev, enabled: false, running: false } : null);
-      } else {
-        // Ensure backend source config exists
-        const existing = sources.find(s => s.source_type === "screenwatch");
-        if (!existing) {
-          await api(`/observation/sources`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clone_id: cloneId, source_type: "screenwatch", enabled: true, mode: "push", frequency: "realtime" }) });
+    try {
+      // Screenwatch: also start/stop the desktop capture timer
+      if (sourceType === "screenwatch" && doppel) {
+        if (currentlyEnabled) {
+          await doppel.stopScreenwatch();
+          await api(`/observation/sources/screenwatch?clone_id=${cloneId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled: false }) });
+          setSwStatus(prev => prev ? { ...prev, enabled: false, running: false } : null);
+          showObsMsg("Screen Watch stopped");
         } else {
-          await api(`/observation/sources/screenwatch?clone_id=${cloneId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled: true }) });
+          // Create or enable backend source config FIRST
+          const existing = sources.find(s => s.source_type === "screenwatch");
+          const res = existing
+            ? await api(`/observation/sources/screenwatch?clone_id=${cloneId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled: true }) })
+            : await api(`/observation/sources`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clone_id: cloneId, source_type: "screenwatch", enabled: true, mode: "push", frequency: "realtime" }) });
+          if (!res.ok) { showObsMsg("Failed to enable Screen Watch", "err"); return; }
+          await doppel.startScreenwatch(cloneId);
+          setSwStatus({ enabled: true, running: true });
+          showObsMsg("Screen Watch started — capturing every 5s");
         }
-        await doppel.startScreenwatch(cloneId);
-        setSwStatus({ enabled: true, running: true });
         load();
         return;
       }
-    }
 
-    const existing = sources.find(s => s.source_type === sourceType);
-    if (existing) {
-      await api(`/observation/sources/${sourceType}?clone_id=${cloneId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled: !currentlyEnabled }) });
-    } else {
-      await api(`/observation/sources`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clone_id: cloneId, source_type: sourceType, enabled: true, frequency: "hourly" }) });
+      // All other sources
+      const existing = sources.find(s => s.source_type === sourceType);
+      const newEnabled = !currentlyEnabled;
+      const res = existing
+        ? await api(`/observation/sources/${sourceType}?clone_id=${cloneId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled: newEnabled }) })
+        : await api(`/observation/sources`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clone_id: cloneId, source_type: sourceType, enabled: true, mode: "poll", frequency: "hourly" }) });
+      if (!res.ok) {
+        const detail = await res.text().catch(() => "");
+        showObsMsg(`Failed to toggle ${OBS_SOURCE_LABELS[sourceType] || sourceType}: ${detail}`, "err");
+        return;
+      }
+      showObsMsg(newEnabled ? `${OBS_SOURCE_LABELS[sourceType] || sourceType} observation enabled` : `${OBS_SOURCE_LABELS[sourceType] || sourceType} observation disabled`);
+      // Auto-trigger first sync when enabling a poll source
+      if (newEnabled && sourceType !== "screenwatch") {
+        api(`/observation/trigger?clone_id=${cloneId}&source_type=${sourceType}`, { method: "POST" }).catch(() => {});
+      }
+      load();
+    } catch (e) {
+      showObsMsg(`Error: ${e}`, "err");
     }
-    load();
   };
 
   const triggerSync = async (sourceType: string) => {
-    await api(`/observation/trigger?clone_id=${cloneId}&source_type=${sourceType}`, { method: "POST" });
-    load();
+    try {
+      const res = await api(`/observation/trigger?clone_id=${cloneId}&source_type=${sourceType}`, { method: "POST" });
+      if (res.ok) showObsMsg(`Syncing ${OBS_SOURCE_LABELS[sourceType] || sourceType}...`);
+      else showObsMsg(`Sync failed: ${await res.text().catch(() => "")}`, "err");
+    } catch (e) { showObsMsg(`Sync error: ${e}`, "err"); }
+    setTimeout(load, 3000); // reload after sync has time to run
   };
 
   const reviewInsight = async (insightId: string, action: "approve" | "reject") => {
-    await api(`/observation/insights/${insightId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action }) });
-    setInsights(prev => prev.filter(i => i.id !== insightId));
+    try {
+      await api(`/observation/insights/${insightId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action }) });
+      setInsights(prev => prev.filter(i => i.id !== insightId));
+      showObsMsg(action === "approve" ? "Insight approved" : "Insight dismissed");
+    } catch { showObsMsg("Failed to review insight", "err"); }
   };
 
   const timeAgo = (iso: string | null) => {
@@ -2008,27 +2034,41 @@ function TrainingPanel({ cloneId, handle }: { cloneId: string; handle: string })
           </div>
         </div>
 
+        {/* Observation status toast */}
+        {obsMsg && (
+          <div style={{ marginBottom: 14, padding: "10px 16px", borderRadius: 10, background: obsMsg.type === "err" ? "rgba(248,113,113,0.10)" : "rgba(52,211,153,0.10)", border: `1px solid ${obsMsg.type === "err" ? "rgba(248,113,113,0.25)" : "rgba(52,211,153,0.25)"}`, fontSize: 13, color: obsMsg.type === "err" ? "rgba(248,113,113,0.85)" : "rgba(52,211,153,0.85)" }}>
+            {obsMsg.text}
+          </div>
+        )}
+
         {/* Observations */}
         <p style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.12em", color: "rgba(255,255,255,0.25)", margin: "0 0 12px" }}>Observations</p>
-        <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 28 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 28 }}>
           {OBS_SOURCE_LIST.map(stype => {
             const src = sources.find(s => s.source_type === stype);
             const enabled = stype === "screenwatch" ? (swStatus?.running ?? src?.enabled ?? false) : (src?.enabled ?? false);
             const status = src?.status ?? "idle";
             const isScreenwatch = stype === "screenwatch";
             const isConnected = isScreenwatch || connectedIds.has(stype);
+            const hasError = status === "error";
             return (
-              <div key={stype} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", borderRadius: 12, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", opacity: isConnected ? 1 : 0.45 }}>
-                <div style={{ width: 6, height: 6, borderRadius: "50%", background: enabled && status !== "error" ? "rgba(52,211,153,0.70)" : "rgba(255,255,255,0.18)", flexShrink: 0 }} />
-                <span style={{ fontSize: 13, color: "rgba(255,255,255,0.75)", flex: 1, fontWeight: 500 }}>{OBS_SOURCE_LABELS[stype] || stype}</span>
-                {src && <span style={{ fontSize: 11, color: "rgba(255,255,255,0.30)" }}>{timeAgo(src.last_observed_at)}</span>}
-                {src && <span style={{ fontSize: 11, color: "rgba(255,255,255,0.25)" }}>{src.items_ingested.toLocaleString()} learned</span>}
-                {!isConnected && <span style={{ fontSize: 10, color: "rgba(255,255,255,0.25)" }}>Not connected</span>}
+              <div key={stype} style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 18px", borderRadius: 14, background: enabled ? "rgba(255,255,255,0.05)" : "rgba(255,255,255,0.025)", border: `1px solid ${hasError ? "rgba(248,113,113,0.20)" : enabled ? "rgba(52,211,153,0.15)" : "rgba(255,255,255,0.08)"}`, opacity: isConnected ? 1 : 0.4, transition: "all 200ms" }}>
+                <div style={{ width: 8, height: 8, borderRadius: "50%", background: hasError ? "rgba(248,113,113,0.70)" : enabled ? "rgba(52,211,153,0.80)" : "rgba(255,255,255,0.15)", flexShrink: 0, boxShadow: enabled && !hasError ? "0 0 6px rgba(52,211,153,0.30)" : "none" }} />
+                <span style={{ fontSize: 14, color: "rgba(255,255,255,0.85)", flex: 1, fontWeight: 500 }}>{OBS_SOURCE_LABELS[stype] || stype}</span>
+                {src && src.last_observed_at && <span style={{ fontSize: 11, color: "rgba(255,255,255,0.35)" }}>{timeAgo(src.last_observed_at)}</span>}
+                {src && src.items_ingested > 0 && <span style={{ fontSize: 11, color: "rgba(255,255,255,0.30)" }}>{src.items_ingested.toLocaleString()} learned</span>}
+                {!isConnected && <span style={{ fontSize: 11, color: "rgba(255,255,255,0.30)", fontStyle: "italic" }}>Not connected</span>}
                 {isConnected && enabled && !isScreenwatch && (
-                  <button onClick={() => triggerSync(stype)} style={{ fontSize: 10, padding: "3px 10px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.45)", cursor: "pointer", fontFamily: "inherit" }}>Sync</button>
+                  <button onClick={() => triggerSync(stype)} style={{ fontSize: 12, fontWeight: 500, padding: "6px 16px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.18)", background: "rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.65)", cursor: "pointer", fontFamily: "inherit", transition: "all 150ms" }}
+                    onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,255,255,0.14)"; e.currentTarget.style.color = "rgba(255,255,255,0.85)"; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = "rgba(255,255,255,0.08)"; e.currentTarget.style.color = "rgba(255,255,255,0.65)"; }}
+                  >Sync now</button>
                 )}
                 {isConnected && (
-                  <button onClick={() => toggleSource(stype, enabled)} style={{ fontSize: 10, padding: "3px 10px", borderRadius: 6, border: `1px solid ${enabled ? "rgba(52,211,153,0.25)" : "rgba(255,255,255,0.10)"}`, background: enabled ? "rgba(52,211,153,0.08)" : "rgba(255,255,255,0.04)", color: enabled ? "rgba(52,211,153,0.75)" : "rgba(255,255,255,0.40)", cursor: "pointer", fontFamily: "inherit" }}>
+                  <button onClick={() => toggleSource(stype, enabled)} style={{ fontSize: 12, fontWeight: 500, padding: "6px 20px", borderRadius: 8, border: `1px solid ${enabled ? "rgba(52,211,153,0.35)" : "rgba(255,255,255,0.20)"}`, background: enabled ? "rgba(52,211,153,0.15)" : "rgba(255,255,255,0.08)", color: enabled ? "rgba(52,211,153,0.90)" : "rgba(255,255,255,0.60)", cursor: "pointer", fontFamily: "inherit", transition: "all 150ms", minWidth: 56, textAlign: "center" as const }}
+                    onMouseEnter={e => { if (enabled) { e.currentTarget.style.background = "rgba(52,211,153,0.22)"; } else { e.currentTarget.style.background = "rgba(255,255,255,0.14)"; e.currentTarget.style.color = "rgba(255,255,255,0.85)"; } }}
+                    onMouseLeave={e => { if (enabled) { e.currentTarget.style.background = "rgba(52,211,153,0.15)"; } else { e.currentTarget.style.background = "rgba(255,255,255,0.08)"; e.currentTarget.style.color = "rgba(255,255,255,0.60)"; } }}
+                  >
                     {enabled ? "On" : "Off"}
                   </button>
                 )}
@@ -2043,17 +2083,23 @@ function TrainingPanel({ cloneId, handle }: { cloneId: string; handle: string })
             <p style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.12em", color: "rgba(255,255,255,0.25)", margin: "0 0 12px" }}>
               Pending review <span style={{ color: "rgba(255,255,255,0.40)" }}>({insights.length})</span>
             </p>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 28 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 28 }}>
               {insights.map(insight => (
-                <div key={insight.id} style={{ padding: "12px 14px", borderRadius: 12, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)" }}>
-                  <p style={{ margin: "0 0 6px", fontSize: 13, color: "rgba(255,255,255,0.75)", lineHeight: 1.5 }}>"{insight.content}"</p>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                    <span style={{ fontSize: 10, color: "rgba(255,255,255,0.25)" }}>from: {OBS_SOURCE_LABELS[insight.source_type] || insight.source_type}</span>
-                    <span style={{ fontSize: 10, color: "rgba(255,255,255,0.25)" }}>confidence: {(insight.confidence * 100).toFixed(0)}%</span>
-                    <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 4, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.35)" }}>{insight.insight_type.replace(/_/g, " ")}</span>
-                    <div style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
-                      <button onClick={() => reviewInsight(insight.id, "approve")} style={{ fontSize: 10, padding: "3px 10px", borderRadius: 6, border: "1px solid rgba(52,211,153,0.25)", background: "rgba(52,211,153,0.08)", color: "rgba(52,211,153,0.75)", cursor: "pointer", fontFamily: "inherit" }}>Approve</button>
-                      <button onClick={() => reviewInsight(insight.id, "reject")} style={{ fontSize: 10, padding: "3px 10px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.40)", cursor: "pointer", fontFamily: "inherit" }}>Reject</button>
+                <div key={insight.id} style={{ padding: "14px 18px", borderRadius: 14, background: "rgba(255,255,255,0.035)", border: "1px solid rgba(255,255,255,0.09)" }}>
+                  <p style={{ margin: "0 0 10px", fontSize: 14, color: "rgba(255,255,255,0.80)", lineHeight: 1.5 }}>"{insight.content}"</p>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 11, color: "rgba(255,255,255,0.30)" }}>{OBS_SOURCE_LABELS[insight.source_type] || insight.source_type}</span>
+                    <span style={{ fontSize: 11, color: "rgba(255,255,255,0.30)" }}>{(insight.confidence * 100).toFixed(0)}% confidence</span>
+                    <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 6, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)", color: "rgba(255,255,255,0.40)" }}>{insight.insight_type.replace(/_/g, " ")}</span>
+                    <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+                      <button onClick={() => reviewInsight(insight.id, "approve")} style={{ fontSize: 12, fontWeight: 500, padding: "6px 18px", borderRadius: 8, border: "1px solid rgba(52,211,153,0.35)", background: "rgba(52,211,153,0.15)", color: "rgba(52,211,153,0.90)", cursor: "pointer", fontFamily: "inherit", transition: "all 150ms" }}
+                        onMouseEnter={e => { e.currentTarget.style.background = "rgba(52,211,153,0.25)"; }}
+                        onMouseLeave={e => { e.currentTarget.style.background = "rgba(52,211,153,0.15)"; }}
+                      >Approve</button>
+                      <button onClick={() => reviewInsight(insight.id, "reject")} style={{ fontSize: 12, fontWeight: 500, padding: "6px 18px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.18)", background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.55)", cursor: "pointer", fontFamily: "inherit", transition: "all 150ms" }}
+                        onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,255,255,0.12)"; e.currentTarget.style.color = "rgba(255,255,255,0.80)"; }}
+                        onMouseLeave={e => { e.currentTarget.style.background = "rgba(255,255,255,0.06)"; e.currentTarget.style.color = "rgba(255,255,255,0.55)"; }}
+                      >Reject</button>
                     </div>
                   </div>
                 </div>
@@ -2064,25 +2110,24 @@ function TrainingPanel({ cloneId, handle }: { cloneId: string; handle: string })
 
         {/* Activity feed */}
         <p style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.12em", color: "rgba(255,255,255,0.25)", margin: "0 0 12px" }}>Activity</p>
-        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
           {activity.length === 0 && !loading && (
-            <p style={{ fontSize: 12, color: "rgba(255,255,255,0.25)", textAlign: "center", padding: "20px 0" }}>No observation activity yet. Enable a source above to start.</p>
+            <p style={{ fontSize: 13, color: "rgba(255,255,255,0.30)", textAlign: "center", padding: "24px 0" }}>No observation activity yet. Enable a source above to start.</p>
           )}
           {activity.map(a => (
-            <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 14px", borderRadius: 10, background: a.error_message ? "rgba(248,113,113,0.04)" : "rgba(255,255,255,0.02)", border: `1px solid ${a.error_message ? "rgba(248,113,113,0.12)" : "rgba(255,255,255,0.05)"}` }}>
-              <div style={{ width: 4, height: 4, borderRadius: "50%", background: a.error_message ? "rgba(248,113,113,0.60)" : "rgba(255,255,255,0.20)", flexShrink: 0 }} />
-              <span style={{ fontSize: 12, color: "rgba(255,255,255,0.55)", flex: 1 }}>
+            <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 16px", borderRadius: 10, background: a.error_message ? "rgba(248,113,113,0.06)" : "rgba(255,255,255,0.025)", border: `1px solid ${a.error_message ? "rgba(248,113,113,0.15)" : "rgba(255,255,255,0.06)"}` }}>
+              <div style={{ width: 5, height: 5, borderRadius: "50%", background: a.error_message ? "rgba(248,113,113,0.70)" : "rgba(52,211,153,0.50)", flexShrink: 0 }} />
+              <span style={{ fontSize: 12, color: a.error_message ? "rgba(248,113,113,0.70)" : "rgba(255,255,255,0.60)", flex: 1 }}>
                 {a.error_message
-                  ? `Error observing ${OBS_SOURCE_LABELS[a.source_type] || a.source_type}`
-                  : `Observed ${a.items_fetched} items from ${OBS_SOURCE_LABELS[a.source_type] || a.source_type}, ingested ${a.items_ingested}${a.insights_extracted > 0 ? `, ${a.insights_extracted} insights` : ""}`}
+                  ? `Error: ${OBS_SOURCE_LABELS[a.source_type] || a.source_type} — ${a.error_message.slice(0, 80)}`
+                  : `${OBS_SOURCE_LABELS[a.source_type] || a.source_type}: ${a.items_fetched} observed, ${a.items_ingested} ingested${a.insights_extracted > 0 ? `, ${a.insights_extracted} insights` : ""}`}
               </span>
-              <span style={{ fontSize: 10, color: "rgba(255,255,255,0.20)", flexShrink: 0 }}>{timeAgo(a.started_at)}</span>
-              {a.duration_ms != null && <span style={{ fontSize: 10, color: "rgba(255,255,255,0.15)" }}>{(a.duration_ms / 1000).toFixed(1)}s</span>}
+              <span style={{ fontSize: 10, color: "rgba(255,255,255,0.25)", flexShrink: 0 }}>{timeAgo(a.started_at)}</span>
             </div>
           ))}
         </div>
 
-        {loading && <p style={{ fontSize: 12, color: "rgba(255,255,255,0.25)", textAlign: "center", padding: "12px 0" }}>Loading...</p>}
+        {loading && <p style={{ fontSize: 13, color: "rgba(255,255,255,0.30)", textAlign: "center", padding: "16px 0" }}>Loading...</p>}
       </div>
     </div>
   );

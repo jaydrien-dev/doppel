@@ -372,9 +372,16 @@ ipcMain.handle(
           types: ["screen"],
           thumbnailSize: { width: 1920, height: 1080 },
         });
-        if (sources.length === 0) return;
+        if (sources.length === 0) {
+          console.warn("[screenwatch] no screen sources available");
+          return;
+        }
 
         const pngBuffer = sources[0].thumbnail.toPNG();
+        if (pngBuffer.length < 1000) {
+          console.warn("[screenwatch] screenshot too small, skipping");
+          return;
+        }
 
         // Skip if screen hasn't changed (hash comparison)
         const hash = createHash("md5").update(pngBuffer).digest("hex");
@@ -382,10 +389,13 @@ ipcMain.handle(
         lastScreenHash = hash;
 
         const auth = await getClerkAuth();
-        if (!auth) return;
+        if (!auth) {
+          console.warn("[screenwatch] no auth, skipping capture");
+          return;
+        }
 
         const base64 = pngBuffer.toString("base64");
-        await net.fetch("https://doppel.up.railway.app/observation/screenwatch/capture", {
+        const res = await net.fetch("https://doppel.up.railway.app/observation/screenwatch/capture", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -393,13 +403,21 @@ ipcMain.handle(
           },
           body: JSON.stringify({ clone_id: screenwatchCloneId, image_base64: base64 }),
         });
+
+        if (!res.ok) {
+          const text = await res.text().catch(() => "");
+          console.error("[screenwatch] backend error:", res.status, text);
+        } else {
+          console.log("[screenwatch] capture sent successfully");
+        }
       } catch (e) {
         console.error("[screenwatch] capture failed:", e);
       }
     };
 
     screenwatchTimer = setInterval(doCapture, SCREENWATCH_INTERVAL_MS);
-    doCapture();
+    // Delay first capture slightly to ensure backend source row is committed
+    setTimeout(doCapture, 1500);
     return { ok: true };
   }
 );
