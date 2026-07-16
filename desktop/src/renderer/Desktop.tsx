@@ -115,13 +115,16 @@ const IAgent = () => <svg width="13" height="13" viewBox="0 0 16 16" fill="none"
 const ISparkle = () => <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M8 2l1.2 3.6L13 7l-3.8 1.4L8 12l-1.2-3.6L3 7l3.8-1.4z" opacity="0.85"/></svg>;
 const IMic = () => <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><rect x="5" y="1" width="6" height="9" rx="3" stroke="currentColor" strokeWidth="1.4"/><path d="M3 7.5a5 5 0 0010 0M8 13v2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/></svg>;
 
-// ── Voice-to-text hook (MediaRecorder → backend /transcribe) ──────────────────
+// ── Voice-to-text hook (MediaRecorder → backend /transcribe, live updates) ────
 
 function useVoiceInput(cloneId: string | null, onTranscript: (text: string) => void) {
   const [listening, setListening] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
+  const [liveText, setLiveText] = useState("");
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pendingRef = useRef(false);
 
   const toggle = useCallback(async () => {
     if (listening && recorderRef.current) {
@@ -133,47 +136,70 @@ function useVoiceInput(cloneId: string | null, onTranscript: (text: string) => v
       const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus" : "audio/webm";
       const recorder = new MediaRecorder(stream, { mimeType });
       chunksRef.current = [];
+      setLiveText("");
+
       recorder.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+
       recorder.onstop = async () => {
         stream.getTracks().forEach(t => t.stop());
+        if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
         setListening(false);
         recorderRef.current = null;
         const blob = new Blob(chunksRef.current, { type: mimeType });
-        if (blob.size < 500) return;
+        if (blob.size < 500) { setLiveText(""); return; }
         setTranscribing(true);
         try {
           const form = new FormData();
           form.append("audio", blob, "dictation.webm");
-          if (cloneId) form.append("clone_id", cloneId);
           const res = await api("/transcribe", { method: "POST", body: form });
           if (res.ok) {
             const data = await res.json();
-            if (data.transcript?.trim()) {
-              onTranscript(data.transcript.trim());
-            }
+            if (data.transcript?.trim()) onTranscript(data.transcript.trim());
           } else {
             console.error("[voice-input] transcribe failed:", res.status, await res.text());
           }
         } catch (e) {
-          console.error("[voice-input] transcription error:", e);
+          console.error("[voice-input] final transcription error:", e);
         }
+        setLiveText("");
         setTranscribing(false);
       };
-      recorder.start();
+
+      // Start with timeslice — emits data every 2.5s for live preview
+      recorder.start(2500);
       recorderRef.current = recorder;
       setListening(true);
+
+      // Live transcription: every 3s send accumulated audio for interim result
+      intervalRef.current = setInterval(async () => {
+        if (!recorderRef.current || recorderRef.current.state !== "recording") return;
+        if (chunksRef.current.length === 0 || pendingRef.current) return;
+        pendingRef.current = true;
+        try {
+          const blob = new Blob(chunksRef.current, { type: mimeType });
+          if (blob.size < 500) { pendingRef.current = false; return; }
+          const form = new FormData();
+          form.append("audio", blob, "dictation.webm");
+          const res = await api("/transcribe", { method: "POST", body: form });
+          if (res.ok) {
+            const data = await res.json();
+            setLiveText(data.transcript?.trim() || "");
+          }
+        } catch { /* silent — interim failure is fine */ }
+        pendingRef.current = false;
+      }, 3000);
+
     } catch (e) {
       console.error("[voice-input] mic access failed:", e);
     }
   }, [listening, cloneId, onTranscript]);
 
   useEffect(() => () => {
-    if (recorderRef.current && recorderRef.current.state === "recording") {
-      recorderRef.current.stop();
-    }
+    if (recorderRef.current && recorderRef.current.state === "recording") recorderRef.current.stop();
+    if (intervalRef.current) clearInterval(intervalRef.current);
   }, []);
 
-  return { listening, transcribing, toggle };
+  return { listening, transcribing, liveText, toggle };
 }
 
 // ── Markdown ───────────────────────────────────────────────────────────────────
@@ -1128,6 +1154,18 @@ function CloneChat({ clone, userId }: { clone: Clone; userId: string }) {
                     {isLoading ? <div style={{ width:14,height:14,borderRadius:"50%",border:"2px solid rgba(255,255,255,0.30)",borderTopColor:"rgba(255,255,255,0.80)",animation:"spin 0.8s linear infinite" }} /> : <ISend />}
                   </button>
                 </div>
+                {/* Live transcription preview */}
+                {(voiceInput.listening || voiceInput.transcribing) && (
+                  <div style={{ display:"flex",alignItems:"center",gap:8,padding:"8px 14px",marginTop:6,background:"rgba(255,255,255,0.03)",borderRadius:12,border:"1px solid rgba(255,255,255,0.06)" }}>
+                    {voiceInput.transcribing
+                      ? <div style={{ width:6,height:6,borderRadius:"50%",border:"1.5px solid rgba(255,255,255,0.15)",borderTopColor:"rgba(255,255,255,0.50)",animation:"spin 0.8s linear infinite",flexShrink:0 }} />
+                      : <div style={{ width:6,height:6,borderRadius:"50%",background:"rgba(248,113,113,0.85)",animation:"typing-dot 1s ease-in-out infinite",flexShrink:0 }} />
+                    }
+                    <span style={{ fontSize:12,color:"rgba(255,255,255,0.45)",fontStyle:"italic",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>
+                      {voiceInput.transcribing ? "Finalizing..." : voiceInput.liveText || "Listening..."}
+                    </span>
+                  </div>
+                )}
               </div>
               {/* Meta bar */}
               <div style={{ margin:"8px auto 0",display:"flex",alignItems:"center",gap:8,fontSize:11,color:"rgba(255,255,255,0.50)" }}>
@@ -3637,8 +3675,10 @@ export function CaptureWindow() {
           }}
         />
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <span style={{ fontSize: 10, color: voiceInput.listening ? "rgba(248,113,113,0.60)" : voiceInput.transcribing ? "rgba(255,255,255,0.40)" : "rgba(255,255,255,0.18)" }}>
-            {voiceInput.listening ? "Recording..." : voiceInput.transcribing ? "Transcribing..." : status === "done" ? "✓ Saved" : status === "error" ? "Failed — try again" : status === "sending" ? "Saving..." : "Esc to close"}
+          <span style={{ fontSize: 10, color: voiceInput.listening ? "rgba(248,113,113,0.60)" : voiceInput.transcribing ? "rgba(255,255,255,0.40)" : "rgba(255,255,255,0.18)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {voiceInput.listening
+              ? (voiceInput.liveText || "Listening...")
+              : voiceInput.transcribing ? "Finalizing..." : status === "done" ? "✓ Saved" : status === "error" ? "Failed — try again" : status === "sending" ? "Saving..." : "Esc to close"}
           </span>
           <div style={{ display: "flex", gap: 6 }}>
             <button
