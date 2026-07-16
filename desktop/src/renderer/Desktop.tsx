@@ -115,30 +115,19 @@ const IAgent = () => <svg width="13" height="13" viewBox="0 0 16 16" fill="none"
 const ISparkle = () => <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M8 2l1.2 3.6L13 7l-3.8 1.4L8 12l-1.2-3.6L3 7l3.8-1.4z" opacity="0.85"/></svg>;
 const IMic = () => <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><rect x="5" y="1" width="6" height="9" rx="3" stroke="currentColor" strokeWidth="1.4"/><path d="M3 7.5a5 5 0 0010 0M8 13v2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/></svg>;
 
-// ── Voice-to-text hook (MediaRecorder → Whisper via uploadVoiceMemo) ──────────
-
-function arrayBufferToBase64(buf: ArrayBuffer): string {
-  const bytes = new Uint8Array(buf);
-  const chunks: string[] = [];
-  for (let i = 0; i < bytes.length; i += 8192) {
-    chunks.push(String.fromCharCode(...bytes.subarray(i, i + 8192)));
-  }
-  return btoa(chunks.join(""));
-}
+// ── Voice-to-text hook (MediaRecorder → backend /transcribe) ──────────────────
 
 function useVoiceInput(cloneId: string | null, onTranscript: (text: string) => void) {
   const [listening, setListening] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
-  const doppel = (window as any).doppelDesktop;
 
   const toggle = useCallback(async () => {
     if (listening && recorderRef.current) {
       recorderRef.current.stop();
       return;
     }
-    if (!cloneId) return;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus" : "audio/webm";
@@ -153,16 +142,20 @@ function useVoiceInput(cloneId: string | null, onTranscript: (text: string) => v
         if (blob.size < 500) return;
         setTranscribing(true);
         try {
-          const buf = await blob.arrayBuffer();
-          const base64 = arrayBufferToBase64(buf);
-          const result = await doppel?.uploadVoiceMemo?.(cloneId, base64);
-          if (result?.ok && result.transcript?.trim()) {
-            onTranscript(result.transcript.trim());
+          const form = new FormData();
+          form.append("audio", blob, "dictation.webm");
+          if (cloneId) form.append("clone_id", cloneId);
+          const res = await api("/transcribe", { method: "POST", body: form });
+          if (res.ok) {
+            const data = await res.json();
+            if (data.transcript?.trim()) {
+              onTranscript(data.transcript.trim());
+            }
           } else {
-            console.error("[voice-input] transcription failed:", result?.error || "no transcript");
+            console.error("[voice-input] transcribe failed:", res.status, await res.text());
           }
         } catch (e) {
-          console.error("[voice-input] transcription failed:", e);
+          console.error("[voice-input] transcription error:", e);
         }
         setTranscribing(false);
       };
@@ -172,7 +165,7 @@ function useVoiceInput(cloneId: string | null, onTranscript: (text: string) => v
     } catch (e) {
       console.error("[voice-input] mic access failed:", e);
     }
-  }, [listening, cloneId, onTranscript, doppel]);
+  }, [listening, cloneId, onTranscript]);
 
   useEffect(() => () => {
     if (recorderRef.current && recorderRef.current.state === "recording") {
