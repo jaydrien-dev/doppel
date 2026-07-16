@@ -349,6 +349,43 @@ ipcMain.handle("doppel:capture-get-clone", async () => {
   }
 });
 
+// ─── Voice Transcription (transcribe-only, no storage) ───────────────────────
+
+ipcMain.handle(
+  "doppel:voice-transcribe",
+  async (_event, { audioBase64 }: { audioBase64: string }) => {
+    try {
+      const auth = await getClerkAuth();
+      if (!auth) return { ok: false, error: "Not signed in" };
+
+      const boundary = `----DoppelTranscribe${Date.now()}`;
+      const audioBuffer = Buffer.from(audioBase64, "base64");
+
+      const parts: Buffer[] = [];
+      const enc = (s: string) => Buffer.from(s, "utf-8");
+      parts.push(enc(`--${boundary}\r\nContent-Disposition: form-data; name="audio"; filename="dictation.webm"\r\nContent-Type: audio/webm\r\n\r\n`));
+      parts.push(audioBuffer);
+      parts.push(enc(`\r\n--${boundary}--\r\n`));
+
+      const body = Buffer.concat(parts);
+
+      const res = await net.fetch("https://doppel.up.railway.app/transcribe", {
+        method: "POST",
+        headers: {
+          "Content-Type": `multipart/form-data; boundary=${boundary}`,
+          "X-User-Id": auth.userId,
+        },
+        body,
+      });
+
+      const data = await res.json();
+      return { ok: true, transcript: data.transcript ?? "" };
+    } catch (e) {
+      return { ok: false, error: String(e) };
+    }
+  }
+);
+
 // ─── Screenwatch ─────────────────────────────────────────────────────────────
 // Fixed 5-second capture interval. Only sends to backend when the screen
 // content actually changes (hash comparison) to minimize API costs.
@@ -453,6 +490,12 @@ ipcMain.handle(
         },
         body,
       });
+
+      if (!res.ok) {
+        const text = await res.text();
+        console.error("[voice-memo] backend error:", res.status, text);
+        return { ok: false, error: `Backend error: ${res.status}` };
+      }
 
       const data = await res.json();
       return { ok: true, ...data };
@@ -618,6 +661,7 @@ function signInPopup(): Promise<AuthInfo | null> {
         resolved = true;
         signInPromise = null;
         server.close();
+        if (auth) cachedAuth = auth; // Cache so IPC handlers can use it
         resolve(auth);
       };
 
@@ -666,7 +710,10 @@ ipcMain.handle(
   "doppel:submit-credentials",
   async (_event, email: string, password: string) => {
     const result = await signInWithCredentials(email, password);
-    if (result.auth) return { auth: result.auth };
+    if (result.auth) {
+      cachedAuth = result.auth;
+      return { auth: result.auth };
+    }
     return { error: result.error ?? "Sign in failed." };
   }
 );

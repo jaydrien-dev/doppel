@@ -115,6 +115,74 @@ const IAgent = () => <svg width="13" height="13" viewBox="0 0 16 16" fill="none"
 const ISparkle = () => <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M8 2l1.2 3.6L13 7l-3.8 1.4L8 12l-1.2-3.6L3 7l3.8-1.4z" opacity="0.85"/></svg>;
 const IMic = () => <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><rect x="5" y="1" width="6" height="9" rx="3" stroke="currentColor" strokeWidth="1.4"/><path d="M3 7.5a5 5 0 0010 0M8 13v2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/></svg>;
 
+// ── Voice-to-text hook (MediaRecorder → Whisper via uploadVoiceMemo) ──────────
+
+function arrayBufferToBase64(buf: ArrayBuffer): string {
+  const bytes = new Uint8Array(buf);
+  const chunks: string[] = [];
+  for (let i = 0; i < bytes.length; i += 8192) {
+    chunks.push(String.fromCharCode(...bytes.subarray(i, i + 8192)));
+  }
+  return btoa(chunks.join(""));
+}
+
+function useVoiceInput(cloneId: string | null, onTranscript: (text: string) => void) {
+  const [listening, setListening] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const doppel = (window as any).doppelDesktop;
+
+  const toggle = useCallback(async () => {
+    if (listening && recorderRef.current) {
+      recorderRef.current.stop();
+      return;
+    }
+    if (!cloneId) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus" : "audio/webm";
+      const recorder = new MediaRecorder(stream, { mimeType });
+      chunksRef.current = [];
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+      recorder.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop());
+        setListening(false);
+        recorderRef.current = null;
+        const blob = new Blob(chunksRef.current, { type: mimeType });
+        if (blob.size < 500) return;
+        setTranscribing(true);
+        try {
+          const buf = await blob.arrayBuffer();
+          const base64 = arrayBufferToBase64(buf);
+          const result = await doppel?.uploadVoiceMemo?.(cloneId, base64);
+          if (result?.ok && result.transcript?.trim()) {
+            onTranscript(result.transcript.trim());
+          } else {
+            console.error("[voice-input] transcription failed:", result?.error || "no transcript");
+          }
+        } catch (e) {
+          console.error("[voice-input] transcription failed:", e);
+        }
+        setTranscribing(false);
+      };
+      recorder.start();
+      recorderRef.current = recorder;
+      setListening(true);
+    } catch (e) {
+      console.error("[voice-input] mic access failed:", e);
+    }
+  }, [listening, cloneId, onTranscript, doppel]);
+
+  useEffect(() => () => {
+    if (recorderRef.current && recorderRef.current.state === "recording") {
+      recorderRef.current.stop();
+    }
+  }, []);
+
+  return { listening, transcribing, toggle };
+}
+
 // ── Markdown ───────────────────────────────────────────────────────────────────
 
 function MarkdownRenderer({ content }: { content: string }) {
@@ -810,6 +878,7 @@ function CloneChat({ clone, userId }: { clone: Clone; userId: string }) {
   const moreRef         = useRef<HTMLDivElement>(null);
   const textareaRef     = useRef<HTMLTextAreaElement>(null);
   const agentScrollRef  = useRef<HTMLDivElement>(null);
+  const voiceInput = useVoiceInput(clone.clone_id, useCallback((t: string) => setInput(prev => prev ? prev + " " + t : t), []));
 
   const { messages, setMessages, workflowDrafts, isLoading, isThinking, error, sendMessage, clearMessages, scrollRef } = useWebChat({
     clone, sessionId, userId, responseMode,
@@ -1057,6 +1126,10 @@ function CloneChat({ clone, userId }: { clone: Clone; userId: string }) {
                   <textarea ref={textareaRef} className="chat-textarea" value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();handleSend();}}}
                     placeholder={`Ask ${cloneName} anything, or give a task…`} rows={1}
                     style={{ flex:1,border:"none",outline:"none",resize:"none",background:"transparent",color:"rgba(255,255,255,0.93)",fontSize:14,lineHeight:1.5,fontFamily:"inherit",minHeight:22,maxHeight:180,overflowY:"auto" }} />
+                  <button onClick={voiceInput.toggle} disabled={voiceInput.transcribing} title={voiceInput.listening ? "Stop recording" : voiceInput.transcribing ? "Transcribing..." : "Dictate"}
+                    style={{ width:36,height:36,borderRadius:12,background:voiceInput.listening?"rgba(248,113,113,0.15)":voiceInput.transcribing?"rgba(255,255,255,0.08)":"rgba(255,255,255,0.04)",border:`1px solid ${voiceInput.listening?"rgba(248,113,113,0.30)":"rgba(255,255,255,0.06)"}`,color:voiceInput.listening?"rgba(248,113,113,0.85)":"rgba(255,255,255,0.35)",display:"flex",alignItems:"center",justifyContent:"center",cursor:voiceInput.transcribing?"wait":"pointer",flexShrink:0,transition:"all 200ms" }}>
+                    {voiceInput.transcribing ? <div style={{ width:14,height:14,borderRadius:"50%",border:"2px solid rgba(255,255,255,0.15)",borderTopColor:"rgba(255,255,255,0.60)",animation:"spin 0.8s linear infinite" }} /> : voiceInput.listening ? <div style={{ width:12,height:12,borderRadius:2,background:"rgba(248,113,113,0.85)",animation:"typing-dot 1s ease-in-out infinite" }} /> : <IMic />}
+                  </button>
                   <button className="composer-send" onClick={handleSend} disabled={!input.trim()||isLoading||cloneNotReady}
                     style={{ width:36,height:36,borderRadius:12,background:(!input.trim()||isLoading||cloneNotReady)?"rgba(255,255,255,0.07)":inputIsAction?"rgba(52,211,153,0.18)":DOPPEL_BLUE,color:(!input.trim()||isLoading||cloneNotReady)?"rgba(255,255,255,0.30)":"#fff",border:"none",display:"flex",alignItems:"center",justifyContent:"center",cursor:(!input.trim()||isLoading||cloneNotReady)?"not-allowed":"pointer",flexShrink:0 }}>
                     {isLoading ? <div style={{ width:14,height:14,borderRadius:"50%",border:"2px solid rgba(255,255,255,0.30)",borderTopColor:"rgba(255,255,255,0.80)",animation:"spin 0.8s linear infinite" }} /> : <ISend />}
@@ -1109,8 +1182,6 @@ function CloneChat({ clone, userId }: { clone: Clone; userId: string }) {
           }} />
       )}
 
-      {/* Voice memo floating button */}
-      {activeView === "chat" && <VoiceMemoButton cloneId={clone.clone_id} />}
 
       {/* Agent panel — shows when open (button toggles) or when running */}
       {agentPanelOpen && (
@@ -3493,6 +3564,7 @@ export function CaptureWindow() {
   const [status, setStatus] = useState<"idle" | "sending" | "done" | "error">("idle");
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const doppel = (window as any).doppelDesktop;
+  const voiceInput = useVoiceInput(cloneId, useCallback((t: string) => setText(prev => prev ? prev + " " + t : t), []));
 
   useEffect(() => {
     doppel?.captureGetClone?.().then((c: any) => {
@@ -3572,23 +3644,39 @@ export function CaptureWindow() {
           }}
         />
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <span style={{ fontSize: 10, color: "rgba(255,255,255,0.18)" }}>
-            {status === "done" ? "✓ Saved" : status === "error" ? "Failed — try again" : status === "sending" ? "Saving..." : "Esc to close"}
+          <span style={{ fontSize: 10, color: voiceInput.listening ? "rgba(248,113,113,0.60)" : voiceInput.transcribing ? "rgba(255,255,255,0.40)" : "rgba(255,255,255,0.18)" }}>
+            {voiceInput.listening ? "Recording..." : voiceInput.transcribing ? "Transcribing..." : status === "done" ? "✓ Saved" : status === "error" ? "Failed — try again" : status === "sending" ? "Saving..." : "Esc to close"}
           </span>
-          <button
-            onClick={submit}
-            disabled={!text.trim() || !cloneId || status === "sending" || status === "done"}
-            style={{
-              fontSize: 11, fontWeight: 500, padding: "5px 14px", borderRadius: 8,
-              background: text.trim() && status === "idle" ? "rgba(52,211,153,0.10)" : "rgba(255,255,255,0.03)",
-              border: `1px solid ${text.trim() && status === "idle" ? "rgba(52,211,153,0.22)" : "rgba(255,255,255,0.07)"}`,
-              color: text.trim() && status === "idle" ? "rgba(52,211,153,0.80)" : "rgba(255,255,255,0.20)",
-              cursor: text.trim() && status === "idle" ? "pointer" : "default",
-              fontFamily: "inherit",
-            }}
-          >
-            Save
-          </button>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button
+              onClick={voiceInput.toggle}
+              disabled={voiceInput.transcribing}
+              title={voiceInput.listening ? "Stop" : voiceInput.transcribing ? "Transcribing..." : "Dictate"}
+              style={{
+                width: 30, height: 30, borderRadius: 8, border: "none",
+                background: voiceInput.listening ? "rgba(248,113,113,0.15)" : "rgba(255,255,255,0.04)",
+                color: voiceInput.listening ? "rgba(248,113,113,0.85)" : "rgba(255,255,255,0.35)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                cursor: voiceInput.transcribing ? "wait" : "pointer", transition: "all 200ms",
+              }}
+            >
+              {voiceInput.transcribing ? <div style={{ width: 12, height: 12, borderRadius: "50%", border: "2px solid rgba(255,255,255,0.15)", borderTopColor: "rgba(255,255,255,0.60)", animation: "spin 0.8s linear infinite" }} /> : voiceInput.listening ? <div style={{ width: 10, height: 10, borderRadius: 2, background: "rgba(248,113,113,0.85)", animation: "typing-dot 1s ease-in-out infinite" }} /> : <IMic />}
+            </button>
+            <button
+              onClick={submit}
+              disabled={!text.trim() || !cloneId || status === "sending" || status === "done"}
+              style={{
+                fontSize: 11, fontWeight: 500, padding: "5px 14px", borderRadius: 8,
+                background: text.trim() && status === "idle" ? "rgba(52,211,153,0.10)" : "rgba(255,255,255,0.03)",
+                border: `1px solid ${text.trim() && status === "idle" ? "rgba(52,211,153,0.22)" : "rgba(255,255,255,0.07)"}`,
+                color: text.trim() && status === "idle" ? "rgba(52,211,153,0.80)" : "rgba(255,255,255,0.20)",
+                cursor: text.trim() && status === "idle" ? "pointer" : "default",
+                fontFamily: "inherit",
+              }}
+            >
+              Save
+            </button>
+          </div>
         </div>
       </div>
     </div>

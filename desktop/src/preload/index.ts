@@ -53,6 +53,10 @@ contextBridge.exposeInMainWorld("doppelDesktop", {
     return () => { ipcRenderer.removeListener("doppel:voice-hotkey", callback); };
   },
 
+  /** Transcribe audio (Whisper) — returns text only, no storage */
+  transcribeAudio: (audioBase64: string): Promise<{ ok: boolean; transcript?: string; error?: string }> =>
+    ipcRenderer.invoke("doppel:voice-transcribe", { audioBase64 }),
+
   /** Quick capture — submit text from floating capture window */
   captureSubmit: (cloneId: string, text: string): Promise<{ ok: boolean; error?: string }> =>
     ipcRenderer.invoke("doppel:capture-submit", { cloneId, text }),

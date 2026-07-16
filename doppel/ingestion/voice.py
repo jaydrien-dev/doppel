@@ -18,8 +18,9 @@ async def transcribe_audio(audio_bytes: bytes, filename: str = "memo.webm") -> s
     Returns the transcript text. Raises on API failure.
     """
     import openai
+    from doppel.brain.context import get_openai_key
 
-    client = openai.AsyncOpenAI()
+    client = openai.AsyncOpenAI(api_key=get_openai_key())
 
     audio_file = io.BytesIO(audio_bytes)
     audio_file.name = filename

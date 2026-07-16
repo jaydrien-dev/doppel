@@ -6758,6 +6758,28 @@ async def ingest_voice_memo(
 
 
 # ---------------------------------------------------------------------------
+# Transcribe only — returns transcript without storing
+# ---------------------------------------------------------------------------
+
+@app.post("/transcribe")
+async def transcribe_only(
+    audio: UploadFile = File(...),
+    request: Request = None,
+) -> dict:
+    """Transcribe audio via Whisper and return the text. No storage."""
+    from doppel.ingestion.voice import transcribe_audio
+
+    _MAX_AUDIO_BYTES = 10 * 1024 * 1024
+    audio_bytes = await audio.read(_MAX_AUDIO_BYTES + 1)
+    if len(audio_bytes) > _MAX_AUDIO_BYTES:
+        raise HTTPException(status_code=413, detail="Audio exceeds 10 MB limit.")
+
+    filename = audio.filename or "memo.webm"
+    transcript = await transcribe_audio(audio_bytes, filename=filename)
+    return {"ok": True, "transcript": transcript}
+
+
+# ---------------------------------------------------------------------------
 # Ingestion — extract / recompute style fingerprint
 # ---------------------------------------------------------------------------
 
