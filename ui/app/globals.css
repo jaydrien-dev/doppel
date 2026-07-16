@@ -341,7 +341,7 @@ option, optgroup {
 }
 .msg--me .msg__av { display: none; }
 .msg__col { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
-.msg__bubble { padding: 12px 15px; border-radius: 14px; font-size: 14px; line-height: 1.55; max-width: 82%; user-select: text; -webkit-user-select: text; cursor: text; }
+.msg__bubble { padding: 12px 15px; border-radius: 14px; font-size: 14px; line-height: 1.55; max-width: 82%; user-select: text; -webkit-user-select: text; cursor: text; overflow-wrap: break-word; word-break: break-word; }
 .msg--me .msg__bubble { border-radius: 14px 14px 4px 14px; }
 .msg--ai .msg__bubble { border-radius: 14px 14px 14px 4px; }
 .msg__bubble p { margin: 0 0 8px; }
@@ -496,10 +496,10 @@ option, optgroup {
 }
 
 /* Page container */
-.db-page { padding: 32px 36px; max-width: 1240px; margin: 0 auto; position: relative; z-index: 1; }
+.db-page { padding: 32px 36px; max-width: 1240px; margin: 0 auto; position: relative; z-index: 1; overflow-x: hidden; }
 
 /* Page header row */
-.db-page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 28px; }
+.db-page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 28px; flex-wrap: wrap; }
 
 /* Typography */
 .db-eyebrow { font-size: 10px; font-weight: 500; letter-spacing: 0.18em; text-transform: uppercase; color: rgba(255,255,255,0.4); margin: 0 0 8px; }

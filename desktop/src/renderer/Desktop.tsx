@@ -113,6 +113,7 @@ const IMore = () => <svg width="14" height="14" viewBox="0 0 16 16" fill="curren
 const ISend = () => <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M2 8l12-5-4 12-3-5-5-2z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" fill="currentColor"/></svg>;
 const IAgent = () => <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><rect x="2" y="5" width="12" height="8" rx="2" stroke="currentColor" strokeWidth="1.3" opacity="0.8"/><path d="M5 5V4a3 3 0 016 0v1" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" opacity="0.6"/><circle cx="5.5" cy="9" r="1" fill="currentColor" opacity="0.7"/><circle cx="10.5" cy="9" r="1" fill="currentColor" opacity="0.7"/><path d="M6.5 11.5h3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" opacity="0.5"/></svg>;
 const ISparkle = () => <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M8 2l1.2 3.6L13 7l-3.8 1.4L8 12l-1.2-3.6L3 7l3.8-1.4z" opacity="0.85"/></svg>;
+const IMic = () => <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><rect x="5" y="1" width="6" height="9" rx="3" stroke="currentColor" strokeWidth="1.4"/><path d="M3 7.5a5 5 0 0010 0M8 13v2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/></svg>;
 
 // ── Markdown ───────────────────────────────────────────────────────────────────
 
@@ -577,6 +578,214 @@ function ActivityPanel({ cloneId }: { cloneId: string }) {
   );
 }
 
+// ── TrainingScoreBar ──────────────────────────────────────────────────────────
+
+interface TrainingBreakdown { score: number; max: number; label: string; hint: string; }
+interface TrainingScore { score: number; grade: string; breakdown: Record<string, TrainingBreakdown>; next_action: string; total_items: number; items_target: number; }
+
+function TrainingScoreBar({ handle }: { handle: string }) {
+  const [data, setData] = useState<TrainingScore | null>(null);
+  const [expanded, setExpanded] = useState(false);
+  const popRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    function load() {
+      api(`/clones/${handle}/training-score`).then(r => r.ok ? r.json() : null).then(d => { if (mounted && d) setData(d); }).catch(() => {});
+    }
+    load();
+    const iv = setInterval(load, 60000);
+    return () => { mounted = false; clearInterval(iv); };
+  }, [handle]);
+
+  useEffect(() => {
+    if (!expanded) return;
+    function handler(e: MouseEvent) { if (popRef.current && !popRef.current.contains(e.target as Node)) setExpanded(false); }
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [expanded]);
+
+  if (!data) return null;
+
+  const gradeColor = data.grade === "A" ? "rgba(52,211,153,0.80)" : data.grade === "B" ? "rgba(52,211,153,0.60)" : data.grade === "C" ? "rgba(255,255,255,0.55)" : "rgba(248,113,113,0.65)";
+
+  return (
+    <div ref={popRef} style={{ position: "relative" }}>
+      <button
+        onClick={() => setExpanded(v => !v)}
+        title={`Training: ${data.score}% — ${data.next_action}`}
+        style={{
+          display: "inline-flex", alignItems: "center", gap: 7,
+          padding: "4px 12px 4px 6px", borderRadius: 8,
+          border: "1px solid rgba(255,255,255,0.09)", background: "rgba(255,255,255,0.04)",
+          cursor: "pointer", fontFamily: "inherit", transition: "all 180ms",
+        }}
+        onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,255,255,0.08)"; }}
+        onMouseLeave={e => { e.currentTarget.style.background = "rgba(255,255,255,0.04)"; }}
+      >
+        {/* Circular progress ring */}
+        <svg width="24" height="24" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="10" fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="2.5" />
+          <circle cx="12" cy="12" r="10" fill="none" stroke={gradeColor} strokeWidth="2.5"
+            strokeDasharray={`${(data.score / 100) * 62.83} 62.83`}
+            strokeLinecap="round" transform="rotate(-90 12 12)" style={{ transition: "stroke-dasharray 0.6s ease" }} />
+          <text x="12" y="12.5" textAnchor="middle" dominantBaseline="central"
+            style={{ fontSize: 8, fontWeight: 600, fill: gradeColor }}>{data.grade}</text>
+        </svg>
+        <span style={{ fontSize: 11, color: "rgba(255,255,255,0.50)", whiteSpace: "nowrap" }}>{data.score}%</span>
+      </button>
+
+      {expanded && (
+        <div style={{
+          position: "absolute", top: "calc(100% + 6px)", right: 0, zIndex: 50,
+          width: 280, padding: "14px 16px",
+          background: "rgba(12,12,12,0.98)", border: "1px solid rgba(255,255,255,0.10)",
+          borderRadius: 14, backdropFilter: "blur(20px)",
+          boxShadow: "0 12px 40px rgba(0,0,0,0.65)",
+          animation: "menu-in 260ms cubic-bezier(0.34,1.56,0.64,1) both",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+            <span style={{ fontSize: 12, fontWeight: 500, color: "rgba(255,255,255,0.70)" }}>Training Score</span>
+            <span style={{ fontSize: 18, fontWeight: 500, color: gradeColor }}>{data.score}<span style={{ fontSize: 11, color: "rgba(255,255,255,0.30)" }}>/100</span></span>
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {Object.values(data.breakdown).map((b, i) => (
+              <div key={i}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
+                  <span style={{ fontSize: 11, color: b.score >= b.max ? "rgba(52,211,153,0.70)" : "rgba(255,255,255,0.45)" }}>{b.label}</span>
+                  <span style={{ fontSize: 10, color: "rgba(255,255,255,0.25)" }}>{b.score}/{b.max}</span>
+                </div>
+                <div style={{ height: 3, borderRadius: 2, background: "rgba(255,255,255,0.06)" }}>
+                  <div style={{ height: "100%", borderRadius: 2, width: `${(b.score / b.max) * 100}%`, background: b.score >= b.max ? "rgba(52,211,153,0.55)" : "rgba(255,255,255,0.20)", transition: "width 0.4s ease" }} />
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {data.next_action && (
+            <div style={{ marginTop: 14, padding: "8px 10px", borderRadius: 8, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)" }}>
+              <span style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em", color: "rgba(255,255,255,0.25)", display: "block", marginBottom: 3 }}>Next step</span>
+              <span style={{ fontSize: 11, color: "rgba(255,255,255,0.55)" }}>{data.next_action}</span>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── VoiceMemoButton ───────────────────────────────────────────────────────────
+
+function VoiceMemoButton({ cloneId }: { cloneId: string }) {
+  const [recording, setRecording] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [toast, setToast] = useState("");
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const doppel = (window as any).doppelDesktop;
+
+  // Listen for global hotkey (Ctrl+Shift+V)
+  useEffect(() => {
+    if (!doppel?.onVoiceHotkey) return;
+    const unsub = doppel.onVoiceHotkey(() => {
+      if (recorderRef.current && recorderRef.current.state === "recording") {
+        stopRecording();
+      } else {
+        startRecording();
+      }
+    });
+    return unsub;
+  }, [cloneId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function startRecording() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus" : "audio/webm";
+      const recorder = new MediaRecorder(stream, { mimeType });
+      chunksRef.current = [];
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+      recorder.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop());
+        const blob = new Blob(chunksRef.current, { type: mimeType });
+        if (blob.size < 1000) { setToast("Too short"); setTimeout(() => setToast(""), 2000); return; }
+        setUploading(true);
+        try {
+          const buf = await blob.arrayBuffer();
+          const base64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+          const result = await doppel.uploadVoiceMemo(cloneId, base64);
+          if (result?.ok && result.stored) {
+            setToast("Got it — transcribed and learned");
+          } else if (result?.ok && !result.stored) {
+            setToast("Too short to store");
+          } else {
+            setToast(result?.error || "Upload failed");
+          }
+        } catch { setToast("Upload failed"); }
+        setUploading(false);
+        setTimeout(() => setToast(""), 3000);
+      };
+      recorder.start();
+      recorderRef.current = recorder;
+      setRecording(true);
+    } catch { setToast("Mic access denied"); setTimeout(() => setToast(""), 3000); }
+  }
+
+  function stopRecording() {
+    if (recorderRef.current && recorderRef.current.state === "recording") {
+      recorderRef.current.stop();
+      recorderRef.current = null;
+      setRecording(false);
+    }
+  }
+
+  function handleClick() {
+    if (recording) stopRecording();
+    else startRecording();
+  }
+
+  return (
+    <>
+      <button
+        onClick={handleClick}
+        disabled={uploading}
+        title={recording ? "Stop recording" : "Record voice memo (Ctrl+Shift+V)"}
+        style={{
+          position: "absolute", bottom: 130, right: 20, zIndex: 30,
+          width: 44, height: 44, borderRadius: 22,
+          background: recording ? "rgba(248,113,113,0.18)" : "rgba(255,255,255,0.07)",
+          border: `1px solid ${recording ? "rgba(248,113,113,0.35)" : "rgba(255,255,255,0.10)"}`,
+          color: recording ? "rgba(248,113,113,0.90)" : "rgba(255,255,255,0.50)",
+          cursor: uploading ? "wait" : "pointer",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          transition: "all 200ms", boxShadow: recording ? "0 0 16px rgba(248,113,113,0.20)" : "none",
+        }}
+        onMouseEnter={e => { if (!recording) { e.currentTarget.style.background = "rgba(255,255,255,0.11)"; e.currentTarget.style.color = "rgba(255,255,255,0.75)"; } }}
+        onMouseLeave={e => { if (!recording) { e.currentTarget.style.background = "rgba(255,255,255,0.07)"; e.currentTarget.style.color = "rgba(255,255,255,0.50)"; } }}
+      >
+        {uploading
+          ? <div style={{ width: 16, height: 16, borderRadius: "50%", border: "2px solid rgba(255,255,255,0.25)", borderTopColor: "rgba(255,255,255,0.75)", animation: "spin 0.8s linear infinite" }} />
+          : recording
+            ? <div style={{ width: 14, height: 14, borderRadius: 3, background: "rgba(248,113,113,0.85)", animation: "typing-dot 1s ease-in-out infinite" }} />
+            : <IMic />
+        }
+      </button>
+      {toast && (
+        <div style={{
+          position: "absolute", bottom: 180, right: 20, zIndex: 30,
+          padding: "8px 14px", borderRadius: 10,
+          background: "rgba(10,10,10,0.95)", border: "1px solid rgba(255,255,255,0.10)",
+          backdropFilter: "blur(12px)", boxShadow: "0 4px 20px rgba(0,0,0,0.40)",
+          fontSize: 12, color: "rgba(255,255,255,0.70)", whiteSpace: "nowrap",
+          animation: "msg-in 200ms ease both",
+        }}>
+          {toast}
+        </div>
+      )}
+    </>
+  );
+}
+
 // ── CloneChat ──────────────────────────────────────────────────────────────────
 
 const hdrBtnStyle: React.CSSProperties = { width:32,height:32,borderRadius:8,background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.09)",color:"rgba(255,255,255,0.50)",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",transition:"all 240ms" };
@@ -587,7 +796,7 @@ function CloneChat({ clone, userId }: { clone: Clone; userId: string }) {
   const [input,               setInput]               = useState("");
   const [shareCopied,         setShareCopied]         = useState(false);
   const [moreOpen,            setMoreOpen]            = useState(false);
-  const [activeView,          setActiveView]          = useState<"chat"|"activity"|"connectors"|"observations">("chat");
+  const [activeView,          setActiveView]          = useState<"chat"|"activity"|"connectors"|"training"|"knowledge">("chat");
   const [showAutomateModal,   setShowAutomateModal]   = useState(false);
   const [automateInstruction, setAutomateInstruction] = useState("");
   const [knowledgeAreas,      setKnowledgeAreas]      = useState<{area:string;depth:string}[]>([]);
@@ -713,6 +922,7 @@ function CloneChat({ clone, userId }: { clone: Clone; userId: string }) {
             <div style={{ fontSize:14,fontWeight:500,color:"rgba(255,255,255,0.93)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{cloneName}</div>
             <div style={{ fontSize:11,color:"rgba(255,255,255,0.40)",marginTop:1 }}>@{clone.handle}</div>
           </div>
+          <TrainingScoreBar handle={clone.handle} />
           <div style={{ display:"inline-flex",gap:6 }}>
             <button className="hdr-act" onClick={startNewConversation} title="New conversation" style={hdrBtnStyle}><INewChat /></button>
             {messages.length>0 && (
@@ -740,7 +950,7 @@ function CloneChat({ clone, userId }: { clone: Clone; userId: string }) {
         </div>
         {/* Tab bar */}
         <div style={{ maxWidth:1080,margin:"0 auto",padding:"0 16px 10px",display:"flex",gap:2 }}>
-          {(["chat","activity","connectors","observations"] as const).map(v => (
+          {(["chat","activity","connectors","training","knowledge"] as const).map(v => (
             <button key={v} onClick={()=>setActiveView(v)} style={{ fontSize:12,fontWeight:500,padding:"5px 14px",borderRadius:8,border:"none",background:activeView===v?"rgba(255,255,255,0.09)":"transparent",color:activeView===v?"rgba(255,255,255,0.82)":"rgba(255,255,255,0.30)",cursor:"pointer",fontFamily:"inherit",transition:"all 180ms",textTransform:"capitalize" }}>{v}</button>
           ))}
         </div>
@@ -880,8 +1090,10 @@ function CloneChat({ clone, userId }: { clone: Clone; userId: string }) {
         </>
       ) : activeView==="connectors" ? (
         <ConnectorsPanel cloneId={clone.clone_id} />
-      ) : activeView==="observations" ? (
-        <ObservationsPanel cloneId={clone.clone_id} />
+      ) : activeView==="training" ? (
+        <TrainingPanel cloneId={clone.clone_id} handle={clone.handle} />
+      ) : activeView==="knowledge" ? (
+        <KnowledgePanel cloneId={clone.clone_id} handle={clone.handle} />
       ) : (
         <ActivityPanel cloneId={clone.clone_id} />
       )}
@@ -896,6 +1108,9 @@ function CloneChat({ clone, userId }: { clone: Clone; userId: string }) {
             setMessages(prev=>[...prev,{id,role:"clone",content:`Automation created: **${name}** — will run ${schedule.replace(/:/g," at ").replace("daily","every day").replace("weekly","every week").replace("weekdays","every weekday").replace("hourly","every hour")}.`,isStreaming:false}]);
           }} />
       )}
+
+      {/* Voice memo floating button */}
+      {activeView === "chat" && <VoiceMemoButton cloneId={clone.clone_id} />}
 
       {/* Agent panel — shows when open (button toggles) or when running */}
       {agentPanelOpen && (
@@ -1033,38 +1248,618 @@ function ConnectorsPanel({ cloneId }: { cloneId: string }) {
   );
 }
 
-// ── ObservationsPanel ─────────────────────────────────────────────────────────
+// ── TrainingPanel ─────────────────────────────────────────────────────────────
 
 interface ObsSource { source_type: string; enabled: boolean; items_observed: number; items_ingested: number; last_observed_at: string | null; status: string; }
 interface ObsActivity { id: string; source_type: string; items_fetched: number; items_ingested: number; items_skipped: number; insights_extracted: number; duration_ms: number | null; error_message: string | null; started_at: string; }
 interface PendingInsight { id: string; insight_type: string; content: string; confidence: number; source_type: string; created_at: string; metadata: Record<string, unknown>; }
 
-const OBS_SOURCE_LABELS: Record<string, string> = { gmail: "Gmail", slack: "Slack", gdrive: "Google Drive", github: "GitHub", notion: "Notion", gcal: "Calendar" };
-const OBS_SOURCE_LIST = ["gmail", "slack", "gdrive", "github", "notion", "gcal"];
+const OBS_SOURCE_LABELS: Record<string, string> = { gmail: "Gmail", slack: "Slack", gdrive: "Google Drive", github: "GitHub", notion: "Notion", gcal: "Calendar", screenwatch: "Screen Watch" };
+const OBS_SOURCE_LIST = ["gmail", "slack", "gdrive", "github", "notion", "gcal", "screenwatch"];
 
-function ObservationsPanel({ cloneId }: { cloneId: string }) {
+// ── Training Suggestions — surface low-confidence queries ──────────────────
+
+interface TrainingSuggestion {
+  id: string;
+  question: string;
+  confidence: number;
+  needs_escalation: boolean;
+  created_at: string;
+}
+
+function TrainingSuggestions({ handle, onTeach }: { handle: string; onTeach: (topic: string) => void }) {
+  const [suggestions, setSuggestions] = useState<TrainingSuggestion[]>([]);
+  const [dismissed, setDismissed] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    api(`/clones/${handle}/training-suggestions?limit=5`)
+      .then(async (r) => {
+        if (r.ok) {
+          const d = await r.json();
+          setSuggestions(d.suggestions ?? []);
+        }
+      })
+      .catch(() => {});
+  }, [handle]);
+
+  const visible = suggestions.filter((s) => !dismissed.has(s.id));
+  if (visible.length === 0) return null;
+
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <p style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.10em", color: "rgba(248,113,113,0.50)", margin: "0 0 10px" }}>
+        Knowledge gaps
+      </p>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {visible.map((s) => (
+          <div
+            key={s.id}
+            style={{
+              display: "flex", alignItems: "center", gap: 10,
+              padding: "10px 14px", borderRadius: 12,
+              background: "rgba(248,113,113,0.03)",
+              border: "1px solid rgba(248,113,113,0.10)",
+            }}
+          >
+            <div style={{
+              width: 24, height: 24, borderRadius: 6, flexShrink: 0,
+              background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.15)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              color: "rgba(248,113,113,0.60)", fontSize: 12,
+            }}>?</div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <p style={{ margin: 0, fontSize: 12, color: "rgba(255,255,255,0.65)", lineHeight: 1.4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                "{s.question}"
+              </p>
+              <p style={{ margin: "2px 0 0", fontSize: 10, color: "rgba(255,255,255,0.22)" }}>
+                {Math.round(s.confidence * 100)}% confidence
+              </p>
+            </div>
+            <button
+              onClick={() => onTeach(s.question)}
+              style={{
+                fontSize: 10, fontWeight: 500, padding: "4px 10px", borderRadius: 7,
+                background: "rgba(167,139,250,0.10)", border: "1px solid rgba(167,139,250,0.22)",
+                color: "rgba(167,139,250,0.80)", cursor: "pointer", fontFamily: "inherit",
+                flexShrink: 0, whiteSpace: "nowrap",
+              }}
+            >
+              Teach it
+            </button>
+            <button
+              onClick={() => setDismissed((prev) => new Set(prev).add(s.id))}
+              style={{
+                background: "none", border: "none", cursor: "pointer",
+                color: "rgba(255,255,255,0.18)", fontSize: 13, padding: "0 2px",
+                lineHeight: 1, fontFamily: "inherit", flexShrink: 0,
+              }}
+            >
+              ×
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Desktop Feed-Data panels (use api() instead of fetch) ────────────────────
+
+const DESKTOP_TOPICS = ["how I close deals","my management style","how I give feedback","our pricing strategy","how I think about product","my decision-making process"];
+type DInterviewMsg = { role: "clone"|"user"; text: string };
+
+function DesktopInterviewPanel({ cloneId, initialTopic }: { cloneId: string; initialTopic?: string }) {
+  const [phase, setPhase] = useState<"topic"|"interview"|"review">("topic");
+  const [topic, setTopic] = useState("");
+  const hasAutoStarted = useRef(false);
+  const [messages, setMessages] = useState<DInterviewMsg[]>([]);
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [formatting, setFormatting] = useState(false);
+  const [chunks, setChunks] = useState<string[]>([]);
+  const [removedChunks, setRemovedChunks] = useState<Set<number>>(new Set());
+  const [ingesting, setIngesting] = useState(false);
+  const [ingestDone, setIngestDone] = useState(false);
+  const [error, setError] = useState<string|null>(null);
+  const bottomRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const userTurnCount = messages.filter(m=>m.role==="user").length;
+
+  useEffect(()=>{bottomRef.current?.scrollIntoView({behavior:"smooth"});},[messages,loading]);
+  useEffect(()=>{if(inputRef.current){inputRef.current.style.height="auto";inputRef.current.style.height=Math.min(inputRef.current.scrollHeight,120)+"px";}},[input]);
+
+  function reset(){setPhase("topic");setMessages([]);setChunks([]);setRemovedChunks(new Set());setInput("");setError(null);setIngestDone(false);}
+
+  function startInterview(t?:string){
+    const t_=(t??topic).trim();if(!t_)return;if(t)setTopic(t);
+    setMessages([]);setError(null);setIngestDone(false);
+    setMessages([{role:"clone",text:`Tell me about ${t_}. Where would you like to start — and what's the most important thing you want me to understand about it?`}]);
+    setPhase("interview");
+  }
+
+  // Auto-start when triggered from training suggestions
+  useEffect(() => {
+    if (initialTopic && !hasAutoStarted.current) {
+      hasAutoStarted.current = true;
+      startInterview(initialTopic);
+    }
+  }, [initialTopic]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function handleSend(){
+    const text=input.trim();if(!text||loading)return;setInput("");setError(null);
+    const updated:DInterviewMsg[]=[...messages,{role:"user",text}];setMessages(updated);setLoading(true);
+    try{
+      const res=await api("/interview",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({topic:topic.trim(),messages:updated,action:"followup"})});
+      const d=await res.json();
+      if(d.question)setMessages(prev=>[...prev,{role:"clone",text:d.question}]);else setError("No response — try again");
+    }catch{setError("Failed to get next question");}finally{setLoading(false);}
+  }
+
+  async function handleFinish(){
+    if(userTurnCount===0){reset();return;}setFormatting(true);
+    try{
+      const res=await api("/interview",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({topic:topic.trim(),messages,action:"format"})});
+      const d=await res.json();setChunks(d.chunks??[]);setRemovedChunks(new Set());setPhase("review");
+    }catch{setError("Failed to format — try again");}finally{setFormatting(false);}
+  }
+
+  async function handleIngestAll(){
+    if(ingesting||chunks.length===0)return;setIngesting(true);setError(null);
+    const toIngest=chunks.filter((_,i)=>!removedChunks.has(i));
+    try{
+      for(const chunk of toIngest){
+        await api("/ingestion/text",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({clone_id:cloneId,text:chunk,source:"interview"})});
+      }
+      setIngestDone(true);
+    }catch{setError("Ingestion failed — try again");}finally{setIngesting(false);}
+  }
+
+  const keptChunks=chunks.filter((_,i)=>!removedChunks.has(i));
+
+  return (
+    <div style={{ borderRadius:14,overflow:"hidden",background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.08)",marginBottom:14 }}>
+      {/* Header */}
+      <div style={{ padding:"18px 20px 14px",borderBottom:"1px solid rgba(255,255,255,0.06)",display:"flex",alignItems:"center",gap:10 }}>
+        <div style={{ width:32,height:32,borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",background:"rgba(167,139,250,0.12)",border:"1px solid rgba(167,139,250,0.22)",color:"rgba(167,139,250,0.85)",flexShrink:0 }}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+        </div>
+        <div style={{ flex:1 }}>
+          <div style={{ display:"flex",alignItems:"center",gap:6 }}>
+            <span style={{ fontSize:14,fontWeight:500,color:"rgba(255,255,255,0.85)" }}>Train by talking</span>
+            <span style={{ fontSize:9,fontWeight:500,padding:"2px 6px",borderRadius:999,background:"rgba(167,139,250,0.10)",color:"rgba(167,139,250,0.70)",border:"1px solid rgba(167,139,250,0.18)" }}>Recommended</span>
+          </div>
+          <p style={{ fontSize:11,color:"rgba(255,255,255,0.30)",margin:"2px 0 0" }}>Answer naturally — everything gets cleaned up and saved.</p>
+        </div>
+      </div>
+
+      {/* Topic */}
+      {phase==="topic"&&(
+        <div style={{ padding:"20px 20px 18px" }}>
+          <p style={{ fontSize:18,fontWeight:300,color:"rgba(255,255,255,0.78)",margin:"0 0 4px" }}>What do you want to teach your clone today?</p>
+          <p style={{ fontSize:12,color:"rgba(255,255,255,0.30)",margin:"0 0 16px",lineHeight:1.5 }}>Pick a topic — the interviewer will ask questions until it understands everything you know about it.</p>
+          <div style={{ display:"flex",gap:6,marginBottom:12 }}>
+            <input value={topic} onChange={e=>setTopic(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&topic.trim())startInterview();}}
+              placeholder="e.g. how I close deals, my management style..." autoFocus
+              style={{ flex:1,background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.10)",borderRadius:10,padding:"9px 12px",fontSize:13,color:"rgba(255,255,255,0.75)",fontFamily:"inherit",outline:"none" }} />
+            <button onClick={()=>startInterview()} disabled={!topic.trim()}
+              style={{ padding:"0 18px",borderRadius:10,fontSize:12,fontWeight:500,background:topic.trim()?"rgba(167,139,250,0.15)":"rgba(167,139,250,0.05)",border:`1px solid ${topic.trim()?"rgba(167,139,250,0.28)":"rgba(167,139,250,0.10)"}`,color:topic.trim()?"rgba(167,139,250,0.85)":"rgba(167,139,250,0.28)",cursor:topic.trim()?"pointer":"default",fontFamily:"inherit",whiteSpace:"nowrap" }}>
+              Start
+            </button>
+          </div>
+          <div style={{ display:"flex",flexWrap:"wrap",gap:5 }}>
+            <span style={{ fontSize:10,color:"rgba(255,255,255,0.22)",alignSelf:"center",marginRight:2 }}>Try:</span>
+            {DESKTOP_TOPICS.map(t=>(
+              <button key={t} onClick={()=>startInterview(t)}
+                style={{ fontSize:11,padding:"3px 9px",borderRadius:999,background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.08)",color:"rgba(255,255,255,0.40)",cursor:"pointer",fontFamily:"inherit" }}>{t}</button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Interview */}
+      {phase==="interview"&&(
+        <div style={{ display:"flex",flexDirection:"column" }}>
+          <div style={{ display:"flex",alignItems:"center",gap:8,padding:"8px 20px",background:"rgba(255,255,255,0.015)",borderBottom:"1px solid rgba(255,255,255,0.05)" }}>
+            <span style={{ fontSize:10,color:"rgba(255,255,255,0.22)" }}>Topic:</span>
+            <span style={{ fontSize:11,color:"rgba(167,139,250,0.70)",background:"rgba(167,139,250,0.08)",border:"1px solid rgba(167,139,250,0.14)",borderRadius:5,padding:"2px 7px" }}>{topic}</span>
+            {userTurnCount>0&&<span style={{ fontSize:10,color:"rgba(255,255,255,0.20)",marginLeft:"auto" }}>{userTurnCount} exchange{userTurnCount!==1?"s":""}</span>}
+          </div>
+          <div style={{ minHeight:240,maxHeight:380,overflowY:"auto",display:"flex",flexDirection:"column",gap:12,padding:"16px 20px",scrollbarWidth:"thin" }}>
+            {messages.map((m,i)=>(
+              <div key={i} style={{ display:"flex",gap:8,alignItems:"flex-end",flexDirection:m.role==="user"?"row-reverse":"row" }}>
+                {m.role==="clone"&&<div style={{ width:24,height:24,borderRadius:"50%",flexShrink:0,background:"rgba(167,139,250,0.15)",border:"1px solid rgba(167,139,250,0.22)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:600,color:"rgba(167,139,250,0.80)" }}>?</div>}
+                <div style={{ maxWidth:"72%",padding:"9px 13px",borderRadius:m.role==="clone"?"4px 14px 14px 14px":"14px 4px 14px 14px",background:m.role==="clone"?"rgba(255,255,255,0.04)":"rgba(167,139,250,0.10)",border:`1px solid ${m.role==="clone"?"rgba(255,255,255,0.07)":"rgba(167,139,250,0.20)"}`,fontSize:12,color:m.role==="clone"?"rgba(255,255,255,0.75)":"rgba(255,255,255,0.70)",lineHeight:1.55 }}>{m.text}</div>
+              </div>
+            ))}
+            {(loading||formatting)&&(
+              <div style={{ display:"flex",gap:8,alignItems:"flex-end" }}>
+                <div style={{ width:24,height:24,borderRadius:"50%",background:"rgba(167,139,250,0.15)",border:"1px solid rgba(167,139,250,0.22)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:600,color:"rgba(167,139,250,0.80)",flexShrink:0 }}>?</div>
+                <div style={{ display:"flex",gap:4,padding:"10px 14px",borderRadius:"4px 14px 14px 14px",background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.07)" }}>
+                  {[0,1,2].map(i=>(<span key={i} style={{ width:4,height:4,borderRadius:"50%",background:"rgba(255,255,255,0.30)",display:"inline-block",animation:`typing-dot 1s ${i*0.18}s ease-in-out infinite` }} />))}
+                </div>
+              </div>
+            )}
+            <div ref={bottomRef} />
+          </div>
+          <div style={{ borderTop:"1px solid rgba(255,255,255,0.06)",padding:"12px 16px 14px" }}>
+            {error&&<p style={{ fontSize:10,color:"rgba(248,113,113,0.60)",margin:"0 0 6px 2px" }}>{error}</p>}
+            <div style={{ display:"flex",gap:6,alignItems:"flex-end" }}>
+              <textarea ref={inputRef} value={input} onChange={e=>setInput(e.target.value)}
+                onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();handleSend();}}}
+                placeholder="Type your answer... (Enter to send)"
+                rows={1} disabled={loading||formatting}
+                style={{ flex:1,background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.10)",borderRadius:10,padding:"8px 12px",fontSize:12,color:"rgba(255,255,255,0.75)",fontFamily:"inherit",resize:"none",overflow:"hidden",outline:"none",lineHeight:1.5 }} />
+              <button onClick={handleSend} disabled={!input.trim()||loading||formatting}
+                style={{ padding:"8px 14px",borderRadius:10,fontSize:12,fontWeight:500,background:(input.trim()&&!loading&&!formatting)?"rgba(167,139,250,0.14)":"rgba(255,255,255,0.03)",border:`1px solid ${(input.trim()&&!loading&&!formatting)?"rgba(167,139,250,0.25)":"rgba(255,255,255,0.07)"}`,color:(input.trim()&&!loading&&!formatting)?"rgba(167,139,250,0.85)":"rgba(255,255,255,0.20)",cursor:(!input.trim()||loading||formatting)?"default":"pointer",fontFamily:"inherit",flexShrink:0 }}>Send</button>
+            </div>
+            <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginTop:8 }}>
+              <span style={{ fontSize:10,color:"rgba(255,255,255,0.20)" }}>{userTurnCount===0?"Answer the first question to get started":`${userTurnCount} exchange${userTurnCount!==1?"s":""}`}</span>
+              <div style={{ display:"flex",gap:5 }}>
+                <button onClick={reset} style={{ padding:"4px 10px",borderRadius:7,fontSize:11,background:"none",border:"1px solid rgba(255,255,255,0.07)",color:"rgba(255,255,255,0.25)",cursor:"pointer",fontFamily:"inherit" }}>Discard</button>
+                <button onClick={handleFinish} disabled={loading||formatting||userTurnCount===0}
+                  style={{ padding:"4px 12px",borderRadius:7,fontSize:11,fontWeight:500,background:(userTurnCount>0&&!loading&&!formatting)?"rgba(52,211,153,0.08)":"rgba(255,255,255,0.02)",border:`1px solid ${(userTurnCount>0&&!loading&&!formatting)?"rgba(52,211,153,0.20)":"rgba(255,255,255,0.06)"}`,color:(userTurnCount>0&&!loading&&!formatting)?"rgba(52,211,153,0.75)":"rgba(255,255,255,0.18)",cursor:(loading||formatting||userTurnCount===0)?"default":"pointer",fontFamily:"inherit" }}>
+                  {formatting?"Processing...":"Finish & review"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Review */}
+      {phase==="review"&&(
+        <div style={{ padding:"18px 20px 20px" }}>
+          <div style={{ display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:12,marginBottom:12 }}>
+            <div>
+              <p style={{ fontSize:14,fontWeight:500,color:"rgba(255,255,255,0.82)",margin:"0 0 3px" }}>{keptChunks.length} piece{keptChunks.length!==1?"s":""} extracted</p>
+              <p style={{ fontSize:11,color:"rgba(255,255,255,0.30)",margin:0 }}>Remove anything inaccurate before saving.</p>
+            </div>
+            <span style={{ fontSize:10,color:"rgba(255,255,255,0.22)",background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:5,padding:"2px 8px",flexShrink:0 }}>{topic}</span>
+          </div>
+          <div style={{ display:"flex",flexDirection:"column",gap:6,marginBottom:14,maxHeight:320,overflowY:"auto",paddingRight:2 }}>
+            {chunks.map((chunk,i)=>{
+              const removed=removedChunks.has(i);
+              return (
+                <div key={i} style={{ padding:"10px 12px",borderRadius:9,background:removed?"rgba(255,255,255,0.01)":"rgba(255,255,255,0.04)",border:`1px solid ${removed?"rgba(255,255,255,0.04)":"rgba(255,255,255,0.08)"}`,display:"flex",gap:10,alignItems:"flex-start",opacity:removed?0.35:1 }}>
+                  <span style={{ fontSize:9,color:"rgba(255,255,255,0.18)",fontFamily:"monospace",flexShrink:0,paddingTop:2,minWidth:16 }}>#{i+1}</span>
+                  <p style={{ fontSize:12,color:"rgba(255,255,255,0.68)",lineHeight:1.6,margin:0,flex:1 }}>{chunk}</p>
+                  <button onClick={()=>setRemovedChunks(prev=>{const next=new Set(prev);if(next.has(i))next.delete(i);else next.add(i);return next;})}
+                    style={{ background:"none",border:"none",cursor:"pointer",padding:"1px 3px",color:removed?"rgba(52,211,153,0.45)":"rgba(255,255,255,0.20)",flexShrink:0,fontSize:13,lineHeight:1 }}>{removed?"\u21a9":"\u00d7"}</button>
+                </div>
+              );
+            })}
+          </div>
+          <div style={{ display:"flex",alignItems:"center",gap:8 }}>
+            {ingestDone?(
+              <div style={{ display:"flex",alignItems:"center",gap:8 }}>
+                <span style={{ fontSize:12,color:"rgba(52,211,153,0.70)" }}>{"\u2713"} {keptChunks.length} piece{keptChunks.length!==1?"s":""} saved</span>
+                <button onClick={reset} style={{ padding:"5px 12px",borderRadius:7,fontSize:11,background:"none",border:"1px solid rgba(255,255,255,0.08)",color:"rgba(255,255,255,0.35)",cursor:"pointer",fontFamily:"inherit" }}>New session</button>
+              </div>
+            ):(
+              <>
+                <button onClick={handleIngestAll} disabled={ingesting||keptChunks.length===0}
+                  style={{ padding:"7px 18px",borderRadius:10,fontSize:12,fontWeight:500,background:keptChunks.length>0?"rgba(52,211,153,0.10)":"rgba(255,255,255,0.02)",border:`1px solid ${keptChunks.length>0?"rgba(52,211,153,0.22)":"rgba(255,255,255,0.06)"}`,color:keptChunks.length>0?"rgba(52,211,153,0.80)":"rgba(255,255,255,0.22)",cursor:(ingesting||keptChunks.length===0)?"default":"pointer",fontFamily:"inherit",opacity:ingesting?0.6:1 }}>
+                  {ingesting?"Saving...":`Save ${keptChunks.length} piece${keptChunks.length!==1?"s":""}`}
+                </button>
+                <button onClick={()=>setPhase("interview")} style={{ padding:"7px 14px",borderRadius:10,fontSize:12,background:"none",border:"1px solid rgba(255,255,255,0.07)",color:"rgba(255,255,255,0.30)",cursor:"pointer",fontFamily:"inherit" }}>Keep talking</button>
+                <button onClick={reset} style={{ padding:"7px 14px",borderRadius:10,fontSize:12,background:"none",border:"none",color:"rgba(255,255,255,0.20)",cursor:"pointer",fontFamily:"inherit" }}>Discard</button>
+              </>
+            )}
+            {error&&<span style={{ fontSize:10,color:"rgba(248,113,113,0.60)" }}>{error}</span>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── SpeechRecognition types for voice panel ─────────────────────────────────
+
+type DSpeechEvent = { results: { [i: number]: { [j: number]: { transcript: string }; isFinal: boolean } }; resultIndex: number };
+type DSpeechError = { error: string };
+interface DSpeechRec { continuous: boolean; interimResults: boolean; lang: string; start(): void; stop(): void; onresult: ((e: DSpeechEvent) => void) | null; onerror: ((e: DSpeechError) => void) | null; onend: (() => void) | null; }
+
+function dChunkTranscript(text: string): string[] {
+  const sentences = text.match(/[^.!?]+[.!?]+/g) ?? [text];
+  const chunks: string[] = []; let current = "";
+  for (const s of sentences) {
+    const joined = (current + " " + s).trim();
+    if (joined.split(/\s+/).length > 250 && current) { chunks.push(current.trim()); current = s; }
+    else current = joined;
+  }
+  if (current.trim()) chunks.push(current.trim());
+  return chunks.filter(c => c.split(/\s+/).length >= 5);
+}
+
+function DesktopVoicePanel({ cloneId }: { cloneId: string }) {
+  const [recording, setRecording] = useState(false);
+  const [interim, setInterim] = useState("");
+  const [transcript, setTranscript] = useState("");
+  const [ingesting, setIngesting] = useState(false);
+  const [result, setResult] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
+  const recognitionRef = useRef<DSpeechRec | null>(null);
+  const finalRef = useRef("");
+  const supported = typeof window !== "undefined" && !!((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition);
+
+  function startRecording() {
+    if (!supported) return;
+    setError(null); setResult(null); setTranscript(""); setInterim(""); finalRef.current = "";
+    const SR = (window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition;
+    const rec: DSpeechRec = new SR();
+    rec.continuous = true; rec.interimResults = true; rec.lang = "en-US";
+    rec.onresult = (e: DSpeechEvent) => {
+      let interimText = "";
+      for (let i = e.resultIndex; i < Object.keys(e.results).length; i++) {
+        const r = e.results[i];
+        if (r.isFinal) { finalRef.current += r[0].transcript + " "; setTranscript(finalRef.current); }
+        else interimText += r[0].transcript;
+      }
+      setInterim(interimText);
+    };
+    rec.onerror = (e: DSpeechError) => { if (e.error !== "no-speech") setError(`Mic: ${e.error}`); };
+    rec.onend = () => { setRecording(false); setInterim(""); };
+    recognitionRef.current = rec; rec.start(); setRecording(true);
+  }
+
+  function stopRecording() { recognitionRef.current?.stop(); setRecording(false); }
+
+  async function handleIngest() {
+    const text = finalRef.current.trim();
+    if (!text) return;
+    const chunks = dChunkTranscript(text);
+    if (chunks.length === 0) { setError("Too short — speak a few more sentences."); return; }
+    setIngesting(true); setError(null);
+    try {
+      let total = 0;
+      for (const chunk of chunks) {
+        const res = await api("/ingestion/text", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clone_id: cloneId, text: chunk, source: "voice" }) });
+        const d = await res.json(); total += d.chunks_stored ?? 0;
+      }
+      setResult(`${total} chunk${total !== 1 ? "s" : ""} saved`);
+      setTranscript(""); finalRef.current = "";
+    } catch { setError("Failed"); }
+    finally { setIngesting(false); }
+  }
+
+  return (
+    <div style={{ borderRadius: 12, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", padding: "14px 16px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: open ? 10 : 0 }}>
+        <div style={{
+          width: 28, height: 28, borderRadius: 7, display: "flex", alignItems: "center", justifyContent: "center",
+          background: recording ? "rgba(239,68,68,0.08)" : "rgba(255,255,255,0.04)",
+          border: `1px solid ${recording ? "rgba(239,68,68,0.20)" : "rgba(255,255,255,0.08)"}`,
+          color: recording ? "rgba(239,68,68,0.70)" : "rgba(255,255,255,0.40)", flexShrink: 0,
+        }}>
+          {recording
+            ? <span style={{ width: 7, height: 7, borderRadius: 2, background: "rgba(239,68,68,0.75)", animation: "voice-pulse 1s ease-in-out infinite" }} />
+            : <svg width="12" height="12" viewBox="0 0 24 24" fill="none"><rect x="8" y="2" width="8" height="13" rx="4" stroke="currentColor" strokeWidth="1.5"/><path d="M4 11a8 8 0 0016 0" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/><path d="M12 19v3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+          }
+        </div>
+        <div style={{ flex: 1 }}>
+          <p style={{ fontSize: 12, fontWeight: 500, color: "rgba(255,255,255,0.70)", margin: 0 }}>Voice monologue</p>
+          <p style={{ fontSize: 10, color: "rgba(255,255,255,0.25)", margin: 0 }}>Speak freely, save the transcript</p>
+        </div>
+        <button onClick={() => { setOpen(o => !o); if (recording) stopRecording(); setResult(null); setError(null); }}
+          style={{ fontSize: 11, padding: "4px 10px", borderRadius: 7, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.40)", cursor: "pointer", fontFamily: "inherit" }}>
+          {open ? "Close" : "Record"}
+        </button>
+      </div>
+      {open && (
+        <>
+          {!supported && <p style={{ fontSize: 11, color: "rgba(248,113,113,0.60)", margin: "0 0 8px" }}>Not supported in this browser.</p>}
+          {(transcript || interim || recording) && (
+            <div style={{ minHeight: 50, maxHeight: 120, overflowY: "auto", padding: "8px 10px", borderRadius: 8, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", fontSize: 12, color: "rgba(255,255,255,0.55)", lineHeight: 1.55, marginBottom: 8 }}>
+              {transcript}
+              {interim && <span style={{ color: "rgba(255,255,255,0.25)" }}>{interim}</span>}
+              {recording && !transcript && !interim && <span style={{ color: "rgba(255,255,255,0.20)" }}>Listening...</span>}
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 5, alignItems: "center", flexWrap: "wrap" }}>
+            {!recording
+              ? <button onClick={startRecording} disabled={!supported} style={{ padding: "6px 12px", borderRadius: 7, fontSize: 11, fontWeight: 500, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.09)", color: "rgba(255,255,255,0.55)", cursor: supported ? "pointer" : "not-allowed", fontFamily: "inherit", opacity: !supported ? 0.4 : 1 }}>Start recording</button>
+              : <button onClick={stopRecording} style={{ padding: "6px 12px", borderRadius: 7, fontSize: 11, fontWeight: 500, background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.20)", color: "rgba(239,68,68,0.70)", cursor: "pointer", fontFamily: "inherit", animation: "voice-pulse 1.5s ease-in-out infinite" }}>Stop</button>
+            }
+            {transcript && !recording && (
+              <button onClick={handleIngest} disabled={ingesting} style={{ padding: "6px 12px", borderRadius: 7, fontSize: 11, fontWeight: 500, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.09)", color: "rgba(255,255,255,0.55)", cursor: ingesting ? "default" : "pointer", fontFamily: "inherit" }}>
+                {ingesting ? "Saving..." : "Save to memory"}
+              </button>
+            )}
+            {result && <span style={{ fontSize: 10, color: "rgba(52,211,153,0.65)" }}>{result}</span>}
+            {error && <span style={{ fontSize: 10, color: "rgba(248,113,113,0.60)" }}>{error}</span>}
+          </div>
+          <style>{`@keyframes voice-pulse { 0%,100% { opacity:1; } 50% { opacity:0.4; } }`}</style>
+        </>
+      )}
+    </div>
+  );
+}
+
+function DesktopTextPanel({ cloneId }:{ cloneId:string }){
+  const [text,setText]=useState("");
+  const [open,setOpen]=useState(false);
+  const [ingesting,setIngesting]=useState(false);
+  const [result,setResult]=useState<string|null>(null);
+  const [error,setError]=useState<string|null>(null);
+
+  async function handleIngest(){
+    const trimmed=text.trim();if(!trimmed||ingesting)return;
+    setIngesting(true);setResult(null);setError(null);
+    try{
+      const res=await api("/ingestion/text",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({clone_id:cloneId,text:trimmed,source:"upload"})});
+      const d=await res.json();
+      if(!res.ok){setError(String(d.detail??d.error??"Failed"));return;}
+      setResult(`${d.chunks_stored} chunk${d.chunks_stored!==1?"s":""} saved`);setText("");setOpen(false);
+    }catch(e){setError(String(e));}finally{setIngesting(false);}
+  }
+
+  return (
+    <div style={{ borderRadius:12,background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.08)",padding:"14px 16px" }}>
+      <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:open?10:0 }}>
+        <div style={{ width:28,height:28,borderRadius:7,display:"flex",alignItems:"center",justifyContent:"center",background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",color:"rgba(255,255,255,0.40)",flexShrink:0 }}>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M4 6h16M4 10h16M4 14h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+        </div>
+        <div style={{ flex:1 }}>
+          <p style={{ fontSize:12,fontWeight:500,color:"rgba(255,255,255,0.70)",margin:0 }}>Paste text</p>
+          <p style={{ fontSize:10,color:"rgba(255,255,255,0.25)",margin:0 }}>Notes, bios, frameworks, opinions</p>
+        </div>
+        <button onClick={()=>{setOpen(o=>!o);setResult(null);setError(null);}}
+          style={{ fontSize:11,padding:"4px 10px",borderRadius:7,background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",color:"rgba(255,255,255,0.40)",cursor:"pointer",fontFamily:"inherit" }}>{open?"Close":"Add"}</button>
+      </div>
+      {open&&(
+        <>
+          <textarea value={text} onChange={e=>{setText(e.target.value);setResult(null);setError(null);}}
+            placeholder="Paste or type anything here..." rows={3} autoFocus
+            style={{ width:"100%",background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:8,padding:"8px 10px",fontSize:12,color:"rgba(255,255,255,0.70)",fontFamily:"inherit",resize:"vertical",marginBottom:6,outline:"none",lineHeight:1.5,boxSizing:"border-box" }} />
+          <div style={{ display:"flex",alignItems:"center",gap:6 }}>
+            <button onClick={handleIngest} disabled={!text.trim()||ingesting}
+              style={{ padding:"6px 14px",borderRadius:7,fontSize:11,fontWeight:500,background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.10)",color:"rgba(255,255,255,0.60)",cursor:(!text.trim()||ingesting)?"default":"pointer",fontFamily:"inherit",opacity:(!text.trim()||ingesting)?0.4:1 }}>
+              {ingesting?"Saving...":"Save to memory"}
+            </button>
+            {result&&<span style={{ fontSize:10,color:"rgba(52,211,153,0.65)" }}>{result}</span>}
+            {error&&<span style={{ fontSize:10,color:"rgba(248,113,113,0.60)" }}>{error}</span>}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function DesktopFilePanel({ cloneId }:{ cloneId:string }){
+  type FItem={id:string;name:string;status:"pending"|"uploading"|"done"|"error";result?:string};
+  const [queue,setQueue]=useState<FItem[]>([]);
+  const [open,setOpen]=useState(false);
+  const [isDragging,setIsDragging]=useState(false);
+  const fileInputRef=useRef<HTMLInputElement>(null);
+
+  function addFiles(files:FileList|File[]){
+    const items:FItem[]=Array.from(files).map(f=>({id:`${f.name}-${Date.now()}`,name:f.name,status:"pending"}));
+    setQueue(prev=>[...prev,...items]);
+    uploadFiles(Array.from(files),items);
+  }
+
+  async function uploadFiles(files:File[],items:FItem[]){
+    for(let i=0;i<files.length;i++){
+      const item=items[i];const file=files[i];
+      setQueue(prev=>prev.map(f=>f.id===item.id?{...f,status:"uploading"}:f));
+      try{
+        const fd=new FormData();fd.append("clone_id",cloneId);fd.append("file",file);
+        const res=await fetch(`${BACKEND}/ingestion/file`,{method:"POST",body:fd,headers:{"X-User-Id":_userId}});
+        let data:Record<string,unknown>={};try{data=await res.json();}catch{data={error:res.statusText};}
+        if(!res.ok)setQueue(prev=>prev.map(f=>f.id===item.id?{...f,status:"error",result:String(data.detail??data.error??`HTTP ${res.status}`)}:f));
+        else setQueue(prev=>prev.map(f=>f.id===item.id?{...f,status:"done",result:`${data.chunks_stored} chunks`}:f));
+      }catch(e){setQueue(prev=>prev.map(f=>f.id===item.id?{...f,status:"error",result:String(e)}:f));}
+    }
+  }
+
+  return (
+    <div style={{ borderRadius:12,background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.08)",padding:"14px 16px" }}>
+      <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:open?10:0 }}>
+        <div style={{ width:28,height:28,borderRadius:7,display:"flex",alignItems:"center",justifyContent:"center",background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",color:"rgba(255,255,255,0.40)",flexShrink:0 }}>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M12 16V6M12 6L8 10M12 6l4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><path d="M3 17v2a2 2 0 002 2h14a2 2 0 002-2v-2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+        </div>
+        <div style={{ flex:1 }}>
+          <p style={{ fontSize:12,fontWeight:500,color:"rgba(255,255,255,0.70)",margin:0 }}>Upload files</p>
+          <p style={{ fontSize:10,color:"rgba(255,255,255,0.25)",margin:0 }}>PDF, DOCX, TXT, CSV, MD</p>
+        </div>
+        <button onClick={()=>{setOpen(o=>!o);setQueue([]);}}
+          style={{ fontSize:11,padding:"4px 10px",borderRadius:7,background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",color:"rgba(255,255,255,0.40)",cursor:"pointer",fontFamily:"inherit" }}>{open?"Close":"Upload"}</button>
+      </div>
+      {open&&(
+        <>
+          <div
+            onDragOver={e=>{e.preventDefault();setIsDragging(true);}}
+            onDragLeave={()=>setIsDragging(false)}
+            onDrop={e=>{e.preventDefault();setIsDragging(false);if(e.dataTransfer.files.length)addFiles(e.dataTransfer.files);}}
+            onClick={()=>fileInputRef.current?.click()}
+            style={{ border:`1.5px dashed ${isDragging?"rgba(255,255,255,0.20)":"rgba(255,255,255,0.08)"}`,borderRadius:9,padding:"14px 14px",display:"flex",flexDirection:"column",alignItems:"center",gap:3,cursor:"pointer",background:isDragging?"rgba(255,255,255,0.02)":"transparent",marginBottom:6 }}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" style={{ color:"rgba(255,255,255,0.18)" }}><path d="M12 16V6M12 6L8 10M12 6l4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><path d="M3 17v2a2 2 0 002 2h14a2 2 0 002-2v-2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+            <p style={{ fontSize:11,color:"rgba(255,255,255,0.28)",margin:0 }}>Drop files or click to browse</p>
+          </div>
+          <input ref={fileInputRef} type="file" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv,.txt,.md,.json,.html" style={{ display:"none" }} onChange={e=>{if(e.target.files?.length){addFiles(e.target.files);e.target.value="";}}} />
+          {queue.length>0&&(
+            <div style={{ display:"flex",flexDirection:"column",gap:4 }}>
+              {queue.map(item=>(
+                <div key={item.id} style={{ display:"flex",alignItems:"center",gap:6,fontSize:11 }}>
+                  <span style={{ fontSize:9,color:"rgba(255,255,255,0.18)",fontFamily:"monospace",minWidth:26 }}>{item.name.split(".").pop()?.toUpperCase()}</span>
+                  <span style={{ flex:1,color:"rgba(255,255,255,0.50)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{item.name}</span>
+                  <span style={{ fontSize:10,flexShrink:0,color:item.status==="done"?"rgba(52,211,153,0.60)":item.status==="error"?"rgba(248,113,113,0.55)":"rgba(255,255,255,0.25)" }}>
+                    {item.status==="uploading"?"...":item.status==="done"?item.result:item.status==="error"?"error":"queued"}
+                  </span>
+                  <button onClick={()=>setQueue(prev=>prev.filter(f=>f.id!==item.id))} style={{ color:"rgba(255,255,255,0.12)",background:"none",border:"none",cursor:"pointer",fontSize:14,lineHeight:1,padding:0 }}>{"\u00d7"}</button>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function TrainingPanel({ cloneId, handle }: { cloneId: string; handle: string }) {
   const [sources, setSources] = useState<ObsSource[]>([]);
   const [activity, setActivity] = useState<ObsActivity[]>([]);
   const [insights, setInsights] = useState<PendingInsight[]>([]);
+  const [connectedIds, setConnectedIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
+  const [swStatus, setSwStatus] = useState<{ enabled: boolean; running: boolean } | null>(null);
+  const [suggestedTopic, setSuggestedTopic] = useState<string | undefined>();
+
+  const doppel = (window as any).doppelDesktop;
 
   const load = useCallback(async () => {
     try {
-      const [srcRes, actRes, insRes] = await Promise.all([
+      const [srcRes, actRes, insRes, toolsRes] = await Promise.all([
         api(`/observation/sources?clone_id=${cloneId}`),
         api(`/observation/activity?clone_id=${cloneId}&limit=20`),
         api(`/observation/insights?clone_id=${cloneId}&status=pending&limit=20`),
+        api(`/clones/${cloneId}/tools`),
       ]);
       if (srcRes.ok) { const d = await srcRes.json(); setSources(d.sources || []); }
       if (actRes.ok) { const d = await actRes.json(); setActivity(d.activity || []); }
       if (insRes.ok) { const d = await insRes.json(); setInsights(d.insights || []); }
+      if (toolsRes.ok) {
+        const td = await toolsRes.json();
+        const tools: { name: string }[] = Array.isArray(td) ? td : td.tools ?? [];
+        const ids = new Set(tools.map(t => TOOL_NAME_TO_ID[t.name]).filter(Boolean));
+        setConnectedIds(ids);
+      }
     } catch {}
     setLoading(false);
   }, [cloneId]);
 
   useEffect(() => { load(); }, [load]);
 
+  // Load screenwatch status from Electron
+  useEffect(() => {
+    if (doppel?.screenwatchStatus) {
+      doppel.screenwatchStatus().then((s: any) => setSwStatus(s));
+    }
+  }, []);
+
   const toggleSource = async (sourceType: string, currentlyEnabled: boolean) => {
+    // Screenwatch: also start/stop the desktop capture timer
+    if (sourceType === "screenwatch" && doppel) {
+      if (currentlyEnabled) {
+        await doppel.stopScreenwatch();
+        setSwStatus(prev => prev ? { ...prev, enabled: false, running: false } : null);
+      } else {
+        // Ensure backend source config exists
+        const existing = sources.find(s => s.source_type === "screenwatch");
+        if (!existing) {
+          await api(`/observation/sources`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clone_id: cloneId, source_type: "screenwatch", enabled: true, mode: "push", frequency: "realtime" }) });
+        } else {
+          await api(`/observation/sources/screenwatch?clone_id=${cloneId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled: true }) });
+        }
+        await doppel.startScreenwatch(cloneId);
+        setSwStatus({ enabled: true, running: true });
+        load();
+        return;
+      }
+    }
+
     const existing = sources.find(s => s.source_type === sourceType);
     if (existing) {
       await api(`/observation/sources/${sourceType}?clone_id=${cloneId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled: !currentlyEnabled }) });
@@ -1097,25 +1892,44 @@ function ObservationsPanel({ cloneId }: { cloneId: string }) {
     <div style={{ flex: 1, overflow: "auto", padding: "20px 24px" }}>
       <div style={{ maxWidth: 720, margin: "0 auto" }}>
 
-        {/* Sources */}
-        <p style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.12em", color: "rgba(255,255,255,0.25)", margin: "0 0 12px" }}>Sources</p>
+        {/* Training suggestions — knowledge gaps */}
+        <TrainingSuggestions handle={handle} onTeach={(topic) => setSuggestedTopic(topic)} />
+
+        {/* Manual training */}
+        <DesktopInterviewPanel key={suggestedTopic ?? "default"} cloneId={cloneId} initialTopic={suggestedTopic} />
+        <div style={{ marginTop: 10, marginBottom: 28 }}>
+          <p style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.10em", color: "rgba(255,255,255,0.20)", margin: "0 0 10px" }}>Other ways to add context</p>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <DesktopTextPanel cloneId={cloneId} />
+            <DesktopVoicePanel cloneId={cloneId} />
+            <DesktopFilePanel cloneId={cloneId} />
+          </div>
+        </div>
+
+        {/* Observations */}
+        <p style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.12em", color: "rgba(255,255,255,0.25)", margin: "0 0 12px" }}>Observations</p>
         <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 28 }}>
           {OBS_SOURCE_LIST.map(stype => {
             const src = sources.find(s => s.source_type === stype);
-            const enabled = src?.enabled ?? false;
+            const enabled = stype === "screenwatch" ? (swStatus?.running ?? src?.enabled ?? false) : (src?.enabled ?? false);
             const status = src?.status ?? "idle";
+            const isScreenwatch = stype === "screenwatch";
+            const isConnected = isScreenwatch || connectedIds.has(stype);
             return (
-              <div key={stype} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", borderRadius: 12, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)" }}>
+              <div key={stype} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", borderRadius: 12, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", opacity: isConnected ? 1 : 0.45 }}>
                 <div style={{ width: 6, height: 6, borderRadius: "50%", background: enabled && status !== "error" ? "rgba(52,211,153,0.70)" : "rgba(255,255,255,0.18)", flexShrink: 0 }} />
                 <span style={{ fontSize: 13, color: "rgba(255,255,255,0.75)", flex: 1, fontWeight: 500 }}>{OBS_SOURCE_LABELS[stype] || stype}</span>
                 {src && <span style={{ fontSize: 11, color: "rgba(255,255,255,0.30)" }}>{timeAgo(src.last_observed_at)}</span>}
                 {src && <span style={{ fontSize: 11, color: "rgba(255,255,255,0.25)" }}>{src.items_ingested.toLocaleString()} learned</span>}
-                {enabled && (
+                {!isConnected && <span style={{ fontSize: 10, color: "rgba(255,255,255,0.25)" }}>Not connected</span>}
+                {isConnected && enabled && !isScreenwatch && (
                   <button onClick={() => triggerSync(stype)} style={{ fontSize: 10, padding: "3px 10px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.45)", cursor: "pointer", fontFamily: "inherit" }}>Sync</button>
                 )}
-                <button onClick={() => toggleSource(stype, enabled)} style={{ fontSize: 10, padding: "3px 10px", borderRadius: 6, border: `1px solid ${enabled ? "rgba(52,211,153,0.25)" : "rgba(255,255,255,0.10)"}`, background: enabled ? "rgba(52,211,153,0.08)" : "rgba(255,255,255,0.04)", color: enabled ? "rgba(52,211,153,0.75)" : "rgba(255,255,255,0.40)", cursor: "pointer", fontFamily: "inherit" }}>
-                  {enabled ? "On" : "Off"}
-                </button>
+                {isConnected && (
+                  <button onClick={() => toggleSource(stype, enabled)} style={{ fontSize: 10, padding: "3px 10px", borderRadius: 6, border: `1px solid ${enabled ? "rgba(52,211,153,0.25)" : "rgba(255,255,255,0.10)"}`, background: enabled ? "rgba(52,211,153,0.08)" : "rgba(255,255,255,0.04)", color: enabled ? "rgba(52,211,153,0.75)" : "rgba(255,255,255,0.40)", cursor: "pointer", fontFamily: "inherit" }}>
+                    {enabled ? "On" : "Off"}
+                  </button>
+                )}
               </div>
             );
           })}
@@ -1168,6 +1982,405 @@ function ObservationsPanel({ cloneId }: { cloneId: string }) {
 
         {loading && <p style={{ fontSize: 12, color: "rgba(255,255,255,0.25)", textAlign: "center", padding: "12px 0" }}>Loading...</p>}
       </div>
+    </div>
+  );
+}
+
+// ── KnowledgePanel — Memory Inspector + Omitter ─────────────────────────────
+
+interface MemoryChunkD { id: string; content: string; source: string; topics: string[]; is_pinned: boolean; is_excluded: boolean; created_at: string | null; }
+interface SemanticFactD { id: string; fact: string; domain: string | null; confidence: number; created_at: string | null; }
+interface OmissionRuleD { pattern: string; created_at: string; affected: number; }
+
+const MEM_SOURCE_LABEL: Record<string,string> = { gmail:"Gmail",upload:"Upload",voice:"Voice",interview:"Interview",seed_qa:"Q&A",chat:"Chat",slack:"Slack",notion:"Notion",gdrive:"Drive",github:"GitHub" };
+const MEM_SOURCES = ["gmail","upload","voice","interview","chat","notion","gdrive","github"] as const;
+
+function KnowledgePanel({ cloneId, handle }: { cloneId: string; handle: string }) {
+  const [tab, setTab] = useState<"pinned"|"all"|"facts"|"omit">("pinned");
+  const [memories, setMemories] = useState<MemoryChunkD[]>([]);
+  const [total, setTotal] = useState(0);
+  const [facts, setFacts] = useState<SemanticFactD[]>([]);
+  const [factsTotal, setFactsTotal] = useState(0);
+  const [rules, setRules] = useState<OmissionRuleD[]>([]);
+  const [page, setPage] = useState(0);
+  const [search, setSearch] = useState("");
+  const [sourceFilter, setSourceFilter] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [omitInput, setOmitInput] = useState("");
+  const [omitAdding, setOmitAdding] = useState(false);
+  const [omitResult, setOmitResult] = useState<string|null>(null);
+  const LIMIT = 20;
+  const debounceRef = useRef<ReturnType<typeof setTimeout>|null>(null);
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => { setDebouncedSearch(search); setPage(0); }, 300);
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
+  }, [search]);
+
+  const loadEpisodic = useCallback(async () => {
+    setLoading(true);
+    const params = new URLSearchParams({ clone_id: cloneId, limit: String(LIMIT), offset: String(page * LIMIT) });
+    if (tab === "pinned") params.set("pinned_only", "true");
+    if (tab === "all") params.set("include_excluded", "true");
+    if (debouncedSearch) params.set("search", debouncedSearch);
+    if (sourceFilter) params.set("source", sourceFilter);
+    try {
+      const res = await api(`/brain/memories?${params}`);
+      if (res.ok) { const d = await res.json(); setMemories(d.memories ?? []); setTotal(d.total ?? 0); }
+    } catch {}
+    setLoading(false);
+  }, [cloneId, tab, page, debouncedSearch, sourceFilter]);
+
+  const loadFacts = useCallback(async () => {
+    setLoading(true);
+    const params = new URLSearchParams({ clone_id: cloneId, limit: String(LIMIT), offset: String(page * LIMIT) });
+    if (debouncedSearch) params.set("search", debouncedSearch);
+    try {
+      const res = await api(`/brain/semantic?${params}`);
+      if (res.ok) { const d = await res.json(); setFacts(d.facts ?? []); setFactsTotal(d.total ?? 0); }
+    } catch {}
+    setLoading(false);
+  }, [cloneId, page, debouncedSearch]);
+
+  const loadRules = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await api(`/clones/${handle}/omissions`);
+      if (res.ok) { const d = await res.json(); setRules(d.rules ?? []); }
+    } catch {}
+    setLoading(false);
+  }, [handle]);
+
+  useEffect(() => {
+    setPage(0); setSelected(new Set());
+    if (tab === "facts") loadFacts();
+    else if (tab === "omit") loadRules();
+    else loadEpisodic();
+  }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (tab === "facts") loadFacts();
+    else if (tab !== "omit") loadEpisodic();
+  }, [page, debouncedSearch, sourceFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function patchMem(id: string, patch: Record<string,unknown>) {
+    await api(`/brain/memories/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clone_id: cloneId, ...patch }) });
+    if (tab === "facts") loadFacts(); else loadEpisodic();
+  }
+
+  async function deleteMem(id: string) {
+    await api(`/brain/memories/${id}?clone_id=${cloneId}`, { method: "DELETE" });
+    loadEpisodic();
+  }
+
+  async function bulkDelete() {
+    if (selected.size === 0 || bulkDeleting) return;
+    setBulkDeleting(true);
+    await Promise.all(Array.from(selected).map(id => api(`/brain/memories/${id}?clone_id=${cloneId}`, { method: "DELETE" })));
+    setSelected(new Set()); loadEpisodic(); setBulkDeleting(false);
+  }
+
+  async function patchFact(id: string, fact: string) {
+    await api(`/brain/semantic/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clone_id: cloneId, fact }) });
+    loadFacts();
+  }
+
+  async function deleteFact(id: string) {
+    await api(`/brain/semantic/${id}?clone_id=${cloneId}`, { method: "DELETE" });
+    loadFacts();
+  }
+
+  async function addOmitRule() {
+    if (!omitInput.trim() || omitAdding) return;
+    setOmitAdding(true); setOmitResult(null);
+    try {
+      const res = await api(`/clones/${handle}/omissions`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pattern: omitInput.trim() }) });
+      if (res.ok) { const d = await res.json(); setOmitResult(`"${d.pattern}" blocked — ${d.affected} chunk${d.affected !== 1 ? "s" : ""} excluded`); setOmitInput(""); loadRules(); }
+    } catch {} finally { setOmitAdding(false); }
+  }
+
+  async function removeOmitRule(pattern: string) {
+    await api(`/clones/${handle}/omissions?pattern=${encodeURIComponent(pattern)}`, { method: "DELETE" });
+    loadRules();
+  }
+
+  const totalPages = tab === "facts" ? Math.ceil(factsTotal / LIMIT) : Math.ceil(total / LIMIT);
+  const allPageSelected = memories.length > 0 && memories.every(c => selected.has(c.id));
+
+  return (
+    <div style={{ flex:1,overflowY:"auto",padding:"20px 16px 80px",maxWidth:1080,margin:"0 auto",width:"100%" }}>
+      {/* Omitter */}
+      <div style={{ borderRadius:14,overflow:"hidden",background:"rgba(239,68,68,0.04)",border:"1px solid rgba(239,68,68,0.18)",marginBottom:14 }}>
+        <div style={{ padding:"14px 18px",borderBottom:"1px solid rgba(239,68,68,0.10)",display:"flex",alignItems:"center",gap:10 }}>
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" style={{ color:"rgba(248,113,113,0.80)",flexShrink:0 }}><path d="M8 2L14.5 13.5H1.5L8 2z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round"/><path d="M8 6v4M8 11.5v.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/></svg>
+          <div style={{ flex:1 }}>
+            <p style={{ fontSize:13,fontWeight:500,color:"rgba(248,113,113,0.85)",margin:0 }}>Memory omitter</p>
+            <p style={{ fontSize:11,color:"rgba(255,255,255,0.35)",margin:"2px 0 0" }}>Block topics or keywords permanently from memory.</p>
+          </div>
+        </div>
+        <div style={{ padding:"12px 18px",borderBottom:"1px solid rgba(239,68,68,0.08)" }}>
+          <div style={{ display:"flex",gap:8 }}>
+            <input value={omitInput} onChange={e=>setOmitInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addOmitRule()}
+              placeholder="e.g. salary, home address, medical history..."
+              style={{ flex:1,background:"rgba(255,255,255,0.04)",border:"1px solid rgba(239,68,68,0.16)",borderRadius:10,padding:"7px 12px",fontSize:12,color:"rgba(255,255,255,0.75)",fontFamily:"inherit",outline:"none" }} />
+            <button onClick={addOmitRule} disabled={omitAdding||!omitInput.trim()}
+              style={{ padding:"7px 14px",borderRadius:10,fontSize:12,fontWeight:500,background:omitInput.trim()?"rgba(239,68,68,0.12)":"rgba(239,68,68,0.05)",border:"1px solid rgba(239,68,68,0.22)",color:omitInput.trim()?"rgba(248,113,113,0.80)":"rgba(248,113,113,0.30)",cursor:omitInput.trim()?"pointer":"default",fontFamily:"inherit" }}>
+              {omitAdding?"Blocking...":"Block"}
+            </button>
+          </div>
+          {omitResult && <p style={{ fontSize:11,color:"rgba(248,113,113,0.60)",margin:"6px 0 0" }}>{omitResult}</p>}
+        </div>
+        {rules.length>0 && (
+          <div>
+            {rules.map((rule,idx)=>(
+              <div key={rule.pattern} style={{ padding:"9px 18px",borderTop:idx===0?"none":"1px solid rgba(239,68,68,0.06)",display:"flex",alignItems:"center",gap:8 }}>
+                <span style={{ flex:1,fontSize:12,color:"rgba(255,255,255,0.60)",fontFamily:"monospace",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{rule.pattern}</span>
+                <span style={{ fontSize:10,color:rule.affected>0?"rgba(248,113,113,0.50)":"rgba(255,255,255,0.22)",flexShrink:0 }}>{rule.affected} chunk{rule.affected!==1?"s":""}</span>
+                <button onClick={()=>removeOmitRule(rule.pattern)} style={{ fontSize:10,color:"rgba(255,255,255,0.25)",background:"none",border:"none",cursor:"pointer",padding:0,flexShrink:0 }}>remove</button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Inspector */}
+      <div style={{ borderRadius:14,overflow:"hidden",background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.08)" }}>
+        <div style={{ padding:"14px 18px 12px",borderBottom:"1px solid rgba(255,255,255,0.06)" }}>
+          <div style={{ display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10 }}>
+            <div>
+              <p style={{ fontSize:14,fontWeight:500,color:"rgba(255,255,255,0.80)",margin:0 }}>Memory inspector</p>
+              <p style={{ fontSize:11,color:"rgba(255,255,255,0.30)",margin:"3px 0 0" }}>
+                {tab==="facts"?"Edit or delete extracted facts":"Pin, hide, edit, or delete memory chunks"}
+              </p>
+            </div>
+            <div style={{ display:"flex",gap:2,background:"rgba(255,255,255,0.03)",borderRadius:10,padding:3 }}>
+              {(["pinned","all","facts"] as const).map(t=>(
+                <button key={t} onClick={()=>{setTab(t);setPage(0);setSearch("");setSelected(new Set());}}
+                  style={{ padding:"4px 11px",borderRadius:8,fontSize:11,cursor:"pointer",border:"none",background:tab===t?"rgba(255,255,255,0.08)":"transparent",color:tab===t?"rgba(255,255,255,0.80)":"rgba(255,255,255,0.35)",fontFamily:"inherit" }}>
+                  {t==="pinned"?"Pinned":t==="all"?"All":"Facts"}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Bulk actions */}
+          {tab!=="facts"&&memories.length>0&&(
+            <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:8 }}>
+              <label style={{ display:"flex",alignItems:"center",gap:5,cursor:"pointer" }}>
+                <input type="checkbox" checked={allPageSelected} onChange={()=>{
+                  if(allPageSelected) setSelected(s=>{const n=new Set(s);memories.forEach(c=>n.delete(c.id));return n;});
+                  else setSelected(s=>{const n=new Set(s);memories.forEach(c=>n.add(c.id));return n;});
+                }} style={{ cursor:"pointer",width:12,height:12,accentColor:"rgba(255,255,255,0.55)" }} />
+                <span style={{ fontSize:10,color:"rgba(255,255,255,0.30)" }}>{selected.size>0?`${selected.size} selected`:"Select all"}</span>
+              </label>
+              {selected.size>0&&(
+                <button onClick={bulkDelete} disabled={bulkDeleting}
+                  style={{ marginLeft:"auto",fontSize:10,padding:"3px 10px",borderRadius:6,cursor:bulkDeleting?"not-allowed":"pointer",background:"rgba(239,68,68,0.08)",border:"1px solid rgba(239,68,68,0.20)",color:"rgba(248,113,113,0.70)",fontFamily:"inherit" }}>
+                  {bulkDeleting?"Deleting...":(`Delete ${selected.size}`)}
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Search + filter */}
+          {tab!=="facts"&&(
+            <div style={{ display:"flex",gap:8 }}>
+              <div style={{ position:"relative",flex:1 }}>
+                <svg style={{ position:"absolute",left:10,top:"50%",transform:"translateY(-50%)",color:"rgba(255,255,255,0.22)",pointerEvents:"none" }} width="11" height="11" viewBox="0 0 12 12" fill="none">
+                  <circle cx="5" cy="5" r="3.5" stroke="currentColor" strokeWidth="1.3"/><path d="M8 8l2.5 2.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+                </svg>
+                <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search memories..."
+                  style={{ width:"100%",paddingLeft:28,background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:8,padding:"6px 10px 6px 28px",fontSize:11,color:"rgba(255,255,255,0.70)",fontFamily:"inherit",outline:"none" }} />
+              </div>
+              <select value={sourceFilter} onChange={e=>{setSourceFilter(e.target.value);setPage(0);setSelected(new Set());}}
+                style={{ background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:8,padding:"6px 8px",fontSize:11,color:"rgba(255,255,255,0.60)",fontFamily:"inherit",outline:"none",cursor:"pointer" }}>
+                <option value="">All sources</option>
+                {MEM_SOURCES.map(s=><option key={s} value={s}>{MEM_SOURCE_LABEL[s]??s}</option>)}
+              </select>
+            </div>
+          )}
+
+          {tab==="facts"&&(
+            <div style={{ position:"relative" }}>
+              <svg style={{ position:"absolute",left:10,top:"50%",transform:"translateY(-50%)",color:"rgba(255,255,255,0.22)",pointerEvents:"none" }} width="11" height="11" viewBox="0 0 12 12" fill="none">
+                <circle cx="5" cy="5" r="3.5" stroke="currentColor" strokeWidth="1.3"/><path d="M8 8l2.5 2.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+              </svg>
+              <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search facts..."
+                style={{ width:"100%",paddingLeft:28,background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:8,padding:"6px 10px 6px 28px",fontSize:11,color:"rgba(255,255,255,0.70)",fontFamily:"inherit",outline:"none" }} />
+            </div>
+          )}
+        </div>
+
+        {loading && <p style={{ padding:"16px 18px",fontSize:12,color:"rgba(255,255,255,0.25)" }}>Loading...</p>}
+
+        {/* Episodic rows */}
+        {!loading && tab!=="facts" && (
+          <>
+            {memories.length===0 && (
+              <p style={{ padding:"24px 18px",textAlign:"center",fontSize:12,color:"rgba(255,255,255,0.28)" }}>
+                {debouncedSearch?`No memories matching "${debouncedSearch}".`:tab==="pinned"?"No pinned memories yet.":"No memories found."}
+              </p>
+            )}
+            {memories.map((chunk,idx)=>(
+              <MemoryRowD key={chunk.id} chunk={chunk} idx={idx} cloneId={cloneId}
+                isSelected={selected.has(chunk.id)}
+                onSelect={(id,checked)=>setSelected(s=>{const n=new Set(s);checked?n.add(id):n.delete(id);return n;})}
+                onPatch={patchMem} onDelete={deleteMem} />
+            ))}
+          </>
+        )}
+
+        {/* Fact rows */}
+        {!loading && tab==="facts" && (
+          <>
+            {facts.length===0 && (
+              <p style={{ padding:"24px 18px",textAlign:"center",fontSize:12,color:"rgba(255,255,255,0.28)" }}>
+                {debouncedSearch?`No facts matching "${debouncedSearch}".`:"No semantic facts yet."}
+              </p>
+            )}
+            {facts.map((f,idx)=>(
+              <FactRowD key={f.id} fact={f} idx={idx} onPatch={patchFact} onDelete={deleteFact} />
+            ))}
+          </>
+        )}
+
+        {/* Pagination */}
+        {totalPages>1&&tab!=="omit"&&(
+          <div style={{ padding:"8px 18px",borderTop:"1px solid rgba(255,255,255,0.05)",display:"flex",alignItems:"center",justifyContent:"space-between" }}>
+            <span style={{ fontSize:11,color:"rgba(255,255,255,0.22)" }}>
+              {page*LIMIT+1}–{Math.min((page+1)*LIMIT, tab==="facts"?factsTotal:total)} of {tab==="facts"?factsTotal:total}
+            </span>
+            <div style={{ display:"flex",gap:6 }}>
+              <button onClick={()=>setPage(p=>p-1)} disabled={page===0} style={{ fontSize:11,padding:"3px 10px",borderRadius:6,background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",color:page===0?"rgba(255,255,255,0.15)":"rgba(255,255,255,0.45)",cursor:page===0?"default":"pointer",fontFamily:"inherit" }}>Prev</button>
+              <button onClick={()=>setPage(p=>p+1)} disabled={page>=totalPages-1} style={{ fontSize:11,padding:"3px 10px",borderRadius:6,background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",color:page>=totalPages-1?"rgba(255,255,255,0.15)":"rgba(255,255,255,0.45)",cursor:page>=totalPages-1?"default":"pointer",fontFamily:"inherit" }}>Next</button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function MemoryRowD({ chunk, idx, cloneId, isSelected, onSelect, onPatch, onDelete }: {
+  chunk: MemoryChunkD; idx: number; cloneId: string; isSelected: boolean;
+  onSelect: (id:string,checked:boolean)=>void;
+  onPatch: (id:string,patch:Record<string,unknown>)=>void;
+  onDelete: (id:string)=>void;
+}) {
+  const [hovered, setHovered] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [editVal, setEditVal] = useState(chunk.content);
+  const [confirmDel, setConfirmDel] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  async function saveEdit() {
+    if(!editVal.trim()||editVal===chunk.content){setEditing(false);return;}
+    setSaving(true);
+    await onPatch(chunk.id, { content: editVal.trim() });
+    setEditing(false); setSaving(false);
+  }
+
+  return (
+    <div onMouseEnter={()=>setHovered(true)} onMouseLeave={()=>{setHovered(false);if(!editing&&!confirmDel)setConfirmDel(false);}}
+      style={{ padding:"10px 18px",borderTop:idx===0?"none":"1px solid rgba(255,255,255,0.04)",opacity:chunk.is_excluded?0.40:1,background:hovered?"rgba(255,255,255,0.02)":"transparent" }}>
+      {editing?(
+        <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
+          <textarea value={editVal} onChange={e=>setEditVal(e.target.value)} rows={3} autoFocus
+            style={{ background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.10)",borderRadius:8,padding:"8px 10px",fontSize:12,color:"rgba(255,255,255,0.75)",fontFamily:"inherit",resize:"vertical",outline:"none",width:"100%" }} />
+          <div style={{ display:"flex",gap:6 }}>
+            <button onClick={saveEdit} disabled={saving||!editVal.trim()} style={{ fontSize:11,padding:"4px 12px",borderRadius:6,background:"rgba(255,255,255,0.08)",border:"1px solid rgba(255,255,255,0.14)",color:"rgba(255,255,255,0.70)",cursor:"pointer",fontFamily:"inherit" }}>{saving?"Saving...":"Save"}</button>
+            <button onClick={()=>{setEditing(false);setEditVal(chunk.content);}} style={{ fontSize:11,padding:"4px 12px",borderRadius:6,background:"none",border:"1px solid rgba(255,255,255,0.08)",color:"rgba(255,255,255,0.35)",cursor:"pointer",fontFamily:"inherit" }}>Cancel</button>
+          </div>
+        </div>
+      ):confirmDel?(
+        <div style={{ display:"flex",alignItems:"center",gap:8 }}>
+          <p style={{ fontSize:11,color:"rgba(248,113,113,0.70)",margin:0,flex:1 }}>Permanently delete?</p>
+          <button onClick={()=>{onDelete(chunk.id);setConfirmDel(false);}} style={{ fontSize:10,padding:"3px 10px",borderRadius:6,background:"rgba(239,68,68,0.10)",border:"1px solid rgba(239,68,68,0.22)",color:"rgba(248,113,113,0.80)",cursor:"pointer",fontFamily:"inherit" }}>Delete</button>
+          <button onClick={()=>setConfirmDel(false)} style={{ fontSize:10,padding:"3px 10px",borderRadius:6,background:"none",border:"1px solid rgba(255,255,255,0.08)",color:"rgba(255,255,255,0.35)",cursor:"pointer",fontFamily:"inherit" }}>Cancel</button>
+        </div>
+      ):(
+        <div style={{ display:"flex",alignItems:"flex-start",gap:10 }}>
+          <input type="checkbox" checked={isSelected} onChange={e=>onSelect(chunk.id,e.target.checked)}
+            style={{ marginTop:3,flexShrink:0,cursor:"pointer",width:12,height:12,accentColor:"rgba(255,255,255,0.55)" }} />
+          <button onClick={()=>onPatch(chunk.id,{is_pinned:!chunk.is_pinned})} title={chunk.is_pinned?"Unpin":"Pin"}
+            style={{ marginTop:2,flexShrink:0,background:"none",border:"none",cursor:"pointer",padding:0,color:chunk.is_pinned?"rgba(255,255,255,0.55)":"rgba(255,255,255,0.12)" }}>
+            <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M5 1h2l.5 3.5L9 5v1H7.5L7 11H5l-.5-5H3V5l1.5-.5L5 1z" fill={chunk.is_pinned?"currentColor":"none"} stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/></svg>
+          </button>
+          <div style={{ flex:1,minWidth:0 }}>
+            <p onClick={()=>setExpanded(e=>!e)} style={{ fontSize:12,color:"rgba(255,255,255,0.65)",lineHeight:1.5,margin:0,cursor:"pointer",...(!expanded?{display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical" as const,overflow:"hidden"}:{}) }}>
+              {chunk.content}
+            </p>
+            <div style={{ display:"flex",gap:6,marginTop:4,alignItems:"center" }}>
+              <span style={{ fontSize:9,color:"rgba(255,255,255,0.22)",background:"rgba(255,255,255,0.04)",borderRadius:3,padding:"1px 5px" }}>{MEM_SOURCE_LABEL[chunk.source]??chunk.source}</span>
+              {chunk.topics.slice(0,2).map(t=><span key={t} style={{ fontSize:9,color:"rgba(255,255,255,0.18)" }}>{t}</span>)}
+              {chunk.created_at&&<span style={{ fontSize:9,color:"rgba(255,255,255,0.13)",marginLeft:"auto" }}>{new Date(chunk.created_at).toLocaleDateString("en-US",{month:"short",day:"numeric"})}</span>}
+            </div>
+          </div>
+          <div style={{ flexShrink:0,display:"flex",gap:6,opacity:hovered?1:0,transition:"opacity 0.15s" }}>
+            <button onClick={()=>{setEditing(true);setEditVal(chunk.content);}} style={{ fontSize:9,color:"rgba(255,255,255,0.30)",background:"none",border:"none",cursor:"pointer",padding:0 }}>edit</button>
+            {!chunk.is_excluded
+              ?<button onClick={()=>onPatch(chunk.id,{is_excluded:true})} style={{ fontSize:9,color:"rgba(255,255,255,0.22)",background:"none",border:"none",cursor:"pointer",padding:0 }}>hide</button>
+              :<button onClick={()=>onPatch(chunk.id,{is_excluded:false})} style={{ fontSize:9,color:"rgba(255,255,255,0.35)",background:"none",border:"none",cursor:"pointer",padding:0 }}>restore</button>
+            }
+            <button onClick={()=>setConfirmDel(true)} style={{ fontSize:9,color:"rgba(248,113,113,0.40)",background:"none",border:"none",cursor:"pointer",padding:0 }}>delete</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FactRowD({ fact, idx, onPatch, onDelete }: {
+  fact: SemanticFactD; idx: number;
+  onPatch: (id:string,fact:string)=>void;
+  onDelete: (id:string)=>void;
+}) {
+  const [hovered, setHovered] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [editVal, setEditVal] = useState(fact.fact);
+  const [confirmDel, setConfirmDel] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const confColor = fact.confidence>=0.8?"rgba(52,211,153,0.60)":fact.confidence>=0.5?"rgba(255,255,255,0.35)":"rgba(251,191,36,0.55)";
+
+  return (
+    <div onMouseEnter={()=>setHovered(true)} onMouseLeave={()=>setHovered(false)}
+      style={{ padding:"9px 18px",borderTop:idx===0?"none":"1px solid rgba(255,255,255,0.04)",background:hovered?"rgba(255,255,255,0.02)":"transparent" }}>
+      {editing?(
+        <div style={{ display:"flex",flexDirection:"column",gap:6 }}>
+          <textarea value={editVal} onChange={e=>setEditVal(e.target.value)} rows={2} autoFocus
+            style={{ background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.10)",borderRadius:8,padding:"8px 10px",fontSize:12,color:"rgba(255,255,255,0.75)",fontFamily:"inherit",resize:"vertical",outline:"none",width:"100%" }} />
+          <div style={{ display:"flex",gap:6 }}>
+            <button onClick={async()=>{if(!editVal.trim()||editVal===fact.fact){setEditing(false);return;}setSaving(true);await onPatch(fact.id,editVal.trim());setEditing(false);setSaving(false);}} disabled={saving} style={{ fontSize:11,padding:"4px 12px",borderRadius:6,background:"rgba(255,255,255,0.08)",border:"1px solid rgba(255,255,255,0.14)",color:"rgba(255,255,255,0.70)",cursor:"pointer",fontFamily:"inherit" }}>{saving?"Saving...":"Save"}</button>
+            <button onClick={()=>{setEditing(false);setEditVal(fact.fact);}} style={{ fontSize:11,padding:"4px 12px",borderRadius:6,background:"none",border:"1px solid rgba(255,255,255,0.08)",color:"rgba(255,255,255,0.35)",cursor:"pointer",fontFamily:"inherit" }}>Cancel</button>
+          </div>
+        </div>
+      ):confirmDel?(
+        <div style={{ display:"flex",alignItems:"center",gap:8 }}>
+          <p style={{ fontSize:11,color:"rgba(248,113,113,0.70)",margin:0,flex:1 }}>Delete this fact?</p>
+          <button onClick={()=>{onDelete(fact.id);setConfirmDel(false);}} style={{ fontSize:10,padding:"3px 10px",borderRadius:6,background:"rgba(239,68,68,0.10)",border:"1px solid rgba(239,68,68,0.22)",color:"rgba(248,113,113,0.80)",cursor:"pointer",fontFamily:"inherit" }}>Delete</button>
+          <button onClick={()=>setConfirmDel(false)} style={{ fontSize:10,padding:"3px 10px",borderRadius:6,background:"none",border:"1px solid rgba(255,255,255,0.08)",color:"rgba(255,255,255,0.35)",cursor:"pointer",fontFamily:"inherit" }}>Cancel</button>
+        </div>
+      ):(
+        <div style={{ display:"flex",alignItems:"flex-start",gap:8 }}>
+          <div style={{ flex:1,minWidth:0 }}>
+            <p style={{ fontSize:12,color:"rgba(255,255,255,0.62)",lineHeight:1.5,margin:0 }}>{fact.fact}</p>
+            <div style={{ display:"flex",gap:6,marginTop:4 }}>
+              {fact.domain&&<span style={{ fontSize:9,color:"rgba(255,255,255,0.22)",background:"rgba(255,255,255,0.04)",borderRadius:3,padding:"1px 5px" }}>{fact.domain}</span>}
+              <span style={{ fontSize:9,color:confColor }}>{Math.round(fact.confidence*100)}% conf</span>
+            </div>
+          </div>
+          <div style={{ flexShrink:0,display:"flex",gap:6,opacity:hovered?1:0,transition:"opacity 0.15s" }}>
+            <button onClick={()=>{setEditing(true);setEditVal(fact.fact);}} style={{ fontSize:9,color:"rgba(255,255,255,0.30)",background:"none",border:"none",cursor:"pointer",padding:0 }}>edit</button>
+            <button onClick={()=>setConfirmDel(true)} style={{ fontSize:9,color:"rgba(248,113,113,0.40)",background:"none",border:"none",cursor:"pointer",padding:0 }}>delete</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -2271,6 +3484,118 @@ function Sidebar({ open, clones, orgClones, active, userName, userInitial, onSel
 }
 
 // ── Main ───────────────────────────────────────────────────────────────────────
+
+// ── Quick Capture Window ─────────────────────────────────────────────────────
+
+export function CaptureWindow() {
+  const [text, setText] = useState("");
+  const [cloneId, setCloneId] = useState<string | null>(null);
+  const [status, setStatus] = useState<"idle" | "sending" | "done" | "error">("idle");
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const doppel = (window as any).doppelDesktop;
+
+  useEffect(() => {
+    doppel?.captureGetClone?.().then((c: any) => {
+      if (c) setCloneId(c.clone_id);
+    });
+    // Auto-focus the input
+    setTimeout(() => inputRef.current?.focus(), 80);
+  }, []);
+
+  const submit = async () => {
+    const t = text.trim();
+    if (!t || !cloneId || status === "sending") return;
+    setStatus("sending");
+    try {
+      const res = await doppel.captureSubmit(cloneId, t);
+      if (res?.ok) {
+        setStatus("done");
+        setTimeout(() => doppel.captureClose(), 600);
+      } else {
+        setStatus("error");
+      }
+    } catch {
+      setStatus("error");
+    }
+  };
+
+  const close = () => doppel?.captureClose();
+
+  return (
+    <div
+      style={{
+        width: "100%", height: "100%",
+        background: "rgba(10,10,10,0.92)", backdropFilter: "blur(24px)",
+        borderRadius: 16, border: "1px solid rgba(255,255,255,0.10)",
+        display: "flex", flexDirection: "column",
+        fontFamily: "'Plus Jakarta Sans', -apple-system, sans-serif",
+        overflow: "hidden", WebkitAppRegion: "drag",
+      } as React.CSSProperties}
+    >
+      {/* Header */}
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        padding: "10px 14px 6px", WebkitAppRegion: "drag",
+      } as React.CSSProperties}>
+        <span style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.12em", color: "rgba(255,255,255,0.25)" }}>
+          Quick capture
+        </span>
+        <button
+          onClick={close}
+          style={{
+            background: "none", border: "none", cursor: "pointer",
+            color: "rgba(255,255,255,0.25)", fontSize: 14, padding: "0 2px",
+            lineHeight: 1, fontFamily: "inherit", WebkitAppRegion: "no-drag",
+          } as React.CSSProperties}
+        >
+          ×
+        </button>
+      </div>
+
+      {/* Input */}
+      <div style={{ flex: 1, padding: "0 14px 10px", display: "flex", flexDirection: "column", gap: 8, WebkitAppRegion: "no-drag" } as React.CSSProperties}>
+        <textarea
+          ref={inputRef}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); }
+            if (e.key === "Escape") close();
+          }}
+          placeholder="Type a thought, fact, or context... (Enter to save)"
+          disabled={status === "sending" || status === "done"}
+          style={{
+            flex: 1, background: "rgba(255,255,255,0.04)",
+            border: "1px solid rgba(255,255,255,0.10)", borderRadius: 10,
+            padding: "10px 12px", fontSize: 13, color: "rgba(255,255,255,0.75)",
+            fontFamily: "inherit", resize: "none", outline: "none", lineHeight: 1.5,
+          }}
+        />
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <span style={{ fontSize: 10, color: "rgba(255,255,255,0.18)" }}>
+            {status === "done" ? "✓ Saved" : status === "error" ? "Failed — try again" : status === "sending" ? "Saving..." : "Esc to close"}
+          </span>
+          <button
+            onClick={submit}
+            disabled={!text.trim() || !cloneId || status === "sending" || status === "done"}
+            style={{
+              fontSize: 11, fontWeight: 500, padding: "5px 14px", borderRadius: 8,
+              background: text.trim() && status === "idle" ? "rgba(52,211,153,0.10)" : "rgba(255,255,255,0.03)",
+              border: `1px solid ${text.trim() && status === "idle" ? "rgba(52,211,153,0.22)" : "rgba(255,255,255,0.07)"}`,
+              color: text.trim() && status === "idle" ? "rgba(52,211,153,0.80)" : "rgba(255,255,255,0.20)",
+              cursor: text.trim() && status === "idle" ? "pointer" : "default",
+              fontFamily: "inherit",
+            }}
+          >
+            Save
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Main Desktop App ─────────────────────────────────────────────────────────
 
 export default function Desktop() {
   const [clones,       setClones]       = useState<Clone[]>([]);

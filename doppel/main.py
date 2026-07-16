@@ -4452,6 +4452,251 @@ async def clone_readiness(
 
 
 # ---------------------------------------------------------------------------
+# Training score — gamified 0-100 completeness score
+# ---------------------------------------------------------------------------
+
+@app.get("/clones/{handle}/training-score")
+async def clone_training_score(
+    handle: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """
+    Compute a 0-100 training completeness score with per-category breakdown.
+    Drives adoption by showing employees what data their clone still needs.
+    """
+    user_id = request.headers.get("X-User-Id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    row = await session.execute(
+        sql_text("SELECT clone_id, user_id FROM clone_identity WHERE handle = :h"),
+        {"h": handle},
+    )
+    rec = row.mappings().first()
+    if not rec or rec["user_id"] != user_id:
+        raise HTTPException(status_code=403, detail="Not your clone")
+
+    clone_id = str(rec["clone_id"])
+
+    # ── Gather counts in parallel-ish queries ──
+    # Observation sources
+    obs_row = await session.execute(
+        sql_text("""
+            SELECT source_type, enabled, items_ingested
+            FROM observation_sources
+            WHERE clone_id = :cid
+        """),
+        {"cid": clone_id},
+    )
+    obs_sources = {r["source_type"]: r for r in obs_row.mappings().all()}
+
+    # Voice memos count
+    voice_row = await session.execute(
+        sql_text("""
+            SELECT COUNT(*) AS total FROM episodic_memory
+            WHERE clone_id = :cid AND source = 'voice_memo' AND is_excluded = FALSE
+        """),
+        {"cid": clone_id},
+    )
+    voice_memo_count = int((voice_row.mappings().first() or {}).get("total") or 0)
+
+    # Style fingerprint
+    style_row = await session.execute(
+        sql_text("SELECT style_fingerprint FROM clone_identity WHERE clone_id = :cid"),
+        {"cid": clone_id},
+    )
+    style_rec = style_row.mappings().first()
+    has_style = bool(style_rec and style_rec["style_fingerprint"])
+
+    # Procedural memory (decision heuristics)
+    proc_row = await session.execute(
+        sql_text("""
+            SELECT COUNT(*) AS total FROM procedural_memory
+            WHERE clone_id = :cid AND pattern_type = 'decision_heuristic'
+        """),
+        {"cid": clone_id},
+    )
+    proc_count = int((proc_row.mappings().first() or {}).get("total") or 0)
+
+    # Total episodic memory
+    ep_row = await session.execute(
+        sql_text("""
+            SELECT COUNT(*) AS total FROM episodic_memory
+            WHERE clone_id = :cid AND is_excluded = FALSE
+        """),
+        {"cid": clone_id},
+    )
+    total_episodic = int((ep_row.mappings().first() or {}).get("total") or 0)
+
+    # ── Scoring ──
+    def src_score(stype: str) -> bool:
+        s = obs_sources.get(stype)
+        return bool(s and s["enabled"] and s["items_ingested"] > 0)
+
+    breakdown = {
+        "email_data": {
+            "score": 20 if src_score("gmail") else 0,
+            "max": 20,
+            "label": "Email connected",
+            "hint": "Connect Gmail to learn your communication style",
+        },
+        "messaging_data": {
+            "score": 15 if src_score("slack") else 0,
+            "max": 15,
+            "label": "Messaging connected",
+            "hint": "Connect Slack to learn how you collaborate",
+        },
+        "documents_data": {
+            "score": 10 if (src_score("gdrive") or src_score("notion")) else 0,
+            "max": 10,
+            "label": "Documents connected",
+            "hint": "Connect Drive or Notion",
+        },
+        "calendar_data": {
+            "score": 5 if src_score("gcal") else 0,
+            "max": 5,
+            "label": "Calendar connected",
+            "hint": "Connect Google Calendar",
+        },
+        "code_data": {
+            "score": 5 if src_score("github") else 0,
+            "max": 5,
+            "label": "Code connected",
+            "hint": "Connect GitHub",
+        },
+        "voice_memos": {
+            "score": min(10, voice_memo_count * 2),
+            "max": 10,
+            "label": "Voice memos",
+            "hint": f"Record {max(0, 5 - voice_memo_count)} more voice memos to capture your thinking",
+        },
+        "screen_watch": {
+            "score": 5 if src_score("screenwatch") else 0,
+            "max": 5,
+            "label": "Screen Watch active",
+            "hint": "Enable Screen Watch in the desktop app",
+        },
+        "style_extracted": {
+            "score": 10 if has_style else 0,
+            "max": 10,
+            "label": "Communication style",
+            "hint": "Need 30+ authored messages to extract your style",
+        },
+        "decisions": {
+            "score": min(10, int(proc_count / 3 * 10)) if proc_count < 3 else 10,
+            "max": 10,
+            "label": "Decision patterns",
+            "hint": "Answer decision-making questions or let observation detect patterns",
+        },
+        "volume": {
+            "score": min(10, total_episodic // 20),
+            "max": 10,
+            "label": "Knowledge depth",
+            "hint": f"Your clone needs 200+ data points. Currently at {total_episodic}.",
+        },
+    }
+
+    total_score = sum(b["score"] for b in breakdown.values())
+
+    # Grade
+    if total_score >= 90:
+        grade = "A"
+    elif total_score >= 70:
+        grade = "B"
+    elif total_score >= 50:
+        grade = "C"
+    elif total_score >= 30:
+        grade = "D"
+    else:
+        grade = "F"
+
+    # Next action: highest-value unfilled category
+    gaps = [(b["max"] - b["score"], b["hint"]) for b in breakdown.values() if b["score"] < b["max"]]
+    gaps.sort(key=lambda g: -g[0])
+    next_action = gaps[0][1] if gaps else "Your clone is fully trained"
+
+    return {
+        "score": total_score,
+        "grade": grade,
+        "breakdown": breakdown,
+        "next_action": next_action,
+        "total_items": total_episodic,
+        "items_target": 200,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Training suggestions — surface low-confidence queries as training prompts
+# ---------------------------------------------------------------------------
+
+@app.get("/clones/{handle}/training-suggestions")
+async def clone_training_suggestions(
+    handle: str,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    limit: int = 10,
+) -> dict:
+    """
+    Return recent queries where the clone had low confidence or needed escalation.
+    These are knowledge gaps the owner can fill by teaching the clone about the topic.
+    """
+    user_id = request.headers.get("X-User-Id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    row = await session.execute(
+        sql_text("SELECT clone_id, user_id FROM clone_identity WHERE handle = :h"),
+        {"h": handle},
+    )
+    rec = row.mappings().first()
+    if not rec or rec["user_id"] != user_id:
+        raise HTTPException(status_code=403, detail="Not your clone")
+
+    clone_id = str(rec["clone_id"])
+
+    result = await session.execute(
+        sql_text("""
+            SELECT
+                id,
+                brain_input->>'message'    AS question,
+                confidence,
+                needs_escalation,
+                created_at
+            FROM reasoning_traces
+            WHERE clone_id = :cid
+              AND confidence IS NOT NULL
+              AND confidence < 0.5
+              AND brain_input->>'message' IS NOT NULL
+              AND LENGTH(brain_input->>'message') > 10
+            ORDER BY created_at DESC
+            LIMIT :lim
+        """),
+        {"cid": clone_id, "lim": limit},
+    )
+    rows = result.mappings().all()
+
+    suggestions = []
+    seen = set()
+    for r in rows:
+        q = str(r["question"]).strip()
+        # Deduplicate similar questions (by first 40 chars lowercase)
+        key = q[:40].lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        suggestions.append({
+            "id": str(r["id"]),
+            "question": q,
+            "confidence": r["confidence"],
+            "needs_escalation": r["needs_escalation"],
+            "created_at": str(r["created_at"]),
+        })
+
+    return {"suggestions": suggestions}
+
+
+# ---------------------------------------------------------------------------
 # Cross-clone import (copy decision-making and/or voice patterns between clones)
 # ---------------------------------------------------------------------------
 
@@ -6438,6 +6683,78 @@ async def ingest_file(
 
     await session.commit()
     return {"chunks_stored": len(chunks), "filename": filename, "chars_extracted": len(text)}
+
+
+@app.post("/ingestion/voice-memo", status_code=201)
+async def ingest_voice_memo(
+    clone_id: str = Form(...),
+    audio: UploadFile = File(...),
+    request: Request = None,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """
+    Upload a voice memo (webm/opus from browser or other audio format).
+    Transcribes via Whisper, then ingests the transcript into clone memory.
+    """
+    from doppel.ingestion.voice import transcribe_audio
+    from doppel.ingestion.chunker import chunk_text
+    from doppel.ingestion.pipeline import _store_chunk_with_embedding
+    from doppel.brain.db.vector import embed_batch
+    from doppel.ingestion.preprocessor import estimate_formality
+    from doppel.ingestion.pii_redactor import redact_pii
+    from doppel.ingestion.connectors.base import RawItem
+    from datetime import datetime, timezone
+    import uuid as _uuid
+
+    _MAX_AUDIO_BYTES = 10 * 1024 * 1024  # 10 MB
+    audio_bytes = await audio.read(_MAX_AUDIO_BYTES + 1)
+    if len(audio_bytes) > _MAX_AUDIO_BYTES:
+        raise HTTPException(status_code=413, detail="Audio exceeds 10 MB limit.")
+
+    clone_uuid = _uuid.UUID(clone_id)
+    caller = request.headers.get("X-User-Id") if request else None
+    await _assert_clone_owner(clone_uuid, caller, session)
+    await load_clone_keys(session, clone_uuid)
+
+    # Transcribe
+    filename = audio.filename or "memo.webm"
+    transcript = await transcribe_audio(audio_bytes, filename=filename)
+
+    if len(transcript) < 10:
+        return {"ok": True, "stored": False, "reason": "too_short", "transcript": transcript}
+
+    # Chunk, embed, store
+    chunks = chunk_text(transcript, max_chars=settings.ingestion_chunk_max_chars)
+    chunks = [redact_pii(c) for c in chunks]
+    embeddings = await embed_batch(chunks)
+    formality = estimate_formality(transcript)
+    now = datetime.now(timezone.utc)
+
+    for chunk, embedding in zip(chunks, embeddings):
+        item = RawItem(
+            content=chunk,
+            source="voice_memo",
+            authored_by_user=True,
+            context_type="voice_note",
+            created_at=now,
+        )
+        await _store_chunk_with_embedding(
+            session=session,
+            clone_id=clone_uuid,
+            content=chunk,
+            embedding=embedding,
+            item=item,
+            formality=formality,
+        )
+
+    await session.commit()
+    return {
+        "ok": True,
+        "stored": True,
+        "transcript": transcript,
+        "chunks_stored": len(chunks),
+        "chars_transcribed": len(transcript),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -8820,6 +9137,411 @@ async def join_org_by_token(
     await session.commit()
 
     return {"status": "joined", "org": {"id": org_id, "name": rec["name"], "slug": rec["slug"]}}
+
+
+# ---------------------------------------------------------------------------
+# Bulk onboarding — IT admin uploads a list of employees
+# ---------------------------------------------------------------------------
+
+class BulkOnboardEmployee(BaseModel):
+    email: str
+    display_name: str
+    role: str = "member"
+
+class BulkOnboardRequest(BaseModel):
+    org_id: str
+    employees: list[BulkOnboardEmployee]
+
+
+@app.post("/org/bulk-onboard")
+async def org_bulk_onboard(
+    body: BulkOnboardRequest,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """
+    IT admin batch-invites employees. Creates org_invites rows with personal
+    invite tokens. Skips duplicates.
+    """
+    user_id = request.headers.get("X-User-Id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    # Verify caller is org admin
+    admin_row = await session.execute(
+        sql_text("""
+            SELECT m.role FROM org_memberships m
+            WHERE m.org_id = :oid AND m.user_id = :uid
+        """),
+        {"oid": body.org_id, "uid": user_id},
+    )
+    admin_rec = admin_row.mappings().first()
+    if not admin_rec or admin_rec["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin required")
+
+    invited = 0
+    skipped = 0
+    errors: list[dict] = []
+
+    for emp in body.employees:
+        email = emp.email.strip().lower()
+        if not email or "@" not in email:
+            errors.append({"email": emp.email, "reason": "Invalid email"})
+            continue
+
+        try:
+            token = secrets.token_hex(16)
+            result = await session.execute(
+                sql_text("""
+                    INSERT INTO org_invites (org_id, invited_email, role, display_name, invite_token)
+                    VALUES (:oid, :email, :role, :dn, :tok)
+                    ON CONFLICT (org_id, invited_email) DO NOTHING
+                    RETURNING id
+                """),
+                {"oid": body.org_id, "email": email, "role": emp.role, "dn": emp.display_name, "tok": token},
+            )
+            if result.first():
+                invited += 1
+            else:
+                skipped += 1
+        except Exception as e:
+            errors.append({"email": emp.email, "reason": str(e)[:100]})
+
+    await session.commit()
+    return {"invited": invited, "skipped": skipped, "errors": errors}
+
+
+@app.get("/org/pending-invites")
+async def list_pending_invites(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """List all pending invites for the caller's org."""
+    user_id = request.headers.get("X-User-Id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    row = await session.execute(
+        sql_text("""
+            SELECT o.id AS org_id, m.role
+            FROM orgs o JOIN org_memberships m ON m.org_id = o.id
+            WHERE m.user_id = :uid LIMIT 1
+        """),
+        {"uid": user_id},
+    )
+    rec = row.mappings().first()
+    if not rec or rec["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin required")
+
+    inv_rows = await session.execute(
+        sql_text("""
+            SELECT id, invited_email, display_name, role, invite_token, invited_at, activated_at
+            FROM org_invites WHERE org_id = :oid
+            ORDER BY invited_at DESC
+        """),
+        {"oid": str(rec["org_id"])},
+    )
+    invites = [
+        {
+            "id": str(r["id"]),
+            "email": r["invited_email"],
+            "display_name": r["display_name"],
+            "role": r["role"],
+            "invite_token": str(r["invite_token"]) if r["invite_token"] else None,
+            "invited_at": r["invited_at"].isoformat() if r["invited_at"] else None,
+            "status": "activated" if r["activated_at"] else "pending",
+        }
+        for r in inv_rows.mappings().all()
+    ]
+    return {"invites": invites}
+
+
+class ActivateInviteRequest(BaseModel):
+    invite_token: str
+    user_id: str
+
+
+@app.post("/org/activate")
+async def activate_invite(
+    body: ActivateInviteRequest,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """
+    Employee clicks invite link → signs up → calls this to join org + auto-create clone.
+    """
+    from uuid import uuid4
+    import re
+
+    # Find invite by token
+    inv_row = await session.execute(
+        sql_text("""
+            SELECT i.id, i.org_id, i.invited_email, i.display_name, i.role, i.activated_at,
+                   o.name AS org_name, o.slug AS org_slug
+            FROM org_invites i
+            JOIN orgs o ON o.id = i.org_id
+            WHERE i.invite_token = :tok
+        """),
+        {"tok": body.invite_token},
+    )
+    inv = inv_row.mappings().first()
+    if not inv:
+        raise HTTPException(status_code=404, detail="Invalid invite token")
+    if inv["activated_at"]:
+        raise HTTPException(status_code=409, detail="Invite already activated")
+
+    org_id = str(inv["org_id"])
+    display_name = inv["display_name"] or inv["invited_email"].split("@")[0]
+
+    # Check if already a member
+    existing = await session.execute(
+        sql_text("SELECT 1 FROM org_memberships WHERE org_id = :oid AND user_id = :uid"),
+        {"oid": org_id, "uid": body.user_id},
+    )
+    if existing.first():
+        # Mark invite as activated anyway
+        await session.execute(
+            sql_text("UPDATE org_invites SET activated_at = NOW() WHERE id = :iid"),
+            {"iid": str(inv["id"])},
+        )
+        await session.commit()
+        return {"status": "already_member", "org_name": inv["org_name"]}
+
+    # Auto-create clone if user doesn't have one
+    clone_row = await session.execute(
+        sql_text("SELECT clone_id, handle FROM clone_identity WHERE user_id = :uid ORDER BY created_at ASC LIMIT 1"),
+        {"uid": body.user_id},
+    )
+    clone_rec = clone_row.mappings().first()
+
+    if not clone_rec:
+        # Generate handle from display_name
+        base_handle = re.sub(r"[^a-z0-9]+", "-", display_name.lower()).strip("-")[:28]
+        if len(base_handle) < 3:
+            base_handle = f"clone-{base_handle}" if base_handle else "clone"
+        handle = base_handle
+
+        # Ensure uniqueness
+        for i in range(100):
+            dup = await session.execute(
+                sql_text("SELECT 1 FROM clone_identity WHERE handle = :h"),
+                {"h": handle},
+            )
+            if not dup.first():
+                break
+            handle = f"{base_handle}-{i + 1}"
+
+        clone_id = uuid4()
+        await session.execute(
+            sql_text("""
+                INSERT INTO clone_identity
+                  (clone_id, display_name, handle, user_id, access_mode,
+                   style_fingerprint, value_system)
+                VALUES
+                  (:cid, :dn, :handle, :uid, 'org_scoped', '{}', '{}')
+            """),
+            {"cid": str(clone_id), "dn": display_name, "handle": handle, "uid": body.user_id},
+        )
+        clone_id_str = str(clone_id)
+    else:
+        clone_id_str = str(clone_rec["clone_id"])
+        handle = clone_rec["handle"]
+
+    # Add to org
+    await session.execute(
+        sql_text("""
+            INSERT INTO org_memberships (org_id, user_id, clone_id, role)
+            VALUES (:oid, :uid, :cid, :role)
+            ON CONFLICT (org_id, user_id) DO NOTHING
+        """),
+        {"oid": org_id, "uid": body.user_id, "cid": clone_id_str, "role": inv["role"]},
+    )
+
+    # Mark invite activated
+    await session.execute(
+        sql_text("UPDATE org_invites SET activated_at = NOW() WHERE id = :iid"),
+        {"iid": str(inv["id"])},
+    )
+    await session.commit()
+
+    return {
+        "status": "activated",
+        "clone_id": clone_id_str,
+        "handle": handle,
+        "org_name": inv["org_name"],
+    }
+
+
+@app.get("/org/by-invite/{invite_token}")
+async def get_org_by_invite_token(
+    invite_token: str,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Public endpoint — look up org info by personal invite token."""
+    row = await session.execute(
+        sql_text("""
+            SELECT o.id, o.name, o.slug, i.display_name, i.invited_email, i.activated_at,
+                   (SELECT COUNT(*) FROM org_memberships WHERE org_id = o.id) AS member_count
+            FROM org_invites i
+            JOIN orgs o ON o.id = i.org_id
+            WHERE i.invite_token = :tok
+        """),
+        {"tok": invite_token},
+    )
+    rec = row.mappings().first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Invalid or expired invite")
+    return {
+        "org_id": str(rec["id"]),
+        "name": rec["name"],
+        "slug": rec["slug"],
+        "display_name": rec["display_name"],
+        "email": rec["invited_email"],
+        "member_count": int(rec["member_count"]),
+        "activated": rec["activated_at"] is not None,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Org training overview — admin sees all members' training scores
+# ---------------------------------------------------------------------------
+
+@app.get("/org/training-overview")
+async def org_training_overview(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Return all org members' training scores for the admin dashboard."""
+    user_id = request.headers.get("X-User-Id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    # Resolve org + verify admin
+    row = await session.execute(
+        sql_text("""
+            SELECT o.id AS org_id, m.role
+            FROM orgs o JOIN org_memberships m ON m.org_id = o.id
+            WHERE m.user_id = :uid LIMIT 1
+        """),
+        {"uid": user_id},
+    )
+    rec = row.mappings().first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Not in an org")
+    if rec["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Admin required")
+
+    org_id = str(rec["org_id"])
+
+    # Get all members with their clones
+    members_row = await session.execute(
+        sql_text("""
+            SELECT m.user_id, m.role, m.joined_at, m.clone_id,
+                   c.display_name, c.handle, c.style_fingerprint
+            FROM org_memberships m
+            LEFT JOIN clone_identity c ON c.clone_id = m.clone_id
+            WHERE m.org_id = :oid
+            ORDER BY m.joined_at
+        """),
+        {"oid": org_id},
+    )
+    members = members_row.mappings().all()
+
+    results = []
+    for mem in members:
+        clone_id = str(mem["clone_id"]) if mem["clone_id"] else None
+        if not clone_id:
+            results.append({
+                "user_id": mem["user_id"],
+                "display_name": None,
+                "handle": None,
+                "score": 0,
+                "grade": "F",
+                "top_gap": "No clone created",
+                "role": mem["role"],
+                "joined_at": mem["joined_at"].isoformat() if mem["joined_at"] else None,
+            })
+            continue
+
+        # Observation sources
+        obs_row = await session.execute(
+            sql_text("SELECT source_type, enabled, items_ingested FROM observation_sources WHERE clone_id = :cid"),
+            {"cid": clone_id},
+        )
+        obs_sources = {r["source_type"]: r for r in obs_row.mappings().all()}
+
+        # Voice memos
+        vm_row = await session.execute(
+            sql_text("SELECT COUNT(*) AS c FROM episodic_memory WHERE clone_id = :cid AND source = 'voice_memo' AND is_excluded = FALSE"),
+            {"cid": clone_id},
+        )
+        vm_count = int((vm_row.mappings().first() or {}).get("c") or 0)
+
+        # Procedural
+        proc_row = await session.execute(
+            sql_text("SELECT COUNT(*) AS c FROM procedural_memory WHERE clone_id = :cid AND pattern_type = 'decision_heuristic'"),
+            {"cid": clone_id},
+        )
+        proc_count = int((proc_row.mappings().first() or {}).get("c") or 0)
+
+        # Episodic total
+        ep_row = await session.execute(
+            sql_text("SELECT COUNT(*) AS c FROM episodic_memory WHERE clone_id = :cid AND is_excluded = FALSE"),
+            {"cid": clone_id},
+        )
+        total_ep = int((ep_row.mappings().first() or {}).get("c") or 0)
+
+        has_style = bool(mem["style_fingerprint"])
+
+        def src_ok(stype: str) -> bool:
+            s = obs_sources.get(stype)
+            return bool(s and s["enabled"] and s["items_ingested"] > 0)
+
+        scores = {
+            "email": 20 if src_ok("gmail") else 0,
+            "messaging": 15 if src_ok("slack") else 0,
+            "documents": 10 if (src_ok("gdrive") or src_ok("notion")) else 0,
+            "calendar": 5 if src_ok("gcal") else 0,
+            "code": 5 if src_ok("github") else 0,
+            "voice": min(10, vm_count * 2),
+            "screenwatch": 5 if src_ok("screenwatch") else 0,
+            "style": 10 if has_style else 0,
+            "decisions": min(10, int(proc_count / 3 * 10)) if proc_count < 3 else 10,
+            "volume": min(10, total_ep // 20),
+        }
+        maxes = {"email": 20, "messaging": 15, "documents": 10, "calendar": 5, "code": 5, "voice": 10, "screenwatch": 5, "style": 10, "decisions": 10, "volume": 10}
+        total_score = sum(scores.values())
+        grade = "A" if total_score >= 90 else "B" if total_score >= 70 else "C" if total_score >= 50 else "D" if total_score >= 30 else "F"
+
+        # Top gap
+        gap_labels = {"email": "Connect Gmail", "messaging": "Connect Slack", "documents": "Connect Drive/Notion", "calendar": "Connect Calendar", "code": "Connect GitHub", "voice": "Record voice memos", "screenwatch": "Enable Screen Watch", "style": "More authored messages", "decisions": "Decision patterns needed", "volume": f"{total_ep}/200 data points"}
+        gaps = [(maxes[k] - scores[k], gap_labels[k]) for k in scores if scores[k] < maxes[k]]
+        gaps.sort(key=lambda g: -g[0])
+        top_gap = gaps[0][1] if gaps else "Fully trained"
+
+        results.append({
+            "user_id": mem["user_id"],
+            "display_name": mem["display_name"],
+            "handle": mem["handle"],
+            "score": total_score,
+            "grade": grade,
+            "top_gap": top_gap,
+            "role": mem["role"],
+            "joined_at": mem["joined_at"].isoformat() if mem["joined_at"] else None,
+        })
+
+    # Aggregate stats
+    scored = [r for r in results if r["score"] > 0 or r["handle"]]
+    avg_score = sum(r["score"] for r in scored) / len(scored) if scored else 0
+    ab_count = sum(1 for r in scored if r["grade"] in ("A", "B"))
+
+    return {
+        "members": results,
+        "stats": {
+            "total_members": len(results),
+            "avg_score": round(avg_score, 1),
+            "ab_percentage": round(ab_count / len(scored) * 100) if scored else 0,
+        },
+    }
 
 
 class OrgSearchRequest(BaseModel):
@@ -12935,6 +13657,130 @@ async def bulk_review_insights(
 
     await session.commit()
     return {"ok": True, "processed": processed, "status": new_status}
+
+
+class ScreenwatchCapture(BaseModel):
+    clone_id: UUID
+    image_base64: str  # base64 PNG, max ~5MB
+
+
+@app.post("/observation/screenwatch/capture")
+async def screenwatch_capture(
+    body: ScreenwatchCapture,
+    request: Request = None,
+    session: AsyncSession = Depends(get_session),
+):
+    """
+    Receive a screenshot from the desktop app, analyze with vision AI,
+    and store the analysis as an observation. Raw image is never stored.
+    """
+    from datetime import datetime, timezone
+    from uuid import uuid4
+
+    # Reject oversized payloads (base64 of 5MB image ~ 6.7M chars)
+    if len(body.image_base64) > 7_000_000:
+        raise HTTPException(status_code=413, detail="Image too large (max 5MB)")
+
+    caller = request.headers.get("X-User-Id") if request else None
+    await _assert_clone_owner(body.clone_id, caller, session)
+
+    # Verify screenwatch is enabled
+    src_row = await session.execute(
+        sql_text("""
+            SELECT enabled FROM observation_sources
+            WHERE clone_id = :cid AND source_type = 'screenwatch'
+        """),
+        {"cid": str(body.clone_id)},
+    )
+    src = src_row.mappings().first()
+    if not src or not src["enabled"]:
+        raise HTTPException(status_code=400, detail="Screenwatch observation not enabled")
+
+    # Analyze screenshot
+    from doppel.observation.sources.screenwatch import analyze_screenshot
+    analysis = await analyze_screenshot(body.image_base64)
+
+    # Build content text from analysis
+    activity = analysis.get("activity", "")
+    tools = analysis.get("tools", [])
+    context = analysis.get("context", "")
+    domain = analysis.get("domain", "general")
+    confidence = float(analysis.get("confidence", 0.5))
+
+    content = f"Screen observation: {activity}"
+    if tools:
+        content += f"\nTools: {', '.join(tools)}"
+    if context:
+        content += f"\nContext: {context}"
+
+    if len(content) < 20:
+        return {"ok": True, "analysis": analysis, "stored": False}
+
+    # Store as episodic memory (analysis only, no image)
+    now = datetime.now(timezone.utc)
+    ep_id = uuid4()
+    await session.execute(
+        sql_text("""
+            INSERT INTO episodic_memory
+              (id, clone_id, content, content_type, source, authored_by_user,
+               context_type, observation_source, ingested_at, created_at)
+            VALUES
+              (:id, :cid, :content, 'text', 'screenwatch', TRUE,
+               'screen_observation', 'observation:screenwatch', :now, :now)
+        """),
+        {
+            "id": str(ep_id),
+            "cid": str(body.clone_id),
+            "content": content,
+            "now": now,
+        },
+    )
+
+    # Update source stats
+    await session.execute(
+        sql_text("""
+            UPDATE observation_sources SET
+                items_observed = items_observed + 1,
+                items_ingested = items_ingested + 1,
+                last_observed_at = :now,
+                updated_at = :now
+            WHERE clone_id = :cid AND source_type = 'screenwatch'
+        """),
+        {"now": now, "cid": str(body.clone_id)},
+    )
+
+    # Log
+    log_id = uuid4()
+    await session.execute(
+        sql_text("""
+            INSERT INTO observation_log
+              (id, clone_id, source_type, items_fetched, items_ingested,
+               items_skipped, duration_ms, started_at, completed_at)
+            VALUES
+              (:id, :cid, 'screenwatch', 1, 1, 0, 0, :now, :now)
+        """),
+        {"id": str(log_id), "cid": str(body.clone_id), "now": now},
+    )
+    await session.commit()
+
+    # Trigger insight extraction if enough screenwatch items
+    try:
+        count_row = await session.execute(
+            sql_text("""
+                SELECT COUNT(*) FROM episodic_memory
+                WHERE clone_id = :cid AND observation_source = 'observation:screenwatch'
+                  AND ingested_at > NOW() - INTERVAL '24 hours'
+            """),
+            {"cid": str(body.clone_id)},
+        )
+        recent_count = count_row.scalar() or 0
+        if recent_count >= 3 and recent_count % 3 == 0:
+            from doppel.observation.insight_extractor import extract_insights
+            await extract_insights(session, body.clone_id, "screenwatch")
+    except Exception as exc:
+        logger.warning("Screenwatch insight extraction failed (non-fatal): %s", exc)
+
+    return {"ok": True, "analysis": analysis, "stored": True}
 
 
 async def _commit_insight(

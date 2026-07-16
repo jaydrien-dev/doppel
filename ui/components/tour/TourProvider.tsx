@@ -47,31 +47,15 @@ export const TOURS = {
         "Real-time stats: memory count, recent queries, approval rate.",
       position: "right" as const,
     },
-    // 2 — Train
+    // 2 — Training
     {
-      target: 'a[href="/dashboard/train"]',
-      title: "Feed it knowledge.",
+      target: 'a[href="/dashboard/training"]',
+      title: "Train your clone.",
       description:
-        "Connect Gmail, Slack, GitHub, Notion, or upload files. Every source becomes retrievable memory.",
+        "Connect sources, observe your work, or teach your clone directly through interviews and uploads.",
       position: "right" as const,
     },
-    // 3 — Identity
-    {
-      target: 'a[href="/dashboard/identity"]',
-      title: "Make it sound like you.",
-      description:
-        "Set tone, values, areas of expertise. The difference between a generic bot and your digital twin.",
-      position: "right" as const,
-    },
-    // 4 — Brain inspector
-    {
-      target: 'a[href="/dashboard/brain"]',
-      title: "See exactly what it knows.",
-      description:
-        "Browse individual memory chunks. Pin the important ones, exclude bad ones, verify accuracy before going live.",
-      position: "right" as const,
-    },
-    // 5 — Test chat
+    // 3 — Test chat
     {
       target: 'a[href="/dashboard/test"]',
       title: "Try it before you share it.",

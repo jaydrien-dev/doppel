@@ -355,7 +355,7 @@ export default function DashboardPage() {
 
       {/* Two-col in advanced, single-col in simple */}
       {advanced ? (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 280px", gap: 20, alignItems: "start" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 280px", gap: 20, alignItems: "start" }}>
           <div>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
               <h3 className="db-h3">Task feed</h3>

@@ -11,7 +11,7 @@ export function PageWrapper({ children }: { children: React.ReactNode }) {
       initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.35, ease: "easeOut" }}
-      style={{ flex: 1, display: "flex", flexDirection: "column", overflowY: "auto" }}
+      style={{ flex: 1, display: "flex", flexDirection: "column", overflowY: "auto", overflowX: "hidden" }}
     >
       {children}
     </motion.div>

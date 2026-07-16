@@ -142,7 +142,7 @@ export default function CloneEditPage({ params }: { params: Promise<{ handle: st
     return (
       <div className="db-page">
         <div style={{ height: 40, width: 200, borderRadius: 8, background: "rgba(255,255,255,0.05)", animation: "pulse 2s infinite", marginBottom: 24 }} />
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: 24 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 320px", gap: 24 }}>
           {[180, 280, 200].map((h, i) => (
             <div key={i} className="card" style={{ height: h, animation: "pulse 2s infinite" }} />
           ))}
@@ -195,7 +195,7 @@ export default function CloneEditPage({ params }: { params: Promise<{ handle: st
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 300px", gap: 24, alignItems: "flex-start" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 300px", gap: 24, alignItems: "flex-start" }}>
 
         {/* ------------------------------------------------------------------ */}
         {/* Left column: form cards                                             */}
@@ -480,7 +480,7 @@ export default function CloneEditPage({ params }: { params: Promise<{ handle: st
 
           {/* Quick links */}
           <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid rgba(255,255,255,0.06)", display: "flex", flexDirection: "column", gap: 8 }}>
-            <Link href={`/dashboard/train`} style={{ fontSize: 12, color: "rgba(255,255,255,0.30)", textDecoration: "none" }}>
+            <Link href={`/dashboard/training`} style={{ fontSize: 12, color: "rgba(255,255,255,0.30)", textDecoration: "none" }}>
               Train this clone →
             </Link>
             <Link href="/dashboard/earnings" style={{ fontSize: 12, color: "rgba(255,255,255,0.30)", textDecoration: "none" }}>

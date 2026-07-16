@@ -31,6 +31,40 @@ contextBridge.exposeInMainWorld("doppelDesktop", {
   submitCredentials: (email: string, password: string): Promise<{ error?: string }> =>
     ipcRenderer.invoke("doppel:submit-credentials", email, password),
 
+  /** Start screenwatch (5-second interval, change-detection built in) */
+  startScreenwatch: (cloneId: string): Promise<{ ok: boolean }> =>
+    ipcRenderer.invoke("doppel:screenwatch-start", { cloneId }),
+
+  /** Stop screenwatch captures */
+  stopScreenwatch: (): Promise<{ ok: boolean }> =>
+    ipcRenderer.invoke("doppel:screenwatch-stop"),
+
+  /** Get current screenwatch status */
+  screenwatchStatus: (): Promise<{ enabled: boolean; running: boolean }> =>
+    ipcRenderer.invoke("doppel:screenwatch-status"),
+
+  /** Upload a voice memo (base64 audio) for transcription + ingestion */
+  uploadVoiceMemo: (cloneId: string, audioBase64: string): Promise<{ ok: boolean; transcript?: string; error?: string }> =>
+    ipcRenderer.invoke("doppel:voice-upload", { cloneId, audioBase64 }),
+
+  /** Listen for the global voice-memo hotkey (Ctrl+Shift+V) */
+  onVoiceHotkey: (callback: () => void) => {
+    ipcRenderer.on("doppel:voice-hotkey", callback);
+    return () => { ipcRenderer.removeListener("doppel:voice-hotkey", callback); };
+  },
+
+  /** Quick capture — submit text from floating capture window */
+  captureSubmit: (cloneId: string, text: string): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke("doppel:capture-submit", { cloneId, text }),
+
+  /** Quick capture — close the floating capture window */
+  captureClose: (): Promise<{ ok: boolean }> =>
+    ipcRenderer.invoke("doppel:capture-close"),
+
+  /** Quick capture — get the user's default clone for ingestion */
+  captureGetClone: (): Promise<{ clone_id: string; display_name: string } | null> =>
+    ipcRenderer.invoke("doppel:capture-get-clone"),
+
   /** True when running inside the Electron desktop app */
   isDesktop: true,
 });

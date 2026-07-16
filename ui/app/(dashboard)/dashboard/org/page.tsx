@@ -111,7 +111,7 @@ function MemberRow({
           {name}{isSelf ? " (you)" : ""}
         </p>
         <p style={{ fontSize: 11, color: "rgba(255,255,255,0.28)", margin: "2px 0 0" }}>
-          {email || (member.clone ? `@${member.clone.handle}` : "No clone")} · {formatDate(member.joined_at)}
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }}>{email || (member.clone ? `@${member.clone.handle}` : "No clone")} · {formatDate(member.joined_at)}</span>
         </p>
       </div>
 
@@ -813,11 +813,12 @@ export default function OrgAdminPage() {
   const [profiles, setProfiles] = useState<Record<string, UserProfile>>({});
   const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<"members" | "clones">("members");
+  const [tab, setTab] = useState<"members" | "clones" | "training">("members");
   const [orgCredits, setOrgCredits] = useState(0);
   const [addingCredits, setAddingCredits] = useState(false);
   const [creditInput, setCreditInput] = useState("");
   const [creditMsg, setCreditMsg] = useState<string | null>(null);
+  const [trainingData, setTrainingData] = useState<{ members: { user_id: string; display_name: string | null; handle: string | null; score: number; grade: string; top_gap: string; role: string; joined_at: string | null }[]; stats: { total_members: number; avg_score: number; ab_percentage: number } } | null>(null);
 
   const load = useCallback(async () => {
     if (!user?.id) return;
@@ -850,14 +851,16 @@ export default function OrgAdminPage() {
     }
 
     if (admin) {
-      const [clonesRes, creditsRes] = await Promise.all([
+      const [clonesRes, creditsRes, trainRes] = await Promise.all([
         fetch("/api/org/admin/clones"),
         fetch("/api/org/credits"),
+        fetch("/api/org/training-overview"),
       ]);
       const clonesData = await clonesRes.json();
       setClones(clonesData.clones ?? []);
       const creditsData = await creditsRes.json();
       setOrgCredits(creditsData.credits ?? 0);
+      if (trainRes.ok) setTrainingData(await trainRes.json());
     }
 
     setLoading(false);
@@ -922,8 +925,8 @@ export default function OrgAdminPage() {
       </div>
 
       {/* Tabs */}
-      <div style={{ display: "flex", gap: 4, padding: 4, borderRadius: 12, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)", marginBottom: 28, width: "fit-content" }}>
-        {(["members", "clones"] as const).map((t) => (
+      <div style={{ display: "flex", alignItems: "center", gap: 4, padding: 4, borderRadius: 12, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)", marginBottom: 28, width: "fit-content" }}>
+        {(["members", "clones", "training"] as const).map((t) => (
           <button key={t} onClick={() => setTab(t)} style={{
             padding: "7px 20px", borderRadius: 9, fontSize: 13, fontWeight: 500,
             cursor: "pointer", fontFamily: "inherit", border: "none",
@@ -931,9 +934,16 @@ export default function OrgAdminPage() {
             color: tab === t ? "rgba(255,255,255,0.85)" : "rgba(255,255,255,0.35)",
             transition: "all 160ms",
           }}>
-            {t === "members" ? `Members (${members.length})` : `Clone access (${clones.length})`}
+            {t === "members" ? `Members (${members.length})` : t === "clones" ? `Clone access (${clones.length})` : "Training"}
           </button>
         ))}
+        <Link href="/dashboard/org/onboard" style={{
+          marginLeft: 8, padding: "7px 16px", borderRadius: 9, fontSize: 12, fontWeight: 500,
+          background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)",
+          color: "rgba(255,255,255,0.55)", textDecoration: "none", transition: "all 160ms",
+        }}>
+          Bulk onboard
+        </Link>
       </div>
 
       {tab === "members" ? (
@@ -1027,7 +1037,7 @@ export default function OrgAdminPage() {
             </div>
           </div>
         </div>
-      ) : (
+      ) : tab === "clones" ? (
         <div>
           <SectionHead label="Clone Access" count={clones.length} />
           {clones.length === 0 && (
@@ -1046,6 +1056,77 @@ export default function OrgAdminPage() {
               />
             ))}
           </div>
+        </div>
+      ) : (
+        /* Training overview */
+        <div>
+          {trainingData && (
+            <>
+              {/* Aggregate stats */}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 28 }}>
+                {[
+                  { label: "Team average", value: `${trainingData.stats.avg_score}%`, color: trainingData.stats.avg_score >= 70 ? "rgba(52,211,153,0.85)" : "rgba(255,255,255,0.85)" },
+                  { label: "A/B grade", value: `${trainingData.stats.ab_percentage}%`, color: "rgba(255,255,255,0.85)" },
+                  { label: "Total members", value: String(trainingData.stats.total_members), color: "rgba(255,255,255,0.85)" },
+                ].map(({ label, value, color }) => (
+                  <div key={label} style={{ padding: "18px 20px", borderRadius: 14, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)" }}>
+                    <p style={{ fontSize: 26, fontWeight: 300, color, margin: "0 0 4px", letterSpacing: "-0.02em" }}>{value}</p>
+                    <p style={{ fontSize: 11, color: "rgba(255,255,255,0.28)", margin: 0, textTransform: "uppercase", letterSpacing: "0.08em" }}>{label}</p>
+                  </div>
+                ))}
+              </div>
+
+              {/* Members table sorted by score (lowest first) */}
+              <SectionHead label="Team Training Scores" count={trainingData.members.length} />
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                  <thead>
+                    <tr>
+                      {["Name", "Score", "Grade", "Top gap", "Role"].map((h) => (
+                        <th key={h} style={{ textAlign: "left", padding: "8px 12px", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.1em", color: "rgba(255,255,255,0.22)", borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[...trainingData.members]
+                      .sort((a, b) => a.score - b.score)
+                      .map((m) => {
+                        const gradeColor = m.grade === "A" ? "rgba(52,211,153,0.80)" : m.grade === "B" ? "rgba(52,211,153,0.60)" : m.grade === "C" ? "rgba(255,255,255,0.50)" : "rgba(248,113,113,0.65)";
+                        const profile = profiles[m.user_id];
+                        const name = m.display_name || profile?.name || (m.handle ? `@${m.handle}` : m.user_id.slice(0, 12));
+                        return (
+                          <tr key={m.user_id} style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+                            <td style={{ padding: "10px 12px", color: "rgba(255,255,255,0.70)", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</td>
+                            <td style={{ padding: "10px 12px" }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                <div style={{ width: 60, height: 4, borderRadius: 2, background: "rgba(255,255,255,0.06)" }}>
+                                  <div style={{ height: "100%", borderRadius: 2, width: `${m.score}%`, background: gradeColor, transition: "width 0.4s ease" }} />
+                                </div>
+                                <span style={{ fontSize: 12, color: "rgba(255,255,255,0.50)" }}>{m.score}%</span>
+                              </div>
+                            </td>
+                            <td style={{ padding: "10px 12px" }}>
+                              <span style={{ fontSize: 11, fontWeight: 500, color: gradeColor, padding: "2px 8px", borderRadius: 6, background: `${gradeColor}15` }}>
+                                {m.grade}
+                              </span>
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: 12, color: "rgba(255,255,255,0.35)", maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.top_gap}</td>
+                            <td style={{ padding: "10px 12px", fontSize: 11, color: "rgba(255,255,255,0.25)" }}>{m.role}</td>
+                          </tr>
+                        );
+                      })}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+          {!trainingData && (
+            <div style={{ padding: "40px 0", textAlign: "center" }}>
+              <p style={{ fontSize: 13, color: "rgba(255,255,255,0.30)" }}>Loading training data...</p>
+            </div>
+          )}
         </div>
       )}
 

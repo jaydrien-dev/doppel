@@ -1079,7 +1079,7 @@ function CloneChat({ clone, userId }: { clone: CloneOwnerInfo; userId: string })
                 </div>
               ))}
             </div>
-            <a href="/dashboard/train" style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 500, padding: "5px 14px", borderRadius: 8, background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.12)", color: "rgba(255,255,255,0.72)", textDecoration: "none", transition: "all 140ms" }}
+            <a href="/dashboard/training" style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 500, padding: "5px 14px", borderRadius: 8, background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.12)", color: "rgba(255,255,255,0.72)", textDecoration: "none", transition: "all 140ms" }}
               onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,255,255,0.12)"; }}
               onMouseLeave={e => { e.currentTarget.style.background = "rgba(255,255,255,0.08)"; }}>
               Train this clone

@@ -653,7 +653,7 @@ function TraceRow({ trace, idx, total, onFeedback, consumerMode }: {
     <div style={{ borderBottom: idx < total - 1 ? "1px solid rgba(255,255,255,0.04)" : "none" }}>
       {/* Main row — click text area to expand, buttons stay in column */}
       <div style={{
-        display: "grid", gridTemplateColumns: "1fr 1fr 60px 100px",
+        display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr) 60px 100px",
         gap: 16, padding: "12px 20px", alignItems: "center",
       }}>
         <button
@@ -703,14 +703,14 @@ function TraceRow({ trace, idx, total, onFeedback, consumerMode }: {
       {/* Expandable detail — only Q&A text, no action buttons here */}
       {open && (
         <div style={{ padding: "4px 20px 18px", display: "flex", flexDirection: "column", gap: 14, borderTop: "1px solid rgba(255,255,255,0.04)" }}>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: 16 }}>
             <div>
               <p style={{ fontSize: 10, letterSpacing: "0.14em", textTransform: "uppercase", color: "rgba(255,255,255,0.22)", margin: "0 0 6px" }}>Question</p>
-              <p style={{ fontSize: 13, color: "rgba(255,255,255,0.60)", lineHeight: 1.6, margin: 0 }}>{trace.input_message}</p>
+              <p style={{ fontSize: 13, color: "rgba(255,255,255,0.60)", lineHeight: 1.6, margin: 0, overflowWrap: "break-word", wordBreak: "break-word" }}>{trace.input_message}</p>
             </div>
             <div>
               <p style={{ fontSize: 10, letterSpacing: "0.14em", textTransform: "uppercase", color: "rgba(255,255,255,0.22)", margin: "0 0 6px" }}>Response</p>
-              <p style={{ fontSize: 13, color: "rgba(255,255,255,0.50)", lineHeight: 1.6, margin: 0, whiteSpace: "pre-wrap" }}>{trace.response}</p>
+              <p style={{ fontSize: 13, color: "rgba(255,255,255,0.50)", lineHeight: 1.6, margin: 0, whiteSpace: "pre-wrap", overflowWrap: "break-word", wordBreak: "break-word" }}>{trace.response}</p>
             </div>
           </div>
           {trace.needs_escalation && (
@@ -880,7 +880,7 @@ export default function ActivityPage() {
 
       {tab === "review" && traces.length > 0 && (
         <div className="card" style={{ padding: 0, overflow: "hidden" }}>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 60px 100px", gap: 16, padding: "10px 20px", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr) 60px 100px", gap: 16, padding: "10px 20px", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
             {["Question", "Response", "Conf.", queryMode === "consumer" ? "Sender" : "Actions"].map((h) => (
               <span key={h} style={{ fontSize: 10, letterSpacing: "0.14em", textTransform: "uppercase", color: "rgba(255,255,255,0.25)", fontWeight: 500 }}>{h}</span>
             ))}

@@ -1106,3 +1106,10 @@ ALTER TABLE episodic_memory ADD COLUMN IF NOT EXISTS observation_source TEXT;
 -- Observation master toggle + auto-approve threshold on clone identity
 ALTER TABLE clone_identity ADD COLUMN IF NOT EXISTS observation_enabled BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE clone_identity ADD COLUMN IF NOT EXISTS auto_approve_threshold FLOAT NOT NULL DEFAULT 0.85;
+
+-- ---------------------------------------------------------------------------
+-- BULK ONBOARDING — extend org_invites for IT admin CSV upload
+-- ---------------------------------------------------------------------------
+ALTER TABLE org_invites ADD COLUMN IF NOT EXISTS invite_token  UUID DEFAULT uuid_generate_v4();
+ALTER TABLE org_invites ADD COLUMN IF NOT EXISTS display_name  TEXT;
+ALTER TABLE org_invites ADD COLUMN IF NOT EXISTS activated_at  TIMESTAMPTZ;

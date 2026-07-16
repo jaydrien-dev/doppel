@@ -206,4 +206,7 @@ def _get_adapter(source_type: str):
     if source_type == "gcal":
         from doppel.observation.sources.gcal import GCalObservationAdapter
         return GCalObservationAdapter()
+    if source_type == "screenwatch":
+        from doppel.observation.sources.screenwatch import ScreenwatchAdapter
+        return ScreenwatchAdapter()
     raise ValueError(f"Unknown observation source: {source_type}")

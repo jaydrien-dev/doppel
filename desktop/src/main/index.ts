@@ -11,37 +11,46 @@ import {
   nativeTheme,
   net,
   session,
+  screen,
+  desktopCapturer,
 } from "electron";
 import { join } from "path";
 import { createServer, type Server } from "http";
 import { readFileSync } from "fs";
+import { createHash } from "crypto";
 import Store from "electron-store";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const PROTOCOL = "doppel";
 const CLERK_FAPI = "https://electric-moray-73.clerk.accounts.dev";
-const HOTKEY = "CommandOrControl+Shift+D";
+const HOTKEY = "CommandOrControl+Alt+D";
 
 // ─── Store ────────────────────────────────────────────────────────────────────
 
 interface StoreSchema {
   launchAtStartup: boolean;
   windowBounds: { width: number; height: number; x?: number; y?: number };
+  screenwatchEnabled: boolean;
 }
 
 const store = new Store<StoreSchema>({
   defaults: {
     launchAtStartup: false,
     windowBounds: { width: 1440, height: 900 },
+    screenwatchEnabled: false,
   },
 });
 
 // ─── State ────────────────────────────────────────────────────────────────────
 
 let mainWindow: BrowserWindow | null = null;
+let captureWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let isQuitting = false;
+let screenwatchTimer: ReturnType<typeof setInterval> | null = null;
+let screenwatchCloneId: string | null = null;
+let lastScreenHash: string | null = null;
 
 // ─── Single instance lock ─────────────────────────────────────────────────────
 
@@ -179,14 +188,72 @@ function rebuildTrayMenu(): void {
   tray.setContextMenu(menu);
 }
 
+// ─── Quick Capture Window ─────────────────────────────────────────────────────
+
+function openCaptureWindow(): void {
+  if (captureWindow && !captureWindow.isDestroyed()) {
+    captureWindow.focus();
+    return;
+  }
+
+  const cursor = screen.getCursorScreenPoint();
+  const display = screen.getDisplayNearestPoint(cursor);
+  const { x, y, width, height } = display.workArea;
+
+  captureWindow = new BrowserWindow({
+    width: 480,
+    height: 180,
+    x: x + Math.round((width - 480) / 2),
+    y: y + Math.round(height * 0.25),
+    frame: false,
+    transparent: true,
+    resizable: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    backgroundColor: "#00000000",
+    hasShadow: true,
+    webPreferences: {
+      preload: join(__dirname, "../preload/index.js"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      webSecurity: false,
+      sandbox: false,
+    },
+    show: false,
+  });
+
+  if (process.env["ELECTRON_RENDERER_URL"]) {
+    captureWindow.loadURL(`${process.env["ELECTRON_RENDERER_URL"]}#capture`);
+  } else {
+    captureWindow.loadFile(join(__dirname, "../../out/renderer/index.html"), { hash: "capture" });
+  }
+
+  captureWindow.once("ready-to-show", () => captureWindow?.show());
+  captureWindow.on("closed", () => { captureWindow = null; });
+}
+
+function closeCaptureWindow(): void {
+  if (captureWindow && !captureWindow.isDestroyed()) captureWindow.close();
+  captureWindow = null;
+}
+
 // ─── Hotkey ───────────────────────────────────────────────────────────────────
 
 function registerHotkey(): void {
+  // Quick capture hotkey — opens tiny floating capture window
   const ok = globalShortcut.register(HOTKEY, () => {
-    if (mainWindow?.isVisible() && mainWindow?.isFocused()) mainWindow.hide();
-    else showWindow();
+    openCaptureWindow();
   });
   if (!ok) console.warn(`[doppel] Could not register hotkey ${HOTKEY}`);
+
+  // Voice memo hotkey — toggles recording in the renderer
+  const voiceOk = globalShortcut.register("CommandOrControl+Shift+V", () => {
+    if (mainWindow) {
+      showWindow();
+      mainWindow.webContents.send("doppel:voice-hotkey");
+    }
+  });
+  if (!voiceOk) console.warn("[doppel] Could not register voice memo hotkey");
 }
 
 // ─── Deep link ────────────────────────────────────────────────────────────────
@@ -235,6 +302,167 @@ ipcMain.handle("doppel:set-launch-at-startup", (_event, enabled: boolean) => {
 });
 ipcMain.handle("doppel:get-launch-at-startup", () => store.get("launchAtStartup"));
 
+// ─── Quick Capture IPC ───────────────────────────────────────────────────────
+
+ipcMain.handle(
+  "doppel:capture-submit",
+  async (_event, { cloneId, text }: { cloneId: string; text: string }) => {
+    try {
+      const auth = await getClerkAuth();
+      if (!auth) return { ok: false, error: "Not signed in" };
+
+      const res = await net.fetch("https://doppel.up.railway.app/ingestion/text", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-User-Id": auth.userId,
+        },
+        body: JSON.stringify({ clone_id: cloneId, text, source: "quick_capture" }),
+      });
+      const data = await res.json();
+      return { ok: res.ok, ...data };
+    } catch (e) {
+      return { ok: false, error: String(e) };
+    }
+  }
+);
+
+ipcMain.handle("doppel:capture-close", () => {
+  closeCaptureWindow();
+  return { ok: true };
+});
+
+ipcMain.handle("doppel:capture-get-clone", async () => {
+  // Return the user's first clone id so the capture window can ingest
+  try {
+    const auth = await getClerkAuth();
+    if (!auth) return null;
+    const res = await net.fetch("https://doppel.up.railway.app/clones", {
+      headers: { "X-User-Id": auth.userId },
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const clones = Array.isArray(data) ? data : data.clones ?? [];
+    return clones.length > 0 ? { clone_id: clones[0].clone_id, display_name: clones[0].display_name } : null;
+  } catch {
+    return null;
+  }
+});
+
+// ─── Screenwatch ─────────────────────────────────────────────────────────────
+// Fixed 5-second capture interval. Only sends to backend when the screen
+// content actually changes (hash comparison) to minimize API costs.
+
+const SCREENWATCH_INTERVAL_MS = 5_000;
+
+ipcMain.handle(
+  "doppel:screenwatch-start",
+  async (_event, { cloneId }: { cloneId: string }) => {
+    if (screenwatchTimer) clearInterval(screenwatchTimer);
+    screenwatchCloneId = cloneId;
+    lastScreenHash = null;
+    store.set("screenwatchEnabled", true);
+
+    const doCapture = async () => {
+      if (!screenwatchCloneId) return;
+      if (mainWindow?.isMinimized()) return;
+
+      try {
+        const sources = await desktopCapturer.getSources({
+          types: ["screen"],
+          thumbnailSize: { width: 1920, height: 1080 },
+        });
+        if (sources.length === 0) return;
+
+        const pngBuffer = sources[0].thumbnail.toPNG();
+
+        // Skip if screen hasn't changed (hash comparison)
+        const hash = createHash("md5").update(pngBuffer).digest("hex");
+        if (hash === lastScreenHash) return;
+        lastScreenHash = hash;
+
+        const auth = await getClerkAuth();
+        if (!auth) return;
+
+        const base64 = pngBuffer.toString("base64");
+        await net.fetch("https://doppel.up.railway.app/observation/screenwatch/capture", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-User-Id": auth.userId,
+          },
+          body: JSON.stringify({ clone_id: screenwatchCloneId, image_base64: base64 }),
+        });
+      } catch (e) {
+        console.error("[screenwatch] capture failed:", e);
+      }
+    };
+
+    screenwatchTimer = setInterval(doCapture, SCREENWATCH_INTERVAL_MS);
+    doCapture();
+    return { ok: true };
+  }
+);
+
+ipcMain.handle("doppel:screenwatch-stop", () => {
+  if (screenwatchTimer) {
+    clearInterval(screenwatchTimer);
+    screenwatchTimer = null;
+  }
+  screenwatchCloneId = null;
+  lastScreenHash = null;
+  store.set("screenwatchEnabled", false);
+  return { ok: true };
+});
+
+ipcMain.handle("doppel:screenwatch-status", () => ({
+  enabled: store.get("screenwatchEnabled"),
+  running: screenwatchTimer !== null,
+}));
+
+// ─── Voice Memos ─────────────────────────────────────────────────────────────
+
+ipcMain.handle(
+  "doppel:voice-upload",
+  async (_event, { cloneId, audioBase64 }: { cloneId: string; audioBase64: string }) => {
+    try {
+      const auth = await getClerkAuth();
+      if (!auth) return { ok: false, error: "Not signed in" };
+
+      const boundary = `----DoppelVoice${Date.now()}`;
+      const audioBuffer = Buffer.from(audioBase64, "base64");
+
+      // Build multipart/form-data body
+      const parts: Buffer[] = [];
+      const enc = (s: string) => Buffer.from(s, "utf-8");
+
+      // clone_id field
+      parts.push(enc(`--${boundary}\r\nContent-Disposition: form-data; name="clone_id"\r\n\r\n${cloneId}\r\n`));
+      // audio file field
+      parts.push(enc(`--${boundary}\r\nContent-Disposition: form-data; name="audio"; filename="memo.webm"\r\nContent-Type: audio/webm\r\n\r\n`));
+      parts.push(audioBuffer);
+      parts.push(enc(`\r\n--${boundary}--\r\n`));
+
+      const body = Buffer.concat(parts);
+
+      const res = await net.fetch("https://doppel.up.railway.app/ingestion/voice-memo", {
+        method: "POST",
+        headers: {
+          "Content-Type": `multipart/form-data; boundary=${boundary}`,
+          "X-User-Id": auth.userId,
+        },
+        body,
+      });
+
+      const data = await res.json();
+      return { ok: true, ...data };
+    } catch (e) {
+      console.error("[voice-memo] upload failed:", e);
+      return { ok: false, error: String(e) };
+    }
+  }
+);
+
 // ─── Clerk auth ──────────────────────────────────────────────────────────────
 
 interface AuthInfo {
@@ -243,16 +471,19 @@ interface AuthInfo {
   lastName: string;
 }
 
+/** Cached auth — set once on successful sign-in, used by IPC handlers. */
+let cachedAuth: AuthInfo | null = null;
+
 /** Check for an existing Clerk session via the Frontend API cookies. */
 async function getClerkAuth(): Promise<AuthInfo | null> {
   try {
     const cookies = await session.defaultSession.cookies.get({ url: CLERK_FAPI });
-    if (!cookies.some((c) => c.name === "__client")) return null;
+    if (!cookies.some((c) => c.name === "__client")) return cachedAuth;
 
     const res = await net.fetch(`${CLERK_FAPI}/v1/client`, {
       credentials: "include",
     });
-    if (!res.ok) return null;
+    if (!res.ok) return cachedAuth;
     const data = (await res.json()) as {
       response?: { sessions?: Array<{
         status: string;
@@ -262,14 +493,15 @@ async function getClerkAuth(): Promise<AuthInfo | null> {
     const active = (data?.response?.sessions ?? []).find(
       (s) => s.status === "active"
     );
-    if (!active?.user) return null;
-    return {
+    if (!active?.user) return cachedAuth;
+    cachedAuth = {
       userId: active.user.id,
       firstName: active.user.first_name ?? "",
       lastName: active.user.last_name ?? "",
     };
+    return cachedAuth;
   } catch {
-    return null;
+    return cachedAuth;
   }
 }
 
@@ -463,4 +695,10 @@ app.on("activate", () => {
 });
 
 app.on("will-quit", () => globalShortcut.unregisterAll());
-app.on("before-quit", () => { isQuitting = true; });
+app.on("before-quit", () => {
+  isQuitting = true;
+  if (screenwatchTimer) {
+    clearInterval(screenwatchTimer);
+    screenwatchTimer = null;
+  }
+});

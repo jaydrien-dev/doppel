@@ -36,16 +36,6 @@ const CLONE: NavItem[] = [
     ),
   },
   {
-    href: "/dashboard/train",
-    label: "Feed Data",
-    icon: (
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-        <path d="M3 8h10M8 3v10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
-        <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.4" opacity="0.5"/>
-      </svg>
-    ),
-  },
-  {
     href: "/dashboard/activity",
     label: "Activity",
     icon: (
@@ -55,28 +45,13 @@ const CLONE: NavItem[] = [
     ),
   },
   {
-    href: "/dashboard/identity",
-    label: "Voice",
-    advancedOnly: true,
+    href: "/dashboard/training",
+    label: "Training",
     icon: (
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-        <circle cx="8" cy="5.5" r="2.5" fill="currentColor" opacity="0.7"/>
-        <path d="M2.5 14c0-3.04 2.46-5.5 5.5-5.5s5.5 2.46 5.5 5.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" opacity="0.5"/>
-      </svg>
-    ),
-  },
-  {
-    href: "/dashboard/memory",
-    label: "Knowledge",
-    advancedOnly: true,
-    icon: (
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-        <circle cx="8" cy="8" r="2.2" fill="currentColor" opacity="0.9"/>
-        <circle cx="3" cy="4.5" r="1.5" fill="currentColor" opacity="0.4"/>
-        <circle cx="13" cy="4.5" r="1.5" fill="currentColor" opacity="0.4"/>
-        <circle cx="3" cy="11.5" r="1.5" fill="currentColor" opacity="0.4"/>
-        <circle cx="13" cy="11.5" r="1.5" fill="currentColor" opacity="0.4"/>
-        <path d="M4.5 5L6.2 6.8M9.8 9.2L11.5 11M11.5 5L9.8 6.8M6.2 9.2L4.5 11" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" opacity="0.35"/>
+        <circle cx="8" cy="8" r="5.5" stroke="currentColor" strokeWidth="1.4" opacity="0.7"/>
+        <circle cx="8" cy="8" r="2" fill="currentColor" opacity="0.6"/>
+        <path d="M2.5 8h2M11.5 8h2M8 2.5v2M8 11.5v2" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" opacity="0.35"/>
       </svg>
     ),
   },
@@ -181,6 +156,7 @@ const ACCOUNT: NavItem[] = [
 ];
 
 const ORG: NavItem[] = [
+  ...CLONE,
   {
     href: "/dashboard/org",
     label: "Admin",
@@ -206,7 +182,6 @@ const ORG: NavItem[] = [
 ];
 
 const GROUPS: { label: string; items: NavItem[]; color: string; disabled?: boolean; advancedOnly?: boolean }[] = [
-  { label: "Clone",        items: CLONE,       color: "#1A73E8" },
   { label: "Organisation", items: ORG,         color: "#6BAEFF" },
   { label: "Marketplace",  items: MARKETPLACE, color: "#34A853", disabled: true, advancedOnly: true },
   { label: "Account",      items: ACCOUNT,     color: "#F59E0B" },
