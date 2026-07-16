@@ -144,7 +144,7 @@ async def extract_insights(
                    source_episode_ids, status, metadata)
                 VALUES
                   (:id, :cid, :itype, :content, :conf, :stype,
-                   :episode_ids, :status, :meta::jsonb)
+                   :episode_ids, :status, CAST(:meta AS jsonb))
             """),
             {
                 "id": str(uuid4()),

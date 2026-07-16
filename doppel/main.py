@@ -13313,8 +13313,8 @@ async def upsert_observation_source(
               (clone_id, source_type, enabled, mode, frequency, exclusion_rules,
                observation_config, next_poll_at)
             VALUES
-              (:cid, :stype, :enabled, :mode, :freq, :excl::jsonb,
-               :config::jsonb, :next_poll)
+              (:cid, :stype, :enabled, :mode, :freq, CAST(:excl AS jsonb),
+               CAST(:obs_config AS jsonb), :next_poll)
             ON CONFLICT (clone_id, source_type)
             DO UPDATE SET
               enabled = EXCLUDED.enabled,
@@ -13333,7 +13333,7 @@ async def upsert_observation_source(
             "mode": body.mode,
             "freq": body.frequency,
             "excl": json.dumps(body.exclusion_rules),
-            "config": json.dumps(body.observation_config),
+            "obs_config": json.dumps(body.observation_config),
             "next_poll": next_poll,
         },
     )
@@ -13371,11 +13371,11 @@ async def patch_observation_source(
         updates.append("frequency = :freq")
         params["freq"] = body.frequency
     if body.exclusion_rules is not None:
-        updates.append("exclusion_rules = :excl::jsonb")
+        updates.append("exclusion_rules = CAST(:excl AS jsonb)")
         params["excl"] = json.dumps(body.exclusion_rules)
     if body.observation_config is not None:
-        updates.append("observation_config = :config::jsonb")
-        params["config"] = json.dumps(body.observation_config)
+        updates.append("observation_config = CAST(:obs_config AS jsonb)")
+        params["obs_config"] = json.dumps(body.observation_config)
 
     if not updates:
         return {"ok": True}
